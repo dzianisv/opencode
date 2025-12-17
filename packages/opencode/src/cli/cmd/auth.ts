@@ -9,13 +9,14 @@ import os from "os"
 import { Global } from "../../global"
 import { Plugin } from "../../plugin"
 import { Instance } from "../../project/instance"
+import open from "open"
 
 export const AuthCommand = cmd({
   command: "auth",
   describe: "manage credentials",
   builder: (yargs) =>
     yargs.command(AuthLoginCommand).command(AuthLogoutCommand).command(AuthListCommand).demandCommand(),
-  async handler() {},
+  async handler() { },
 })
 
 export const AuthListCommand = cmd({
@@ -30,6 +31,14 @@ export const AuthListCommand = cmd({
     prompts.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = await Auth.all().then((x) => Object.entries(x))
     const database = await ModelsDev.get()
+    if (!database["kilocode"]) {
+      database["kilocode"] = {
+        id: "kilocode",
+        name: "Kilo Code",
+        env: ["KILOCODE_API_KEY"],
+        models: {},
+      }
+    }
 
     for (const [providerID, result] of results) {
       const name = database[providerID]?.name || providerID
@@ -102,7 +111,7 @@ export const AuthLoginCommand = cmd({
           prompts.outro("Done")
           return
         }
-        await ModelsDev.refresh().catch(() => {})
+        await ModelsDev.refresh().catch(() => { })
         const providers = await ModelsDev.get()
         const priority: Record<string, number> = {
           opencode: 0,
@@ -112,6 +121,7 @@ export const AuthLoginCommand = cmd({
           google: 4,
           openrouter: 5,
           vercel: 6,
+          kilocode: 7,
         }
         let provider = await prompts.autocomplete({
           message: "Select provider",
@@ -131,6 +141,10 @@ export const AuthLoginCommand = cmd({
               })),
             ),
             {
+              label: "Kilo Code",
+              value: "kilocode",
+            },
+            {
               value: "other",
               label: "Other",
             },
@@ -138,6 +152,67 @@ export const AuthLoginCommand = cmd({
         })
 
         if (prompts.isCancel(provider)) throw new UI.CancelledError()
+
+        if (provider === "kilocode") {
+          const spinner = prompts.spinner()
+          spinner.start("Initiating Kilo Code authorization...")
+
+          try {
+            const response = await fetch("https://api.kilo.ai/api/device-auth/codes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            })
+
+            if (!response.ok) throw new Error(`Failed to initiate auth: ${response.status}`)
+
+            const { code, verificationUrl, expiresIn } = (await response.json()) as any
+            spinner.stop(`Code: ${UI.Style.TEXT_NORMAL_BOLD}${code}`)
+
+            prompts.log.info(`Go to: ${UI.Style.TEXT_NORMAL_BOLD}${verificationUrl}`)
+            await open(verificationUrl)
+
+            const pollSpinner = prompts.spinner()
+            pollSpinner.start("Waiting for authorization...")
+
+            const start = Date.now()
+            while (Date.now() - start < expiresIn * 1000) {
+              const pollResponse = await fetch(`https://api.kilo.ai/api/device-auth/codes/${code}`)
+
+              if (pollResponse.status === 200) {
+                const data = (await pollResponse.json()) as any
+                if (data.status === "approved" && data.token) {
+                  await Auth.set("kilocode", {
+                    type: "api",
+                    key: data.token,
+                  })
+                  pollSpinner.stop(`Login successful as ${data.userEmail}`)
+                  prompts.outro("Done")
+                  return
+                }
+              }
+
+              if (pollResponse.status === 403) {
+                pollSpinner.stop("Authorization denied", 1)
+                prompts.outro("Done")
+                return
+              }
+
+              if (pollResponse.status === 410) {
+                pollSpinner.stop("Authorization expired", 1)
+                prompts.outro("Done")
+                return
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, 3000))
+            }
+
+            pollSpinner.stop("Authorization timed out", 1)
+          } catch (e) {
+            spinner.stop(`Error: ${e instanceof Error ? e.message : String(e)}`, 1)
+          }
+          prompts.outro("Done")
+          return
+        }
 
         const plugin = await Plugin.list().then((x) => x.find((x) => x.auth?.provider === provider))
         if (plugin && plugin.auth) {
