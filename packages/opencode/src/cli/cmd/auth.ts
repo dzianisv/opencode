@@ -11,6 +11,7 @@ import { Config } from "../../config/config"
 import { Global } from "../../global"
 import { Plugin } from "../../plugin"
 import { Instance } from "../../project/instance"
+import open from "open"
 import type { Hooks } from "@opencode-ai/plugin"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
@@ -212,6 +213,14 @@ export const AuthListCommand = cmd({
     prompts.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = Object.entries(await Auth.all())
     const database = await ModelsDev.get()
+    if (!database["kilocode"]) {
+      database["kilocode"] = {
+        id: "kilocode",
+        name: "Kilo Code",
+        env: ["KILOCODE_API_KEY"],
+        models: {},
+      }
+    }
 
     for (const [providerID, result] of results) {
       const name = database[providerID]?.name || providerID
@@ -343,6 +352,10 @@ export const AuthLoginCommand = cmd({
               value: x.id,
               hint: "plugin",
             })),
+            {
+              label: "Kilo Code",
+              value: "kilocode",
+            },
             {
               value: "other",
               label: "Other",
