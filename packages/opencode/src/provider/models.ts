@@ -110,10 +110,10 @@ export namespace ModelsDev {
         name: "Kilo Code",
         env: ["KILOCODE_API_KEY"],
         models: {
-          "anthropic/claude-3-5-sonnet": {
-            id: "anthropic/claude-3-5-sonnet",
-            name: "Claude 3.5 Sonnet",
-            release_date: "2024-06-20",
+          "minimax/max-m2": {
+            id: "minimax/max-m2",
+            name: "Minimax M2",
+            release_date: "2024-12-01",
             attachment: true,
             reasoning: false,
             temperature: true,
@@ -123,7 +123,7 @@ export namespace ModelsDev {
               output: 0,
             },
             limit: {
-              context: 200000,
+              context: 128000,
               output: 8192,
             },
             options: {},
