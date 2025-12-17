@@ -4,6 +4,7 @@ import path from "path"
 import z from "zod"
 import { data } from "./models-macro" with { type: "macro" }
 import { Installation } from "../installation"
+import { Auth } from "../auth"
 
 export namespace ModelsDev {
   const log = Log.create({ service: "models.dev" })
@@ -99,6 +100,46 @@ export namespace ModelsDev {
             options: {},
           },
         },
+      }
+    }
+
+    const auth = await Auth.get("kilocode")
+    if (auth && auth.type === "api") {
+      try {
+        const response = await fetch("https://api.kilo.ai/api/openrouter/models", {
+          headers: {
+            Authorization: `Bearer ${auth.key}`,
+          },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (response.ok) {
+          const json = (await response.json()) as any
+          const models = json.data
+          if (Array.isArray(models)) {
+            for (const model of models) {
+              database["kilocode"].models[model.id] = {
+                id: model.id,
+                name: model.name,
+                release_date: "2024-01-01",
+                attachment: true,
+                reasoning: false,
+                temperature: true,
+                tool_call: true,
+                cost: {
+                  input: 0,
+                  output: 0,
+                },
+                limit: {
+                  context: model.context_length || 128000,
+                  output: 4096,
+                },
+                options: {},
+              }
+            }
+          }
+        }
+      } catch (e) {
+        log.error("Failed to discover kilocode models", { error: e })
       }
     }
 
