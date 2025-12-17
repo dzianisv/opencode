@@ -6,6 +6,7 @@ import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { lazy } from "@/util/lazy"
 import { Filesystem } from "../util/filesystem"
+import { Auth } from "../auth"
 
 // Try to import bundled snapshot (generated at build time)
 // Falls back to undefined in dev mode when snapshot doesn't exist
@@ -128,6 +129,47 @@ export namespace ModelsDev {
         },
       }
     }
+
+    const auth = await Auth.get("kilocode")
+    if (auth && auth.type === "api") {
+      try {
+        const response = await fetch("https://api.kilo.ai/api/openrouter/models", {
+          headers: {
+            Authorization: `Bearer ${auth.key}`,
+          },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (response.ok) {
+          const json = (await response.json()) as any
+          const models = json.data
+          if (Array.isArray(models)) {
+            for (const model of models) {
+              database["kilocode"].models[model.id] = {
+                id: model.id,
+                name: model.name,
+                release_date: "2024-01-01",
+                attachment: true,
+                reasoning: false,
+                temperature: true,
+                tool_call: true,
+                cost: {
+                  input: 0,
+                  output: 0,
+                },
+                limit: {
+                  context: model.context_length || 128000,
+                  output: 4096,
+                },
+                options: {},
+              }
+            }
+          }
+        }
+      } catch (e) {
+        log.error("Failed to discover kilocode models", { error: e })
+      }
+    }
+
     return database
   }
 
