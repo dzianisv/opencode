@@ -131,7 +131,6 @@ export namespace ModelsDev {
         },
       }
     }
-
     // Try to load from local cache first
     const kilocodeCache = await Bun.file(kilocodeFilepath)
       .json()
@@ -214,7 +213,6 @@ export namespace ModelsDev {
         refreshModels()
       }
     }
-
     return database
   }
 
