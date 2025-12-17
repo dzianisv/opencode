@@ -368,14 +368,16 @@ export namespace Provider {
       }
     },
     kilocode: async (provider) => {
-      if (provider) provider.npm = "@ai-sdk/openrouter"
+      if (provider) provider.npm = "@ai-sdk/openai-compatible"
       return {
         autoload: true,
         options: {
-          baseURL: "https://api.kilo.ai/api/openrouter/v1",
+          baseURL: "https://api.kilo.ai/api/openrouter",
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://kilocode.ai",
+            "X-Title": "Kilo Code",
+            "X-KiloCode-Version": "4.138.0",
+            "User-Agent": "Kilo-Code/4.138.0",
           },
         },
       }

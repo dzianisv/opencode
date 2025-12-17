@@ -85,6 +85,8 @@ export namespace ModelsDev {
   function url() {
     return Flag.OPENCODE_MODELS_URL || "https://models.dev"
   }
+  const cacheDir = Global.Path.cache
+  const kilocodeFilepath = path.join(cacheDir, "kilocode-models.json")
 
   export const Data = lazy(async () => {
     const result = await Filesystem.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).catch(() => {})
@@ -130,43 +132,68 @@ export namespace ModelsDev {
       }
     }
 
+    // Try to load from local cache first
+    const kilocodeCache = await Bun.file(kilocodeFilepath)
+      .json()
+      .catch(() => null)
+    if (kilocodeCache) {
+      Object.assign(database["kilocode"].models, kilocodeCache)
+    }
+
     const auth = await Auth.get("kilocode")
     if (auth && auth.type === "api") {
-      try {
-        const response = await fetch("https://api.kilo.ai/api/openrouter/models", {
-          headers: {
-            Authorization: `Bearer ${auth.key}`,
-          },
-          signal: AbortSignal.timeout(5000),
-        })
-        if (response.ok) {
-          const json = (await response.json()) as any
-          const models = json.data
-          if (Array.isArray(models)) {
-            for (const model of models) {
-              database["kilocode"].models[model.id] = {
-                id: model.id,
-                name: model.name,
-                release_date: "2024-01-01",
-                attachment: true,
-                reasoning: false,
-                temperature: true,
-                tool_call: true,
-                cost: {
-                  input: 0,
-                  output: 0,
-                },
-                limit: {
-                  context: model.context_length || 128000,
-                  output: 4096,
-                },
-                options: {},
+      const refreshModels = async () => {
+        try {
+          const response = await fetch("https://api.kilo.ai/api/openrouter/models", {
+            headers: {
+              Authorization: `Bearer ${auth.key}`,
+              "HTTP-Referer": "https://kilocode.ai",
+              "X-Title": "Kilo Code",
+              "X-KiloCode-Version": "4.138.0",
+              "User-Agent": "Kilo-Code/4.138.0",
+            },
+            signal: AbortSignal.timeout(5000),
+          })
+          if (response.ok) {
+            const json = (await response.json()) as any
+            const models = json.data
+            if (Array.isArray(models)) {
+              const newModels: Record<string, Model> = {}
+              for (const model of models) {
+                newModels[model.id] = {
+                  id: model.id,
+                  name: model.name,
+                  release_date: "2024-01-01",
+                  attachment: true,
+                  reasoning: model.supported_parameters?.includes("reasoning") ?? false,
+                  temperature: model.supported_parameters?.includes("temperature") ?? true,
+                  tool_call: model.supported_parameters?.includes("tools") ?? true,
+                  cost: {
+                    input: parseFloat(model.pricing?.prompt || "0"),
+                    output: parseFloat(model.pricing?.completion || "0"),
+                  },
+                  limit: {
+                    context: model.context_length || 128000,
+                    output: model.top_provider?.max_completion_tokens || 4096,
+                  },
+                  options: {},
+                }
               }
+              Object.assign(database["kilocode"].models, newModels)
+              await Bun.write(kilocodeFilepath, JSON.stringify(newModels, null, 2))
             }
           }
+        } catch (e) {
+          log.error("Failed to discover kilocode models", { error: e })
         }
-      } catch (e) {
-        log.error("Failed to discover kilocode models", { error: e })
+      }
+
+      if (!kilocodeCache) {
+        // Block if no cache exists yet
+        await refreshModels()
+      } else {
+        // Refresh in background if we have a cache
+        refreshModels()
       }
     }
 
