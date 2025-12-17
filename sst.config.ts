@@ -1,4 +1,4 @@
-/// <reference path="./.sst/platform/config.d.ts" />
+import "./.sst/platform/config.d.ts"
 
 export default $config({
   app(input) {
@@ -19,5 +19,6 @@ export default $config({
     await import("./infra/app.js")
     await import("./infra/console.js")
     await import("./infra/enterprise.js")
+    await import("./infra/desktop.js")
   },
 })

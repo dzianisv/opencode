@@ -422,6 +422,19 @@ export namespace Provider {
         },
       }
     },
+    kilocode: async (provider) => {
+      if (provider) provider.npm = "@ai-sdk/openrouter"
+      return {
+        autoload: true,
+        options: {
+          baseURL: "https://api.kilo.ai/api/openrouter/v1",
+          headers: {
+            "HTTP-Referer": "https://opencode.ai/",
+            "X-Title": "opencode",
+          },
+        },
+      }
+    },
     vercel: async () => {
       return {
         autoload: false,
