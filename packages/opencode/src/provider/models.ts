@@ -71,10 +71,38 @@ export namespace ModelsDev {
   export async function get() {
     refresh()
     const file = Bun.file(filepath)
-    const result = await file.json().catch(() => {})
-    if (result) return result as Record<string, Provider>
-    const json = await data()
-    return JSON.parse(json) as Record<string, Provider>
+    const result = (await file.json().catch(() => { })) || JSON.parse(await data())
+    const database = result as Record<string, Provider>
+
+    if (!database["kilocode"]) {
+      database["kilocode"] = {
+        id: "kilocode",
+        name: "Kilo Code",
+        env: ["KILOCODE_API_KEY"],
+        models: {
+          "anthropic/claude-3-5-sonnet": {
+            id: "anthropic/claude-3-5-sonnet",
+            name: "Claude 3.5 Sonnet",
+            release_date: "2024-06-20",
+            attachment: true,
+            reasoning: false,
+            temperature: true,
+            tool_call: true,
+            cost: {
+              input: 0,
+              output: 0,
+            },
+            limit: {
+              context: 200000,
+              output: 8192,
+            },
+            options: {},
+          },
+        },
+      }
+    }
+
+    return database
   }
 
   export async function refresh() {
