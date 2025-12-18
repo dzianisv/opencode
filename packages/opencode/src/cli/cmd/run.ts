@@ -10,6 +10,7 @@ import { Filesystem } from "../../util/filesystem"
 import { createOpencodeClient, type Message, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
+<<<<<<< HEAD
 import { Agent } from "../../agent/agent"
 import { PermissionNext } from "../../permission/next"
 import { Tool } from "../../tool/tool"
@@ -27,6 +28,9 @@ import { SkillTool } from "../../tool/skill"
 import { BashTool } from "../../tool/bash"
 import { TodoWriteTool } from "../../tool/todo"
 import { Locale } from "../../util/locale"
+=======
+import { Auth } from "../../auth"
+>>>>>>> d339174b7 (fix(kilocode): improve authentication flow and token refresh)
 
 type ToolProps<T extends Tool.Info> = {
   input: Tool.InferParameters<T>
@@ -304,9 +308,27 @@ export const RunCommand = cmd({
       })
   },
   handler: async (args) => {
+<<<<<<< HEAD
     let message = [...args.message, ...(args["--"] || [])]
       .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
       .join(" ")
+=======
+    const { isJwtExpired } = await import("../../util/jwt")
+    const auth = await Auth.get("kilocode")
+    const defaultModel = await Provider.defaultModel().catch(() => undefined)
+    const isUsingKilocode =
+      args.model?.includes("kilocode") ||
+      (!args.model && defaultModel?.providerID === "kilocode")
+
+    if (isUsingKilocode && auth && auth.type === "api") {
+      if (isJwtExpired(auth.key)) {
+        UI.error("Kilo Code token has expired. Please run 'opencode auth login kilocode' to refresh it.")
+        process.exit(1)
+      }
+    }
+
+    let message = args.message.join(" ")
+>>>>>>> d339174b7 (fix(kilocode): improve authentication flow and token refresh)
 
     const directory = (() => {
       if (!args.dir) return undefined
@@ -326,7 +348,17 @@ export const RunCommand = cmd({
 
       for (const filePath of list) {
         const resolvedPath = path.resolve(process.cwd(), filePath)
+<<<<<<< HEAD
         if (!(await Filesystem.exists(resolvedPath))) {
+=======
+        const file = Bun.file(resolvedPath)
+        const stats = await file.stat().catch(() => { })
+        if (!stats) {
+          UI.error(`File not found: ${filePath}`)
+          process.exit(1)
+        }
+        if (!(await file.exists())) {
+>>>>>>> d339174b7 (fix(kilocode): improve authentication flow and token refresh)
           UI.error(`File not found: ${filePath}`)
           process.exit(1)
         }
