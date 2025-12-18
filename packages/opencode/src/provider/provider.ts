@@ -183,6 +183,8 @@ export namespace Provider {
     kilocode: async (provider) => {
       const auth = await Auth.get("kilocode")
       const key = auth && (auth.type === "api" || auth.type === "wellknown") ? auth.key : undefined
+
+      // Determine base URL from token (dev vs prod)
       const baseUrl = (() => {
         if (!key) return "https://api.kilo.ai"
         try {
@@ -190,17 +192,18 @@ export namespace Provider {
           if (parts.length !== 3) return "https://api.kilo.ai"
           const payload = JSON.parse(Buffer.from(parts[1], "base64").toString())
           if (payload.env === "development") return "http://localhost:3000"
-        } catch { }
+        } catch {}
         return "https://api.kilo.ai"
       })()
 
       if (provider) provider.npm = "@ai-sdk/openai-compatible"
+
       return {
         autoload: true,
         options: {
           baseURL: `${baseUrl}/api/openrouter`,
           headers: {
-            "Authorization": `Bearer ${key}`,
+            Authorization: `Bearer ${key}`,
             "x-api-key": key,
             "HTTP-Referer": "https://kilocode.ai",
             "X-Title": "Kilo Code",
