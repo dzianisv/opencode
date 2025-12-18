@@ -142,11 +142,27 @@ export namespace ModelsDev {
 
     const auth = await Auth.get("kilocode")
     if (auth && auth.type === "api") {
+      const { isJwtExpired } = await import("../util/jwt")
+      if (isJwtExpired(auth.key)) {
+        log.warn("Kilo Code token has expired. Please run 'opencode auth login kilocode' to refresh it.")
+      }
+
       const refreshModels = async () => {
         try {
-          const response = await fetch("https://api.kilo.ai/api/openrouter/models", {
+          const baseUrl = (() => {
+            try {
+              const parts = auth.key.split(".")
+              if (parts.length !== 3) return "https://api.kilo.ai"
+              const payload = JSON.parse(Buffer.from(parts[1], "base64").toString())
+              if (payload.env === "development") return "http://localhost:3000"
+            } catch { }
+            return "https://api.kilo.ai"
+          })()
+
+          const response = await fetch(`${baseUrl}/api/openrouter/models`, {
             headers: {
               Authorization: `Bearer ${auth.key}`,
+              "x-api-key": auth.key,
               "HTTP-Referer": "https://kilocode.ai",
               "X-Title": "Kilo Code",
               "X-KiloCode-Version": "4.138.0",
@@ -182,6 +198,8 @@ export namespace ModelsDev {
               Object.assign(database["kilocode"].models, newModels)
               await Bun.write(kilocodeFilepath, JSON.stringify(newModels, null, 2))
             }
+          } else if (response.status === 401 || response.status === 403) {
+            log.error("Kilo Code authentication failed. The token might be expired or invalid.")
           }
         } catch (e) {
           log.error("Failed to discover kilocode models", { error: e })
