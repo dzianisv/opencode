@@ -10,6 +10,7 @@ import { select } from "@clack/prompts"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
+import { Auth } from "../../auth"
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -88,6 +89,20 @@ export const RunCommand = cmd({
       })
   },
   handler: async (args) => {
+    const { isJwtExpired } = await import("../../util/jwt")
+    const auth = await Auth.get("kilocode")
+    const defaultModel = await Provider.defaultModel().catch(() => undefined)
+    const isUsingKilocode =
+      args.model?.includes("kilocode") ||
+      (!args.model && defaultModel?.providerID === "kilocode")
+
+    if (isUsingKilocode && auth && auth.type === "api") {
+      if (isJwtExpired(auth.key)) {
+        UI.error("Kilo Code token has expired. Please run 'opencode auth login kilocode' to refresh it.")
+        process.exit(1)
+      }
+    }
+
     let message = args.message.join(" ")
 
     const fileParts: any[] = []
@@ -97,7 +112,7 @@ export const RunCommand = cmd({
       for (const filePath of files) {
         const resolvedPath = path.resolve(process.cwd(), filePath)
         const file = Bun.file(resolvedPath)
-        const stats = await file.stat().catch(() => {})
+        const stats = await file.stat().catch(() => { })
         if (!stats) {
           UI.error(`File not found: ${filePath}`)
           process.exit(1)
