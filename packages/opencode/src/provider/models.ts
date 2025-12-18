@@ -155,7 +155,7 @@ export namespace ModelsDev {
               if (parts.length !== 3) return "https://api.kilo.ai"
               const payload = JSON.parse(Buffer.from(parts[1], "base64").toString())
               if (payload.env === "development") return "http://localhost:3000"
-            } catch { }
+            } catch {}
             return "https://api.kilo.ai"
           })()
 
