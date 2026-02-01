@@ -12,7 +12,7 @@
     "typecheck": "bun turbo typecheck",
     "prepare": "husky",
     "install": "./scripts/install-local.sh",
-    "install:local": "bun run --cwd packages/opencode build --single --install",
+    "install:local": "./scripts/install-local.sh",
     "random": "echo 'Random script'",
     "hello": "echo 'Hello World!'",
     "test": "echo 'do not run tests from root' && exit 1"

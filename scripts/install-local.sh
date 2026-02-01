@@ -58,7 +58,6 @@ if [ "$OS" = "darwin" ]; then
     echo "🔏 Signing binary for macOS..."
     codesign --force --sign - "$INSTALL_PATH" 2>/dev/null || true
 fi
-
 echo ""
 echo "✅ opencode installed successfully!"
 echo ""
