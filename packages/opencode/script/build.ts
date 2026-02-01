@@ -35,58 +35,58 @@ const allTargets: {
   abi?: "musl"
   avx2?: false
 }[] = [
-  {
-    os: "linux",
-    arch: "arm64",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-    avx2: false,
-  },
-  {
-    os: "linux",
-    arch: "arm64",
-    abi: "musl",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-    abi: "musl",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-    abi: "musl",
-    avx2: false,
-  },
-  {
-    os: "darwin",
-    arch: "arm64",
-  },
-  {
-    os: "darwin",
-    arch: "x64",
-  },
-  {
-    os: "darwin",
-    arch: "x64",
-    avx2: false,
-  },
-  {
-    os: "win32",
-    arch: "x64",
-  },
-  {
-    os: "win32",
-    arch: "x64",
-    avx2: false,
-  },
-]
+    {
+      os: "linux",
+      arch: "arm64",
+    },
+    {
+      os: "linux",
+      arch: "x64",
+    },
+    {
+      os: "linux",
+      arch: "x64",
+      avx2: false,
+    },
+    {
+      os: "linux",
+      arch: "arm64",
+      abi: "musl",
+    },
+    {
+      os: "linux",
+      arch: "x64",
+      abi: "musl",
+    },
+    {
+      os: "linux",
+      arch: "x64",
+      abi: "musl",
+      avx2: false,
+    },
+    {
+      os: "darwin",
+      arch: "arm64",
+    },
+    {
+      os: "darwin",
+      arch: "x64",
+    },
+    {
+      os: "darwin",
+      arch: "x64",
+      avx2: false,
+    },
+    {
+      os: "win32",
+      arch: "x64",
+    },
+    {
+      os: "win32",
+      arch: "x64",
+      avx2: false,
+    },
+  ]
 
 const targets = singleFlag
   ? allTargets.filter((item) => {
@@ -179,7 +179,17 @@ for (const item of targets) {
   binaries[name] = Script.version
 }
 
-if (Script.release) {
+if (process.argv.includes("--install")) {
+  const os = process.platform === "win32" ? "windows" : process.platform
+  const arch = process.arch === "x64" ? "x64" : "arm64"
+  const name = [pkg.name, os, arch].join("-")
+  const binary = os === "windows" ? "opencode.exe" : "opencode"
+  const installDir = path.join(process.env.HOME || "", ".opencode", "bin")
+  await $`mkdir -p ${installDir}`
+  await $`cp dist/${name}/bin/${binary} ${installDir}/${binary}`
+  if (os !== "windows") await $`chmod +x ${installDir}/${binary}`
+  console.log(`✅ Installed to ${installDir}/${binary}`)
+} else if (Script.release) {
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)

@@ -11,6 +11,7 @@ import { Global } from "../../global"
 import { Plugin } from "../../plugin"
 import { Instance } from "../../project/instance"
 import type { Hooks } from "@opencode-ai/plugin"
+import open from "open"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -164,7 +165,7 @@ export const AuthCommand = cmd({
   describe: "manage credentials",
   builder: (yargs) =>
     yargs.command(AuthLoginCommand).command(AuthLogoutCommand).command(AuthListCommand).demandCommand(),
-  async handler() {},
+  async handler() { },
 })
 
 export const AuthListCommand = cmd({
@@ -276,6 +277,7 @@ export const AuthLoginCommand = cmd({
           google: 4,
           openrouter: 5,
           vercel: 6,
+          kilocode: 7,
         }
         let provider = await prompts.autocomplete({
           message: "Select provider",
@@ -306,6 +308,68 @@ export const AuthLoginCommand = cmd({
         })
 
         if (prompts.isCancel(provider)) throw new UI.CancelledError()
+
+        // Handle Kilo Code device authorization flow
+        if (provider === "kilocode") {
+          const spinner = prompts.spinner()
+          spinner.start("Initiating Kilo Code authorization...")
+
+          try {
+            const response = await fetch("https://api.kilo.ai/api/device-auth/codes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            })
+
+            if (!response.ok) throw new Error(`Failed to initiate auth: ${response.status}`)
+
+            const { code, verificationUrl, expiresIn } = (await response.json()) as any
+            spinner.stop(`Code: ${UI.Style.TEXT_NORMAL_BOLD}${code}`)
+
+            prompts.log.info(`Go to: ${UI.Style.TEXT_NORMAL_BOLD}${verificationUrl}`)
+            await open(verificationUrl)
+
+            const pollSpinner = prompts.spinner()
+            pollSpinner.start("Waiting for authorization...")
+
+            const start = Date.now()
+            while (Date.now() - start < expiresIn * 1000) {
+              const pollResponse = await fetch(`https://api.kilo.ai/api/device-auth/codes/${code}`)
+
+              if (pollResponse.status === 200) {
+                const data = (await pollResponse.json()) as any
+                if (data.status === "approved" && data.token) {
+                  await Auth.set("kilocode", {
+                    type: "api",
+                    key: data.token,
+                  })
+                  pollSpinner.stop(`Login successful as ${data.userEmail}`)
+                  prompts.outro("Done")
+                  return
+                }
+              }
+
+              if (pollResponse.status === 403) {
+                pollSpinner.stop("Authorization denied", 1)
+                prompts.outro("Done")
+                return
+              }
+
+              if (pollResponse.status === 410) {
+                pollSpinner.stop("Authorization expired", 1)
+                prompts.outro("Done")
+                return
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, 3000))
+            }
+
+            pollSpinner.stop("Authorization timed out", 1)
+          } catch (e) {
+            spinner.stop(`Error: ${e instanceof Error ? e.message : String(e)}`, 1)
+          }
+          prompts.outro("Done")
+          return
+        }
 
         const plugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
         if (plugin && plugin.auth) {

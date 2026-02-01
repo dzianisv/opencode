@@ -20,6 +20,7 @@ export namespace Auth {
     .object({
       type: z.literal("api"),
       key: z.string(),
+      organizationId: z.string().optional(),
     })
     .meta({ ref: "ApiAuth" })
 
