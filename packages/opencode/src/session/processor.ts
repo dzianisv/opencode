@@ -1,4 +1,4 @@
-import { MessageV2 } from "./message-v2"
+import { MessageV2, StreamIdleTimeoutError } from "./message-v2"
 import { Log } from "@/util/log"
 import { Session } from "."
 import { Agent } from "@/agent/agent"
@@ -17,8 +17,65 @@ import { Question } from "@/question"
 import { PartID } from "./schema"
 import type { SessionID, MessageID } from "./schema"
 
+/**
+ * Wraps an async iterable with an idle timeout. If no value is yielded within
+ * the timeout period, throws a StreamIdleTimeoutError.
+ * 
+ * This prevents the streaming loop from hanging indefinitely when:
+ * - Network connection drops mid-stream (TCP half-open)
+ * - LLM provider stalls without closing the connection
+ * - Proxy/gateway timeouts that don't properly terminate the stream
+ */
+async function* withIdleTimeout<T>(
+  stream: AsyncIterable<T>,
+  timeoutMs: number,
+  abort: AbortSignal
+): AsyncGenerator<T> {
+  const iterator = stream[Symbol.asyncIterator]()
+  
+  while (true) {
+    abort.throwIfAborted()
+    
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let rejectTimeout: ((error: Error) => void) | undefined
+    
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      rejectTimeout = reject
+      timer = setTimeout(() => {
+        reject(new StreamIdleTimeoutError(timeoutMs))
+      }, timeoutMs)
+    })
+    
+    // Clean up timer when abort signal fires
+    const abortHandler = () => {
+      if (timer) clearTimeout(timer)
+    }
+    abort.addEventListener("abort", abortHandler, { once: true })
+    
+    try {
+      const result = await Promise.race([
+        iterator.next(),
+        timeoutPromise
+      ])
+      
+      // Clear the timer since we got a result
+      if (timer) clearTimeout(timer)
+      abort.removeEventListener("abort", abortHandler)
+      
+      if (result.done) return
+      yield result.value
+    } catch (e) {
+      // Clean up on error too
+      if (timer) clearTimeout(timer)
+      abort.removeEventListener("abort", abortHandler)
+      throw e
+    }
+  }
+}
+
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const STREAM_IDLE_TIMEOUT = 60_000
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -46,15 +103,38 @@ export namespace SessionProcessor {
       async process(streamInput: LLM.StreamInput) {
         log.info("process")
         needsCompaction = false
-        const shouldBreak = (await Config.get()).experimental?.continue_loop_on_deny !== true
+        const cfg = await Config.get()
+        const idle = cfg.experimental?.stream_idle_timeout ?? STREAM_IDLE_TIMEOUT
+        const shouldBreak = cfg.experimental?.continue_loop_on_deny !== true
         while (true) {
+          let idleTriggered = false
+          let timer: ReturnType<typeof setTimeout> | undefined
           try {
+            const ctl = new AbortController()
+            const resetIdle = () => {
+              if (!idle) return
+              if (timer) clearTimeout(timer)
+              timer = setTimeout(() => {
+                idleTriggered = true
+                ctl.abort()
+              }, idle)
+            }
             let currentText: MessageV2.TextPart | undefined
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
-            const stream = await LLM.stream(streamInput)
+            const stream = await LLM.stream({
+              ...streamInput,
+              abort: AbortSignal.any([streamInput.abort, ctl.signal]),
+            })
+            resetIdle()
 
-            for await (const value of stream.fullStream) {
+            // Wrap the stream with idle timeout to prevent hanging on stalled connections
+            const wrappedStream = idle > 0
+              ? withIdleTimeout(stream.fullStream, idle, input.abort)
+              : stream.fullStream
+
+            for await (const value of wrappedStream) {
               input.abort.throwIfAborted()
+              resetIdle()
               switch (value.type) {
                 case "start":
                   SessionStatus.set(input.sessionID, { type: "busy" })
@@ -351,12 +431,25 @@ export namespace SessionProcessor {
               }
               if (needsCompaction) break
             }
+            if (timer) clearTimeout(timer)
           } catch (e: any) {
+            if (timer) clearTimeout(timer)
             log.error("process", {
               error: e,
               stack: JSON.stringify(e.stack),
             })
-            const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+            const error = idleTriggered
+              ? new MessageV2.APIError(
+                  {
+                    message: `Stream idle timeout after ${idle}ms`,
+                    isRetryable: true,
+                    metadata: {
+                      reason: "stream_idle_timeout",
+                    },
+                  },
+                  { cause: e },
+                ).toObject()
+              : MessageV2.fromError(e, { providerID: input.model.providerID })
             if (MessageV2.ContextOverflowError.isInstance(error)) {
               needsCompaction = true
               Bus.publish(Session.Event.Error, {
