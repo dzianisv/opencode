@@ -26,6 +26,7 @@ import { Question } from "@/question"
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const FLUSH_INTERVAL = 50
+  const DEFAULT_MAX_RETRIES_BEFORE_FALLBACK = 3
   const log = Log.create({ service: "session.processor" })
 
   export type Result = "compact" | "stop" | "continue"
@@ -443,7 +444,7 @@ export namespace SessionProcessor {
                       fallbackIndex: fallbackIndex - 1,
                     })
                     try {
-                      const resolved = await Provider.getModel(next.providerID as any, next.modelID as any)
+                      const resolved = await Provider.getModel(next.providerID, next.modelID)
                       streamInput.model = resolved
                       input.model = resolved
                       input.assistantMessage.modelID = resolved.id
