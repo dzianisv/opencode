@@ -45,6 +45,12 @@ fi
 cp "$DIST_BINARY" "$INSTALL_PATH"
 chmod +x "$INSTALL_PATH"
 
+# Sign the binary on macOS to prevent Gatekeeper from killing it
+if [ "$OS" = "darwin" ]; then
+    echo "🔏 Signing binary for macOS..."
+    codesign -s - "$INSTALL_PATH" 2>/dev/null || true
+fi
+
 echo ""
 echo "✅ opencode installed successfully!"
 echo ""
