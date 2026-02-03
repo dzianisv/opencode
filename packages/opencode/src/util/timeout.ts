@@ -2,6 +2,7 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timeout: NodeJS.Timeout
   return Promise.race([
     promise.finally(() => {
+      // Clear timeout on both resolution and rejection to prevent timer leak
       clearTimeout(timeout)
     }),
     new Promise<never>((_, reject) => {

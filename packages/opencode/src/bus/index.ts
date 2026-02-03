@@ -38,6 +38,7 @@ export namespace Bus {
           sub(event)
         }
       }
+      // Clear all subscriptions to free memory and prevent leaks
       entry.subscriptions.clear()
     },
   )
