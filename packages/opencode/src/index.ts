@@ -26,6 +26,7 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+import { Instance } from "./project/instance"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -151,6 +152,10 @@ try {
   }
   process.exitCode = 1
 } finally {
+  // Dispose all instances to clean up resources and prevent memory leaks
+  await Instance.disposeAll().catch((error) => {
+    Log.Default.warn("disposeAll failed", { error })
+  })
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.

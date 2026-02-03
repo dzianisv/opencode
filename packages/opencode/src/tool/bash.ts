@@ -18,6 +18,7 @@ import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 
 const MAX_METADATA_LENGTH = 30_000
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024 // 10MB cap to prevent memory leaks
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
 export const log = Log.create({ service: "bash-tool" })
@@ -172,7 +173,9 @@ export const BashTool = Tool.define("bash", async () => {
         detached: process.platform !== "win32",
       })
 
-      let output = ""
+      // Use Buffer[] ring buffer to cap memory usage
+      const outputChunks: Buffer[] = []
+      let outputBytes = 0
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -183,7 +186,17 @@ export const BashTool = Tool.define("bash", async () => {
       })
 
       const append = (chunk: Buffer) => {
-        output += chunk.toString()
+        outputChunks.push(chunk)
+        outputBytes += chunk.length
+
+        // Evict old chunks if over limit
+        while (outputBytes > MAX_OUTPUT_BYTES && outputChunks.length > 1) {
+          const evicted = outputChunks.shift()!
+          outputBytes -= evicted.length
+        }
+
+        // Build output string for metadata (truncated)
+        const output = Buffer.concat(outputChunks).toString()
         ctx.metadata({
           metadata: {
             // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
@@ -247,6 +260,9 @@ export const BashTool = Tool.define("bash", async () => {
       if (aborted) {
         resultMetadata.push("User aborted the command")
       }
+
+      // Build final output string from buffer chunks
+      let output = Buffer.concat(outputChunks).toString()
 
       if (resultMetadata.length > 0) {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"

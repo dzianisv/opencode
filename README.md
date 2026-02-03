@@ -1,3 +1,46 @@
+# dziansiv/opencode Fork - Memory Leak Fixes
+
+> **This is a custom fork of [sst/opencode](https://github.com/sst/opencode) with critical memory leak fixes.**
+>
+> The upstream OpenCode has known memory leak issues that cause 16+ GB RAM consumption when running multiple agents, leading to system hangs. This fork addresses those issues.
+
+## Why This Fork Exists
+
+Users were experiencing 16+ GB RAM consumption when running 3 OpenCode agents, causing MacBooks to hang multiple times per day. Investigation revealed this is a **known issue** in the upstream repository with multiple GitHub issues documenting 70-113+ GB memory consumption.
+
+### Root Causes Identified
+
+The memory leaks are NOT primarily from message history storage (which is file-based and lazy-loaded correctly). The actual leaks come from:
+
+1. **AsyncQueue** (`util/queue.ts`) - Iterator loops forever, no termination
+2. **Bash tool** (`tool/bash.ts`) - `output += chunk.toString()` unbounded string growth
+3. **LSP diagnostics** (`lsp/client.ts`) - Map never cleared, no size cap
+4. **Bus subscriptions** (`bus/index.ts`) - Not cleared on dispose
+5. **PTY buffer** (`pty/index.ts`) - String concatenation causes GC pressure
+6. **disposeAll()** (`index.ts`) - Not called on process exit
+7. **Timer leak in withTimeout** (`util/timeout.ts`) - Timer only cleared on resolution, not rejection
+8. **OAuth event listeners** (`mcp/index.ts`) - `.on()` handlers not removed after one fires
+
+### Fixes Applied
+
+| File                                    | Status      | Description                                                                                                                                                     |
+| --------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/opencode/src/util/queue.ts`   | ✅ Complete | Added `close()`, `drain()`, `isClosed` getter. Iterator now exits when closed instead of looping forever.                                                       |
+| `packages/opencode/src/tool/bash.ts`    | ✅ Complete | Added `MAX_OUTPUT_BYTES = 10 * 1024 * 1024` (10MB cap). Changed from `output += chunk.toString()` to `Buffer[]` ring buffer. Evicts old chunks when over limit. |
+| `packages/opencode/src/lsp/client.ts`   | ✅ Complete | Added `MAX_DIAGNOSTICS_ENTRIES = 5000` with cap enforcement (evicts oldest). Clears diagnostics map on shutdown.                                                |
+| `packages/opencode/src/bus/index.ts`    | ✅ Complete | Added `subscriptions.clear()` in dispose callback to free memory.                                                                                               |
+| `packages/opencode/src/pty/index.ts`    | ✅ Complete | Changed `buffer: string` to `bufferChunks: string[]` with chunk-based ring buffer to reduce GC pressure.                                                        |
+| `packages/opencode/src/index.ts`        | ✅ Complete | Added `Instance.disposeAll()` call in finally block to clean up all resources on exit.                                                                          |
+| `packages/opencode/src/util/timeout.ts` | ✅ Complete | Changed `.then()` to `.finally()` to ensure timer is cleared on both resolution and rejection.                                                                  |
+| `packages/opencode/src/mcp/index.ts`    | ✅ Complete | Changed `.on("error"` and `.on("exit"` to `.once("error"` and `.once("exit"` to prevent listener accumulation.                                                  |
+
+### Related Upstream Issues/PRs
+
+- PR #10914: https://github.com/sst/opencode/pull/10914
+- PR #11717: https://github.com/sst/opencode/pull/11717
+
+---
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

@@ -66,7 +66,8 @@ export namespace Pty {
   interface ActiveSession {
     info: Info
     process: IPty
-    buffer: string
+    bufferChunks: string[]
+    bufferSize: number
     subscribers: Set<WSContext>
   }
 
@@ -135,7 +136,8 @@ export namespace Pty {
     const session: ActiveSession = {
       info,
       process: ptyProcess,
-      buffer: "",
+      bufferChunks: [],
+      bufferSize: 0,
       subscribers: new Set(),
     }
     state().set(id, session)
@@ -150,9 +152,14 @@ export namespace Pty {
         ws.send(data)
       }
       if (open) return
-      session.buffer += data
-      if (session.buffer.length <= BUFFER_LIMIT) return
-      session.buffer = session.buffer.slice(-BUFFER_LIMIT)
+      // Buffer data using chunks to reduce GC pressure
+      session.bufferChunks.push(data)
+      session.bufferSize += data.length
+      // Evict old chunks if over limit
+      while (session.bufferSize > BUFFER_LIMIT && session.bufferChunks.length > 1) {
+        const removed = session.bufferChunks.shift()!
+        session.bufferSize -= removed.length
+      }
     })
     ptyProcess.onExit(({ exitCode }) => {
       log.info("session exited", { id, exitCode })
@@ -220,16 +227,21 @@ export namespace Pty {
     }
     log.info("client connected to session", { id })
     session.subscribers.add(ws)
-    if (session.buffer) {
-      const buffer = session.buffer.length <= BUFFER_LIMIT ? session.buffer : session.buffer.slice(-BUFFER_LIMIT)
-      session.buffer = ""
+    if (session.bufferChunks.length > 0) {
+      // Join chunks into a single buffer for sending
+      const buffer = session.bufferChunks.join("")
+      // Clear the chunks
+      session.bufferChunks = []
+      session.bufferSize = 0
       try {
         for (let i = 0; i < buffer.length; i += BUFFER_CHUNK) {
           ws.send(buffer.slice(i, i + BUFFER_CHUNK))
         }
       } catch {
         session.subscribers.delete(ws)
-        session.buffer = buffer
+        // Restore buffer on failure
+        session.bufferChunks = [buffer]
+        session.bufferSize = buffer.length
         ws.close()
         return
       }

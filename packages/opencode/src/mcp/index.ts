@@ -812,11 +812,12 @@ export namespace MCP {
       await new Promise<void>((resolve, reject) => {
         // Give the process a moment to fail if it's going to
         const timeout = setTimeout(() => resolve(), 500)
-        subprocess.on("error", (error) => {
+        // Use .once() to prevent listener accumulation on subprocess
+        subprocess.once("error", (error) => {
           clearTimeout(timeout)
           reject(error)
         })
-        subprocess.on("exit", (code) => {
+        subprocess.once("exit", (code) => {
           if (code !== null && code !== 0) {
             clearTimeout(timeout)
             reject(new Error(`Browser open failed with exit code ${code}`))

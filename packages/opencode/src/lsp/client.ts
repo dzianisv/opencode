@@ -14,6 +14,7 @@ import { Instance } from "../project/instance"
 import { Filesystem } from "../util/filesystem"
 
 const DIAGNOSTICS_DEBOUNCE_MS = 150
+const MAX_DIAGNOSTICS_ENTRIES = 5000 // Cap to prevent unbounded growth
 
 export namespace LSPClient {
   const log = Log.create({ service: "lsp.client" })
@@ -56,6 +57,17 @@ export namespace LSPClient {
         count: params.diagnostics.length,
       })
       const exists = diagnostics.has(filePath)
+
+      // Cap enforcement: if we're at the limit and adding a new entry, evict oldest
+      if (!exists && diagnostics.size >= MAX_DIAGNOSTICS_ENTRIES) {
+        // Evict the first (oldest) entry to make room
+        const firstKey = diagnostics.keys().next().value
+        if (firstKey) {
+          diagnostics.delete(firstKey)
+          l.info("diagnostics cap reached, evicted oldest entry", { evicted: firstKey })
+        }
+      }
+
       diagnostics.set(filePath, params.diagnostics)
       if (!exists && input.serverID === "typescript") return
       Bus.publish(Event.Diagnostics, { path: filePath, serverID: input.serverID })
@@ -238,6 +250,8 @@ export namespace LSPClient {
       },
       async shutdown() {
         l.info("shutting down")
+        // Clear diagnostics map to free memory
+        diagnostics.clear()
         connection.end()
         connection.dispose()
         input.server.process.kill()
