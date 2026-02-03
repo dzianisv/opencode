@@ -7,6 +7,7 @@ import { Locale } from "../../util/locale"
 import { Flag } from "../../flag/flag"
 import { EOL } from "os"
 import path from "path"
+import { Instance } from "../../project/instance"
 
 function pagerCmd(): string[] {
   const lessOptions = ["-R", "-S"]
@@ -61,9 +62,10 @@ export const SessionListCommand = cmd({
   },
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
+      const directory = Instance.directory
       const sessions = []
       for await (const session of Session.list()) {
-        if (!session.parentID) {
+        if (!session.parentID && session.directory === directory) {
           sessions.push(session)
         }
       }
