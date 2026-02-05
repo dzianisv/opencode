@@ -24,8 +24,16 @@ import { Question } from "@/question"
  * - Network connection drops mid-stream (TCP half-open)
  * - LLM provider stalls without closing the connection
  * - Proxy/gateway timeouts that don't properly terminate the stream
+ *
+ * The timeout can be dynamically adjusted via getTimeoutMs() - this is used to
+ * extend the timeout when tool inputs are pending, since some providers (like
+ * GitHub Copilot + Claude) buffer entire tool call arguments instead of streaming them.
  */
-async function* withIdleTimeout<T>(stream: AsyncIterable<T>, timeoutMs: number, abort: AbortSignal): AsyncGenerator<T> {
+async function* withIdleTimeout<T>(
+  stream: AsyncIterable<T>,
+  getTimeoutMs: () => number,
+  abort: AbortSignal,
+): AsyncGenerator<T> {
   const iterator = stream[Symbol.asyncIterator]()
 
   while (true) {
@@ -34,11 +42,12 @@ async function* withIdleTimeout<T>(stream: AsyncIterable<T>, timeoutMs: number, 
     let timer: ReturnType<typeof setTimeout> | undefined
     let rejectTimeout: ((error: Error) => void) | undefined
 
+    const currentTimeout = getTimeoutMs()
     const timeoutPromise = new Promise<never>((_, reject) => {
       rejectTimeout = reject
       timer = setTimeout(() => {
-        reject(new StreamIdleTimeoutError(timeoutMs))
-      }, timeoutMs)
+        reject(new StreamIdleTimeoutError(currentTimeout))
+      }, currentTimeout)
     })
 
     // Clean up timer when abort signal fires
@@ -101,17 +110,24 @@ export namespace SessionProcessor {
         const shouldBreak = config.experimental?.continue_loop_on_deny !== true
         // Default to 60 seconds between chunks, 0 disables the timeout
         const streamIdleTimeout = config.experimental?.stream_idle_timeout ?? 60000
+        // Extended timeout (5 min) for when tool inputs are pending - some providers
+        // like GitHub Copilot + Claude buffer entire tool arguments instead of streaming
+        const toolInputPendingTimeout = 300000
+        // Track pending tool inputs that haven't received their full arguments yet
+        const pendingToolInputs = new Set<string>()
+
         while (true) {
           try {
             let currentText: MessageV2.TextPart | undefined
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
             const stream = await LLM.stream(streamInput)
 
+            // Dynamic timeout: use longer timeout when tool inputs are pending
+            const getTimeoutMs = () => (pendingToolInputs.size > 0 ? toolInputPendingTimeout : streamIdleTimeout)
+
             // Wrap the stream with idle timeout to prevent hanging on stalled connections
             const wrappedStream =
-              streamIdleTimeout > 0
-                ? withIdleTimeout(stream.fullStream, streamIdleTimeout, input.abort)
-                : stream.fullStream
+              streamIdleTimeout > 0 ? withIdleTimeout(stream.fullStream, getTimeoutMs, input.abort) : stream.fullStream
 
             for await (const value of wrappedStream) {
               input.abort.throwIfAborted()
@@ -162,6 +178,8 @@ export namespace SessionProcessor {
                   break
 
                 case "tool-input-start":
+                  // Track this tool input as pending - extends timeout until tool-call arrives
+                  pendingToolInputs.add(value.id)
                   const part = await Session.updatePart({
                     id: toolcalls[value.id]?.id ?? Identifier.ascending("part"),
                     messageID: input.assistantMessage.id,
@@ -185,6 +203,8 @@ export namespace SessionProcessor {
                   break
 
                 case "tool-call": {
+                  // Tool input is complete - remove from pending set
+                  pendingToolInputs.delete(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match) {
                     const part = await Session.updatePart({
