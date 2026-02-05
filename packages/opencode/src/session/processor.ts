@@ -110,11 +110,13 @@ export namespace SessionProcessor {
         const shouldBreak = config.experimental?.continue_loop_on_deny !== true
         // Default to 60 seconds between chunks, 0 disables the timeout
         const streamIdleTimeout = config.experimental?.stream_idle_timeout ?? 60000
-        // Extended timeout (5 min) for when tool inputs are pending - some providers
-        // like GitHub Copilot + Claude buffer entire tool arguments instead of streaming
-        const toolInputPendingTimeout = 300000
-        // Track pending tool inputs that haven't received their full arguments yet
+        // Extended timeout (5 min) for when tools are active - some providers
+        // like GitHub Copilot + Claude buffer entire tool arguments instead of streaming,
+        // and tool execution (like running tests) can take much longer than 60 seconds
+        const toolActiveTimeout = 300000
+        // Track pending tool inputs (waiting for JSON) and running tools (executing)
         const pendingToolInputs = new Set<string>()
+        const runningTools = new Set<string>()
 
         while (true) {
           try {
@@ -122,8 +124,9 @@ export namespace SessionProcessor {
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
             const stream = await LLM.stream(streamInput)
 
-            // Dynamic timeout: use longer timeout when tool inputs are pending
-            const getTimeoutMs = () => (pendingToolInputs.size > 0 ? toolInputPendingTimeout : streamIdleTimeout)
+            // Dynamic timeout: use longer timeout when tools are active (pending input or executing)
+            const getTimeoutMs = () =>
+              pendingToolInputs.size > 0 || runningTools.size > 0 ? toolActiveTimeout : streamIdleTimeout
 
             // Wrap the stream with idle timeout to prevent hanging on stalled connections
             const wrappedStream =
@@ -203,8 +206,9 @@ export namespace SessionProcessor {
                   break
 
                 case "tool-call": {
-                  // Tool input is complete - remove from pending set
+                  // Tool input is complete - move from pending to running
                   pendingToolInputs.delete(value.toolCallId)
+                  runningTools.add(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match) {
                     const part = await Session.updatePart({
@@ -251,6 +255,8 @@ export namespace SessionProcessor {
                   break
                 }
                 case "tool-result": {
+                  // Tool execution complete - remove from running set
+                  runningTools.delete(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({
@@ -275,6 +281,8 @@ export namespace SessionProcessor {
                 }
 
                 case "tool-error": {
+                  // Tool execution failed - remove from running set
+                  runningTools.delete(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({
