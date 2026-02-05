@@ -19,48 +19,41 @@ import { Question } from "@/question"
 /**
  * Wraps an async iterable with an idle timeout. If no value is yielded within
  * the timeout period, throws a StreamIdleTimeoutError.
- * 
+ *
  * This prevents the streaming loop from hanging indefinitely when:
  * - Network connection drops mid-stream (TCP half-open)
  * - LLM provider stalls without closing the connection
  * - Proxy/gateway timeouts that don't properly terminate the stream
  */
-async function* withIdleTimeout<T>(
-  stream: AsyncIterable<T>,
-  timeoutMs: number,
-  abort: AbortSignal
-): AsyncGenerator<T> {
+async function* withIdleTimeout<T>(stream: AsyncIterable<T>, timeoutMs: number, abort: AbortSignal): AsyncGenerator<T> {
   const iterator = stream[Symbol.asyncIterator]()
-  
+
   while (true) {
     abort.throwIfAborted()
-    
+
     let timer: ReturnType<typeof setTimeout> | undefined
     let rejectTimeout: ((error: Error) => void) | undefined
-    
+
     const timeoutPromise = new Promise<never>((_, reject) => {
       rejectTimeout = reject
       timer = setTimeout(() => {
         reject(new StreamIdleTimeoutError(timeoutMs))
       }, timeoutMs)
     })
-    
+
     // Clean up timer when abort signal fires
     const abortHandler = () => {
       if (timer) clearTimeout(timer)
     }
     abort.addEventListener("abort", abortHandler, { once: true })
-    
+
     try {
-      const result = await Promise.race([
-        iterator.next(),
-        timeoutPromise
-      ])
-      
+      const result = await Promise.race([iterator.next(), timeoutPromise])
+
       // Clear the timer since we got a result
       if (timer) clearTimeout(timer)
       abort.removeEventListener("abort", abortHandler)
-      
+
       if (result.done) return
       yield result.value
     } catch (e) {
@@ -74,6 +67,8 @@ async function* withIdleTimeout<T>(
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  /** Maximum number of stream idle timeout retries before giving up */
+  const MAX_STREAM_IDLE_TIMEOUT_RETRIES = 3
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -89,6 +84,7 @@ export namespace SessionProcessor {
     let snapshot: string | undefined
     let blocked = false
     let attempt = 0
+    let idleTimeoutRetries = 0
     let needsCompaction = false
 
     const result = {
@@ -112,9 +108,10 @@ export namespace SessionProcessor {
             const stream = await LLM.stream(streamInput)
 
             // Wrap the stream with idle timeout to prevent hanging on stalled connections
-            const wrappedStream = streamIdleTimeout > 0 
-              ? withIdleTimeout(stream.fullStream, streamIdleTimeout, input.abort)
-              : stream.fullStream
+            const wrappedStream =
+              streamIdleTimeout > 0
+                ? withIdleTimeout(stream.fullStream, streamIdleTimeout, input.abort)
+                : stream.fullStream
 
             for await (const value of wrappedStream) {
               input.abort.throwIfAborted()
@@ -405,25 +402,68 @@ export namespace SessionProcessor {
               error: e,
               stack: JSON.stringify(e.stack),
             })
-            const error = MessageV2.fromError(e, { providerID: input.model.providerID })
-            const retry = SessionRetry.retryable(error)
-            if (retry !== undefined) {
-              attempt++
-              const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
-              SessionStatus.set(input.sessionID, {
-                type: "retry",
-                attempt,
-                message: retry,
-                next: Date.now() + delay,
+
+            // Special handling for StreamIdleTimeoutError: limit retries to prevent infinite loop
+            // This can happen when the model generates very large outputs that cause the stream to stall
+            if (e instanceof StreamIdleTimeoutError) {
+              idleTimeoutRetries++
+              log.info("stream idle timeout", {
+                attempt: idleTimeoutRetries,
+                maxRetries: MAX_STREAM_IDLE_TIMEOUT_RETRIES,
+                timeoutMs: e.timeoutMs,
               })
-              await SessionRetry.sleep(delay, input.abort).catch(() => {})
-              continue
+
+              if (idleTimeoutRetries >= MAX_STREAM_IDLE_TIMEOUT_RETRIES) {
+                const error = MessageV2.fromError(
+                  new Error(
+                    `Stream timed out ${MAX_STREAM_IDLE_TIMEOUT_RETRIES} times (${e.timeoutMs}ms idle). ` +
+                      `The model may be generating content that exceeds output limits or the connection is unstable. ` +
+                      `Try breaking the task into smaller pieces or check your network connection.`,
+                  ),
+                  { providerID: input.model.providerID },
+                )
+                input.assistantMessage.error = error
+                Bus.publish(Session.Event.Error, {
+                  sessionID: input.assistantMessage.sessionID,
+                  error: input.assistantMessage.error,
+                })
+                SessionStatus.set(input.sessionID, { type: "idle" })
+                // Don't continue - fall through to cleanup and exit
+              } else {
+                // Retry with exponential backoff
+                const delay = SessionRetry.delay(idleTimeoutRetries)
+                SessionStatus.set(input.sessionID, {
+                  type: "retry",
+                  attempt: idleTimeoutRetries,
+                  message: `Stream idle timeout (attempt ${idleTimeoutRetries}/${MAX_STREAM_IDLE_TIMEOUT_RETRIES})`,
+                  next: Date.now() + delay,
+                })
+                await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                continue
+              }
+            } else {
+              // Handle all other errors with the generic retry logic
+              const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+              const retry = SessionRetry.retryable(error)
+              if (retry !== undefined) {
+                attempt++
+                const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
+                SessionStatus.set(input.sessionID, {
+                  type: "retry",
+                  attempt,
+                  message: retry,
+                  next: Date.now() + delay,
+                })
+                await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                continue
+              }
+              input.assistantMessage.error = error
+              Bus.publish(Session.Event.Error, {
+                sessionID: input.assistantMessage.sessionID,
+                error: input.assistantMessage.error,
+              })
+              SessionStatus.set(input.sessionID, { type: "idle" })
             }
-            input.assistantMessage.error = error
-            Bus.publish(Session.Event.Error, {
-              sessionID: input.assistantMessage.sessionID,
-              error: input.assistantMessage.error,
-            })
           }
           if (snapshot) {
             const patch = await Snapshot.patch(snapshot)
