@@ -13,6 +13,17 @@ import { iife } from "@/util/iife"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 
+/**
+ * Error thrown when no data is received from the LLM stream within the timeout period.
+ * This typically indicates a stalled connection (network issues, LLM provider unresponsive).
+ */
+export class StreamIdleTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`Stream idle timeout: no data received for ${timeoutMs}ms`)
+    this.name = "StreamIdleTimeoutError"
+  }
+}
+
 export namespace MessageV2 {
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
   export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
@@ -740,6 +751,33 @@ export namespace MessageV2 {
         return new MessageV2.APIError(
           {
             message: "Connection reset by server",
+            isRetryable: true,
+            metadata: {
+              code: (e as SystemError).code ?? "",
+              syscall: (e as SystemError).syscall ?? "",
+              message: (e as SystemError).message ?? "",
+            },
+          },
+          { cause: e },
+        ).toObject()
+      case e instanceof StreamIdleTimeoutError:
+        return new MessageV2.APIError(
+          {
+            message: e.message,
+            isRetryable: true,
+            metadata: {
+              timeoutMs: String(e.timeoutMs),
+            },
+          },
+          { cause: e },
+        ).toObject()
+      // Handle additional network errors that indicate transient connection issues
+      case ["ETIMEDOUT", "ENOTFOUND", "ECONNREFUSED", "EPIPE", "EHOSTUNREACH", "ENETUNREACH"].includes(
+        (e as SystemError)?.code ?? ""
+      ):
+        return new MessageV2.APIError(
+          {
+            message: `Network error: ${(e as SystemError).code}`,
             isRetryable: true,
             metadata: {
               code: (e as SystemError).code ?? "",
