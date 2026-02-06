@@ -13,17 +13,6 @@ import { iife } from "@/util/iife"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 
-/**
- * Error thrown when no data is received from the LLM stream within the timeout period.
- * This typically indicates a stalled connection (network issues, LLM provider unresponsive).
- */
-export class StreamIdleTimeoutError extends Error {
-  constructor(public readonly timeoutMs: number) {
-    super(`Stream idle timeout: no data received for ${timeoutMs}ms`)
-    this.name = "StreamIdleTimeoutError"
-  }
-}
-
 export namespace MessageV2 {
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
   export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
@@ -449,6 +438,26 @@ export namespace MessageV2 {
   export function toModelMessages(input: WithParts[], model: Provider.Model): ModelMessage[] {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
+    // Track media from tool results that need to be injected as user messages
+    // for providers that don't support media in tool results.
+    //
+    // OpenAI-compatible APIs only support string content in tool results, so we need
+    // to extract media and inject as user messages. Other SDKs (anthropic, google,
+    // bedrock) handle type: "content" with media parts natively.
+    //
+    // Only apply this workaround if the model actually supports image input -
+    // otherwise there's no point extracting images.
+    const supportsMediaInToolResults = (() => {
+      if (model.api.npm === "@ai-sdk/anthropic") return true
+      if (model.api.npm === "@ai-sdk/openai") return true
+      if (model.api.npm === "@ai-sdk/amazon-bedrock") return true
+      if (model.api.npm === "@ai-sdk/google-vertex/anthropic") return true
+      if (model.api.npm === "@ai-sdk/google") {
+        const id = model.api.id.toLowerCase()
+        return id.includes("gemini-3") && !id.includes("gemini-2")
+      }
+      return false
+    })()
 
     const toModelOutput = (output: unknown) => {
       if (typeof output === "string") {
@@ -525,6 +534,7 @@ export namespace MessageV2 {
 
       if (msg.info.role === "assistant") {
         const differentModel = `${model.providerID}/${model.id}` !== `${msg.info.providerID}/${msg.info.modelID}`
+        const media: Array<{ mime: string; url: string }> = []
 
         if (
           msg.info.error &&
@@ -556,11 +566,23 @@ export namespace MessageV2 {
             if (part.state.status === "completed") {
               const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
               const attachments = part.state.time.compacted ? [] : (part.state.attachments ?? [])
+
+              // For providers that don't support media in tool results, extract media files
+              // (images, PDFs) to be sent as a separate user message
+              const isMediaAttachment = (a: { mime: string }) =>
+                a.mime.startsWith("image/") || a.mime === "application/pdf"
+              const mediaAttachments = attachments.filter(isMediaAttachment)
+              const nonMediaAttachments = attachments.filter((a) => !isMediaAttachment(a))
+              if (!supportsMediaInToolResults && mediaAttachments.length > 0) {
+                media.push(...mediaAttachments)
+              }
+              const finalAttachments = supportsMediaInToolResults ? attachments : nonMediaAttachments
+
               const output =
-                attachments.length > 0
+                finalAttachments.length > 0
                   ? {
                       text: outputText,
-                      attachments,
+                      attachments: finalAttachments,
                     }
                   : outputText
 
@@ -604,6 +626,25 @@ export namespace MessageV2 {
         }
         if (assistantMessage.parts.length > 0) {
           result.push(assistantMessage)
+          // Inject pending media as a user message for providers that don't support
+          // media (images, PDFs) in tool results
+          if (media.length > 0) {
+            result.push({
+              id: Identifier.ascending("message"),
+              role: "user",
+              parts: [
+                {
+                  type: "text" as const,
+                  text: "Attached image(s) from tool result:",
+                },
+                ...media.map((attachment) => ({
+                  type: "file" as const,
+                  url: attachment.url,
+                  mediaType: attachment.mime,
+                })),
+              ],
+            })
+          }
         }
       }
     }
@@ -699,33 +740,6 @@ export namespace MessageV2 {
         return new MessageV2.APIError(
           {
             message: "Connection reset by server",
-            isRetryable: true,
-            metadata: {
-              code: (e as SystemError).code ?? "",
-              syscall: (e as SystemError).syscall ?? "",
-              message: (e as SystemError).message ?? "",
-            },
-          },
-          { cause: e },
-        ).toObject()
-      case e instanceof StreamIdleTimeoutError:
-        return new MessageV2.APIError(
-          {
-            message: e.message,
-            isRetryable: true,
-            metadata: {
-              timeoutMs: String(e.timeoutMs),
-            },
-          },
-          { cause: e },
-        ).toObject()
-      // Handle additional network errors that indicate transient connection issues
-      case ["ETIMEDOUT", "ENOTFOUND", "ECONNREFUSED", "EPIPE", "EHOSTUNREACH", "ENETUNREACH"].includes(
-        (e as SystemError)?.code ?? ""
-      ):
-        return new MessageV2.APIError(
-          {
-            message: `Network error: ${(e as SystemError).code}`,
             isRetryable: true,
             metadata: {
               code: (e as SystemError).code ?? "",
