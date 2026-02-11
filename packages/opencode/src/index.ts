@@ -32,6 +32,7 @@ import path from "path"
 import { Global } from "./global"
 import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
+import { Instance } from "./project/instance"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -44,6 +45,21 @@ process.on("uncaughtException", (e) => {
     e: e instanceof Error ? e.message : e,
   })
 })
+
+let disposing = false
+const graceful = async (signal: string) => {
+  if (disposing) return
+  disposing = true
+  Log.Default.info("received signal, disposing", { signal })
+  await Instance.disposeAll().catch((e) => {
+    Log.Default.error("error during disposal", { e: e instanceof Error ? e.message : e })
+  })
+  process.exit()
+}
+
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.on(signal, () => void graceful(signal))
+}
 
 const cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
@@ -195,9 +211,11 @@ try {
   }
   process.exitCode = 1
 } finally {
+  // Dispose all instances to clean up child processes (LSP, MCP, bash, PTY).
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.
   // Explicitly exit to avoid any hanging subprocesses.
+  await Instance.disposeAll().catch(() => {})
   process.exit()
 }

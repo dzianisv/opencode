@@ -1747,26 +1747,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const chunks: Buffer[] = []
     let size = 0
-    const previewParts: string[] = []
-    let previewLen = 0
-    let previewDirty = false
-    let metadataTimer: ReturnType<typeof setTimeout> | undefined
+    let preview = ""
     const MAX_PREVIEW = MAX_METADATA_LENGTH
-
-    const flushPreview = () => {
-      metadataTimer = undefined
-      if (!previewDirty) return
-      previewDirty = false
-      const text =
-        previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: text,
-          description: "",
-        }
-        Session.updatePart(part)
-      }
-    }
 
     const appendChunk = (chunk: Buffer) => {
       chunks.push(chunk)
@@ -1774,13 +1756,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
         size -= chunks.shift()!.length
       }
-      if (previewLen < MAX_PREVIEW) {
-        previewParts.push(chunk.toString())
-        previewLen += chunk.length
+      if (preview.length < MAX_PREVIEW) {
+        preview += chunk.toString()
+        if (preview.length > MAX_PREVIEW) {
+          preview = preview.slice(0, MAX_PREVIEW) + "\n\n..."
+        }
       }
-      previewDirty = true
-      if (!metadataTimer) {
-        metadataTimer = setTimeout(flushPreview, 100)
+      if (part.state.status === "running") {
+        part.state.metadata = {
+          output: preview,
+          description: "",
+        }
+        Session.updatePart(part)
       }
     }
 
@@ -1812,17 +1799,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     })
 
-    if (metadataTimer) clearTimeout(metadataTimer)
-    flushPreview()
-
     let output = Buffer.concat(chunks).toString()
 
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
     }
-
-    const finalPreview =
-      previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
 
     msg.time.completed = Date.now()
     await Session.updateMessage(msg)
@@ -1836,7 +1817,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input: part.state.input,
         title: "",
         metadata: {
-          output: finalPreview,
+          output: preview,
           description: "",
         },
         output,
