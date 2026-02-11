@@ -106,27 +106,34 @@ export namespace PermissionNext {
     ),
   }
 
-  const state = Instance.state(() => {
-    const projectID = Instance.project.id
-    const row = Database.use((db) =>
-      db.select().from(PermissionTable).where(eq(PermissionTable.project_id, projectID)).get(),
-    )
-    const stored = row?.data ?? ([] as Ruleset)
+  const state = Instance.state(
+    () => {
+      const projectID = Instance.project.id
+      const row = Database.use((db) =>
+        db.select().from(PermissionTable).where(eq(PermissionTable.project_id, projectID)).get(),
+      )
+      const stored = row?.data ?? ([] as Ruleset)
 
-    const pending: Record<
-      string,
-      {
-        info: Request
-        resolve: () => void
-        reject: (e: any) => void
+      const pending: Record<
+        string,
+        {
+          info: Request
+          resolve: () => void
+          reject: (e: any) => void
+        }
+      > = {}
+
+      return {
+        pending,
+        approved: stored,
       }
-    > = {}
-
-    return {
-      pending,
-      approved: stored,
-    }
-  })
+    },
+    async (current) => {
+      for (const item of Object.values(current.pending)) {
+        item.reject(new RejectedError())
+      }
+    },
+  )
 
   export const ask = fn(
     Request.partial({ id: true }).extend({

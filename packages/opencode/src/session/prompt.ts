@@ -626,9 +626,11 @@ export namespace SessionPrompt {
         })
       }
 
+      const sessionMessages = msgs.map((msg) => ({ ...msg, parts: msg.parts.map((part) => ({ ...part })) }))
+
       // Ephemerally wrap queued user messages with a reminder to stay on track
       if (step > 1 && lastFinished) {
-        for (const msg of msgs) {
+        for (const msg of sessionMessages) {
           if (msg.info.role !== "user" || msg.info.id <= lastFinished.id) continue
           for (const part of msg.parts) {
             if (part.type !== "text" || part.ignored || part.synthetic) continue
@@ -645,7 +647,7 @@ export namespace SessionPrompt {
         }
       }
 
-      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
 
       // Build system prompt, adding structured output instruction if needed
       const system = [...(await SystemPrompt.environment(model)), ...(await InstructionPrompt.system())]
@@ -661,7 +663,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...MessageV2.toModelMessages(sessionMessages, model),
           ...(isLastStep
             ? [
                 {
@@ -671,7 +673,7 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        tools: isLastStep ? {} : tools,
         model,
         toolChoice: format.type === "json_schema" ? "required" : undefined,
       })
@@ -1634,24 +1636,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     })
 
-    let output = ""
+    const chunks: Buffer[] = []
+    let size = 0
+    let preview = ""
+    const MAX_OUTPUT = 1024 * 1024
 
-    proc.stdout?.on("data", (chunk) => {
-      output += chunk.toString()
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      chunks.push(chunk)
+      size += chunk.length
+      while (size > MAX_OUTPUT && chunks.length > 1) {
+        size -= chunks.shift()!.length
+      }
+      if (preview.length < MAX_OUTPUT) {
+        preview += chunk.toString()
+        if (preview.length > MAX_OUTPUT) {
+          preview = preview.slice(0, MAX_OUTPUT) + "\n\n..."
+        }
+      }
       if (part.state.status === "running") {
         part.state.metadata = {
-          output: output,
+          output: preview,
           description: "",
         }
         Session.updatePart(part)
       }
     })
 
-    proc.stderr?.on("data", (chunk) => {
-      output += chunk.toString()
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      chunks.push(chunk)
+      size += chunk.length
+      while (size > MAX_OUTPUT && chunks.length > 1) {
+        size -= chunks.shift()!.length
+      }
+      if (preview.length < MAX_OUTPUT) {
+        preview += chunk.toString()
+        if (preview.length > MAX_OUTPUT) {
+          preview = preview.slice(0, MAX_OUTPUT) + "\n\n..."
+        }
+      }
       if (part.state.status === "running") {
         part.state.metadata = {
-          output: output,
+          output: preview,
           description: "",
         }
         Session.updatePart(part)
@@ -1683,6 +1708,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     })
 
+    let output = Buffer.concat(chunks).toString()
+
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
     }
@@ -1698,7 +1725,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input: part.state.input,
         title: "",
         metadata: {
-          output,
+          output: preview,
           description: "",
         },
         output,
