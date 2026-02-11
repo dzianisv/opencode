@@ -20,6 +20,7 @@ import { Plugin } from "@/plugin"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 
 export const log = Log.create({ service: "bash-tool" })
 
@@ -179,7 +180,9 @@ export const BashTool = Tool.define("bash", async () => {
         detached: process.platform !== "win32",
       })
 
-      let output = ""
+      const chunks: Buffer[] = []
+      let size = 0
+      let preview = ""
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -190,11 +193,23 @@ export const BashTool = Tool.define("bash", async () => {
       })
 
       const append = (chunk: Buffer) => {
-        output += chunk.toString()
+        chunks.push(chunk)
+        size += chunk.length
+        // Drop oldest chunks when exceeding cap so final output stays bounded
+        while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
+          size -= chunks.shift()!.length
+        }
+        // Build a capped preview string for the TUI metadata display.
+        // Once we exceed the cap we stop appending to avoid O(n²) growth.
+        if (preview.length < MAX_METADATA_LENGTH) {
+          preview += chunk.toString()
+          if (preview.length > MAX_METADATA_LENGTH) {
+            preview = preview.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+          }
+        }
         ctx.metadata({
           metadata: {
-            // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
-            output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
+            output: preview,
             description: params.description,
           },
         })
@@ -245,6 +260,8 @@ export const BashTool = Tool.define("bash", async () => {
         })
       })
 
+      let output = Buffer.concat(chunks).toString()
+
       const resultMetadata: string[] = []
 
       if (timedOut) {
@@ -262,7 +279,7 @@ export const BashTool = Tool.define("bash", async () => {
       return {
         title: params.description,
         metadata: {
-          output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
+          output: preview,
           exit: proc.exitCode,
           description: params.description,
         },
