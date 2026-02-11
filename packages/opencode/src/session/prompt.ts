@@ -1800,7 +1800,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         resolve()
       })
     })
-
     let output = Buffer.concat(chunks).toString()
 
     if (aborted) {
