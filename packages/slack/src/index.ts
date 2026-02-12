@@ -1,5 +1,6 @@
 import { App } from "@slack/bolt"
 import { createOpencode, type ToolPart } from "@opencode-ai/sdk"
+import { createDedup } from "./dedup"
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -8,26 +9,30 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 })
 
-console.log("🔧 Bot configuration:")
+console.log("Bot configuration:")
 console.log("- Bot token present:", !!process.env.SLACK_BOT_TOKEN)
 console.log("- Signing secret present:", !!process.env.SLACK_SIGNING_SECRET)
 console.log("- App token present:", !!process.env.SLACK_APP_TOKEN)
 
-console.log("🚀 Starting opencode server...")
+console.log("Starting opencode server...")
 const opencode = await createOpencode({
   port: 0,
 })
-console.log("✅ Opencode server ready")
+console.log("Opencode server ready")
 
 const sessions = new Map<string, { client: any; server: any; sessionId: string; channel: string; thread: string }>()
+
+// Deduplicate between app.message() and app.event('app_mention')
+// which both fire for @mentions in channels where the bot is a member
+const dedup = createDedup()
+
 ;(async () => {
   const events = await opencode.client.event.subscribe()
   for await (const event of events.stream) {
     if (event.type === "message.part.updated") {
       const part = event.properties.part
       if (part.type === "tool") {
-        // Find the session for this tool update
-        for (const [sessionKey, session] of sessions.entries()) {
+        for (const [, session] of sessions.entries()) {
           if (session.sessionId === part.sessionID) {
             handleToolUpdate(part, session.channel, session.thread)
             break
@@ -40,88 +45,78 @@ const sessions = new Map<string, { client: any; server: any; sessionId: string; 
 
 async function handleToolUpdate(part: ToolPart, channel: string, thread: string) {
   if (part.state.status !== "completed") return
-  const toolMessage = `*${part.tool}* - ${part.state.title}`
+  const msg = `*${part.tool}* - ${part.state.title}`
   await app.client.chat
     .postMessage({
       channel,
       thread_ts: thread,
-      text: toolMessage,
+      text: msg,
     })
     .catch(() => {})
 }
 
-app.use(async ({ next, context }) => {
-  console.log("📡 Raw Slack event:", JSON.stringify(context, null, 2))
-  await next()
-})
+async function processMessage(text: string, channel: string, ts: string, threadTs?: string) {
+  const thread = threadTs || ts
 
-app.message(async ({ message, say }) => {
-  console.log("📨 Received message event:", JSON.stringify(message, null, 2))
-
-  if (message.subtype || !("text" in message) || !message.text) {
-    console.log("⏭️ Skipping message - no text or has subtype")
+  if (dedup.check(ts)) {
+    console.log("Skipping duplicate message:", ts)
     return
   }
 
-  console.log("✅ Processing message:", message.text)
-
-  const channel = message.channel
-  const thread = (message as any).thread_ts || message.ts
-  const sessionKey = `${channel}-${thread}`
-
-  let session = sessions.get(sessionKey)
+  const key = `${channel}-${thread}`
+  let session = sessions.get(key)
 
   if (!session) {
-    console.log("🆕 Creating new opencode session...")
+    console.log("Creating new opencode session...")
     const { client, server } = opencode
 
-    const createResult = await client.session.create({
+    const result = await client.session.create({
       body: { title: `Slack thread ${thread}` },
     })
 
-    if (createResult.error) {
-      console.error("❌ Failed to create session:", createResult.error)
-      await say({
-        text: "Sorry, I had trouble creating a session. Please try again.",
+    if (result.error) {
+      console.error("Failed to create session:", result.error)
+      await app.client.chat.postMessage({
+        channel,
         thread_ts: thread,
+        text: "Sorry, I had trouble creating a session. Please try again.",
       })
       return
     }
 
-    console.log("✅ Created opencode session:", createResult.data.id)
+    console.log("Created opencode session:", result.data.id)
 
-    session = { client, server, sessionId: createResult.data.id, channel, thread }
-    sessions.set(sessionKey, session)
+    session = { client, server, sessionId: result.data.id, channel, thread }
+    sessions.set(key, session)
 
-    const shareResult = await client.session.share({ path: { id: createResult.data.id } })
-    if (!shareResult.error && shareResult.data) {
-      const sessionUrl = shareResult.data.share?.url!
-      console.log("🔗 Session shared:", sessionUrl)
-      await app.client.chat.postMessage({ channel, thread_ts: thread, text: sessionUrl })
+    const share = await client.session.share({ path: { id: result.data.id } })
+    if (!share.error && share.data) {
+      const url = share.data.share?.url!
+      console.log("Session shared:", url)
+      await app.client.chat.postMessage({ channel, thread_ts: thread, text: url })
     }
   }
 
-  console.log("📝 Sending to opencode:", message.text)
+  console.log("Sending to opencode:", text)
   const result = await session.client.session.prompt({
     path: { id: session.sessionId },
-    body: { parts: [{ type: "text", text: message.text }] },
+    body: { parts: [{ type: "text", text }] },
   })
 
-  console.log("📤 Opencode response:", JSON.stringify(result, null, 2))
+  console.log("Opencode response:", JSON.stringify(result, null, 2))
 
   if (result.error) {
-    console.error("❌ Failed to send message:", result.error)
-    await say({
-      text: "Sorry, I had trouble processing your message. Please try again.",
+    console.error("Failed to send message:", result.error)
+    await app.client.chat.postMessage({
+      channel,
       thread_ts: thread,
+      text: "Sorry, I had trouble processing your message. Please try again.",
     })
     return
   }
 
   const response = result.data
-
-  // Build response text
-  const responseText =
+  const body =
     response.info?.content ||
     response.parts
       ?.filter((p: any) => p.type === "text")
@@ -129,17 +124,49 @@ app.message(async ({ message, say }) => {
       .join("\n") ||
     "I received your message but didn't have a response."
 
-  console.log("💬 Sending response:", responseText)
+  console.log("Sending response:", body)
+  await app.client.chat.postMessage({ channel, thread_ts: thread, text: body })
+}
 
-  // Send main response (tool updates will come via live events)
-  await say({ text: responseText, thread_ts: thread })
+app.use(async ({ next, context }) => {
+  console.log("Raw Slack event:", JSON.stringify(context, null, 2))
+  await next()
+})
+
+// Handle regular messages in channels where the bot is a member
+app.message(async ({ message }) => {
+  console.log("Received message event:", JSON.stringify(message, null, 2))
+
+  if (message.subtype || !("text" in message) || !message.text) {
+    console.log("Skipping message - no text or has subtype")
+    return
+  }
+
+  console.log("Processing message:", message.text)
+  await processMessage(message.text, message.channel, message.ts, (message as any).thread_ts)
+})
+
+// Handle @mention events - critical for thread replies where the bot is mentioned
+// Slack sends app_mention when someone @mentions the bot, even in threads.
+// Without this handler, thread @mentions like "@SupportEngineer please fix this"
+// would be silently dropped if the message event wasn't received.
+app.event("app_mention", async ({ event }) => {
+  console.log("Received app_mention event:", JSON.stringify(event, null, 2))
+
+  if (!event.text) {
+    console.log("Skipping app_mention - no text")
+    return
+  }
+
+  console.log("Processing app_mention:", event.text)
+  await processMessage(event.text, event.channel, event.ts, event.thread_ts)
 })
 
 app.command("/test", async ({ command, ack, say }) => {
   await ack()
-  console.log("🧪 Test command received:", JSON.stringify(command, null, 2))
-  await say("🤖 Bot is working! I can hear you loud and clear.")
+  console.log("Test command received:", JSON.stringify(command, null, 2))
+  await say("Bot is working! I can hear you loud and clear.")
 })
 
 await app.start()
-console.log("⚡️ Slack bot is running!")
+console.log("Slack bot is running!")
