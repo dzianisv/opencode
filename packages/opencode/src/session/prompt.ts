@@ -780,6 +780,8 @@ export namespace SessionPrompt {
         })
       }
 
+      // Cross-message doom loop detection: track whether each iteration
+      // only called a single tool type (e.g. repeated todowrite across turns)
       const iterParts = await MessageV2.parts(processor.message.id)
       const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
       const toolOnly = iterParts.length > 0 && iterTools.length === iterParts.length
