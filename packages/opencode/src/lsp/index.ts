@@ -117,6 +117,7 @@ export namespace LSP {
                 windowsHide: true,
                 env: {
                   ...process.env,
+                  NODE_OPTIONS: [process.env["NODE_OPTIONS"], "--max-old-space-size=512"].filter(Boolean).join(" "),
                   ...item.env,
                 },
               }),

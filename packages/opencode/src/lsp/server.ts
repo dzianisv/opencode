@@ -19,6 +19,18 @@ const spawn = ((cmd, args, opts) => {
   return launch(cmd, { ...(args ?? {}), windowsHide: true })
 }) as typeof launch
 
+const NODE_HEAP_LIMIT_MB = 512
+function lspEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const existing = process.env["NODE_OPTIONS"] ?? ""
+  const limit = `--max-old-space-size=${NODE_HEAP_LIMIT_MB}`
+  const options = existing.includes("--max-old-space-size") ? existing : existing ? `${existing} ${limit}` : limit
+  return {
+    ...process.env,
+    NODE_OPTIONS: options,
+    ...extra,
+  }
+}
+
 export namespace LSPServer {
   const log = Log.create({ service: "lsp.server" })
   const pathExists = async (p: string) =>
@@ -384,8 +396,14 @@ export namespace LSPServer {
         if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
 
         log.info("installing gopls")
+<<<<<<< HEAD
         const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
           env: { ...process.env, GOBIN: Global.Path.bin },
+=======
+        const proc = Bun.spawn({
+          cmd: ["go", "install", "golang.org/x/tools/gopls@latest"],
+          env: lspEnv({ GOBIN: Global.Path.bin }),
+>>>>>>> b08f44e30 (Set heap limit)
           stdout: "pipe",
           stderr: "pipe",
           stdin: "pipe",
@@ -1235,6 +1253,7 @@ export namespace LSPServer {
         process: spawn(
           java,
           [
+            `-Xmx${NODE_HEAP_LIMIT_MB}m`,
             "-jar",
             launcherJar,
             "-configuration",
@@ -1957,9 +1976,7 @@ export namespace LSPServer {
       return {
         process: spawn(nixd, [], {
           cwd: root,
-          env: {
-            ...process.env,
-          },
+          env: lspEnv(),
         }),
       }
     },
