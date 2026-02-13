@@ -66,7 +66,8 @@ export namespace Pty {
   interface ActiveSession {
     info: Info
     process: IPty
-    buffer: string
+    chunks: string[]
+    length: number
     subscribers: Set<WSContext>
   }
 
@@ -135,7 +136,8 @@ export namespace Pty {
     const session: ActiveSession = {
       info,
       process: ptyProcess,
-      buffer: "",
+      chunks: [],
+      length: 0,
       subscribers: new Set(),
     }
     state().set(id, session)
@@ -150,9 +152,13 @@ export namespace Pty {
         ws.send(data)
       }
       if (open) return
-      session.buffer += data
-      if (session.buffer.length <= BUFFER_LIMIT) return
-      session.buffer = session.buffer.slice(-BUFFER_LIMIT)
+      session.chunks.push(data)
+      session.length += data.length
+      if (session.length <= BUFFER_LIMIT) return
+      // Drop oldest chunks until within limit
+      while (session.length > BUFFER_LIMIT && session.chunks.length > 1) {
+        session.length -= session.chunks.shift()!.length
+      }
     })
     ptyProcess.onExit(({ exitCode }) => {
       log.info("session exited", { id, exitCode })
@@ -220,16 +226,20 @@ export namespace Pty {
     }
     log.info("client connected to session", { id })
     session.subscribers.add(ws)
-    if (session.buffer) {
-      const buffer = session.buffer.length <= BUFFER_LIMIT ? session.buffer : session.buffer.slice(-BUFFER_LIMIT)
-      session.buffer = ""
+    if (session.length > 0) {
+      const chunks = session.chunks
+      session.chunks = []
+      session.length = 0
       try {
-        for (let i = 0; i < buffer.length; i += BUFFER_CHUNK) {
-          ws.send(buffer.slice(i, i + BUFFER_CHUNK))
+        for (const chunk of chunks) {
+          for (let i = 0; i < chunk.length; i += BUFFER_CHUNK) {
+            ws.send(chunk.slice(i, i + BUFFER_CHUNK))
+          }
         }
       } catch {
         session.subscribers.delete(ws)
-        session.buffer = buffer
+        session.chunks = chunks
+        session.length = chunks.reduce((sum, c) => sum + c.length, 0)
         ws.close()
         return
       }
