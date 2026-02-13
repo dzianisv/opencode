@@ -45,6 +45,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { Storage } from "../storage/storage"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -270,6 +271,61 @@ export namespace SessionPrompt {
     return
   }
 
+  async function loadMessages(
+    sessionID: string,
+    cached:
+      | {
+          order: string[]
+          map: Map<string, MessageV2.WithParts>
+        }
+      | undefined,
+  ) {
+    const order = (await Storage.list(["message", sessionID])).map((item) => item[2] as string).reverse()
+    if (!cached) {
+      const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
+      return {
+        messages,
+        cache: {
+          order,
+          map: new Map(order.map((id, index) => [id, messages[index]])),
+        },
+      }
+    }
+
+    const map = new Map<string, MessageV2.WithParts>()
+    for (const id of order) {
+      const existing = cached.map.get(id)
+      if (existing) {
+        map.set(id, existing)
+        continue
+      }
+      map.set(id, await MessageV2.get({ sessionID, messageID: id }))
+    }
+
+    return {
+      messages: order.map((id) => map.get(id)!).filter((msg): msg is MessageV2.WithParts => !!msg),
+      cache: { order, map },
+    }
+  }
+
+  function filterCompactedList(messages: MessageV2.WithParts[]) {
+    const result: MessageV2.WithParts[] = []
+    const completed = new Set<string>()
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      result.push(msg)
+      if (
+        msg.info.role === "user" &&
+        completed.has(msg.info.id) &&
+        msg.parts.some((part) => part.type === "compaction")
+      )
+        break
+      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish) completed.add(msg.info.parentID)
+    }
+    result.reverse()
+    return result
+  }
+
   export const LoopInput = z.object({
     sessionID: Identifier.schema("session"),
     resume_existing: z.boolean().optional(),
@@ -295,12 +351,20 @@ export namespace SessionPrompt {
     let step = 0
     const CROSS_MSG_DOOM_THRESHOLD = 5
     const recentDominant: string[] = []
+    let cache:
+      | {
+          order: string[]
+          map: Map<string, MessageV2.WithParts>
+        }
+      | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
-      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
+      const stored = await loadMessages(sessionID, cache)
+      cache = stored.cache
+      let msgs = filterCompactedList(stored.messages)
 
       let lastUser: MessageV2.User | undefined
       let lastAssistant: MessageV2.Assistant | undefined
