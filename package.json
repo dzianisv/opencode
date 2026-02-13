@@ -13,6 +13,10 @@
     "typecheck": "bun turbo typecheck",
     "prepare": "husky",
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+    "install": "./scripts/install-local.sh",
+>>>>>>> b21f98f6f (feat: add install script for local development builds)
     "random": "echo 'Random script'",
     "hello": "echo 'Hello World!'",
     "test": "echo 'do not run tests from root' && exit 1"
