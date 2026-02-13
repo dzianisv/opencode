@@ -18,6 +18,7 @@ import { Question } from "@/question"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const FLUSH_INTERVAL = 50
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -52,6 +53,52 @@ export namespace SessionProcessor {
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
             const stream = await LLM.stream(streamInput)
 
+            // Throttled flush state for text/reasoning deltas.
+            // ALL text is accumulated in arrays and joined only on flush
+            // (at most every FLUSH_INTERVAL ms) to avoid:
+            //   1. O(n²) string concatenation on part.text per token
+            //   2. Per-token Storage.write + Bus.publish serialization
+            const accumulated = new Map<string, { chunks: string[]; flushed: number }>()
+            let flushTimer: ReturnType<typeof setTimeout> | undefined
+
+            const scheduleFlush = (partID: string, delta: string) => {
+              const entry = accumulated.get(partID)
+              if (entry) entry.chunks.push(delta)
+              else accumulated.set(partID, { chunks: [delta], flushed: 0 })
+              if (!flushTimer) {
+                flushTimer = setTimeout(flushAllDeltas, FLUSH_INTERVAL)
+              }
+            }
+
+            const flushAllDeltas = () => {
+              flushTimer = undefined
+              for (const [partID, entry] of accumulated) {
+                if (entry.flushed >= entry.chunks.length) continue
+                const delta = entry.chunks.slice(entry.flushed).join("")
+                entry.flushed = entry.chunks.length
+                const text = entry.chunks.join("")
+
+                if (currentText?.id === partID) {
+                  currentText.text = text
+                  Session.updatePart({ part: currentText, delta })
+                  continue
+                }
+                const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
+                if (reasoning) {
+                  reasoning.text = text
+                  Session.updatePart({ part: reasoning, delta })
+                }
+              }
+            }
+
+            const finalizePart = (partID: string) => {
+              const entry = accumulated.get(partID)
+              if (!entry || entry.chunks.length === 0) return
+              const text = entry.chunks.join("")
+              accumulated.delete(partID)
+              return text
+            }
+
             for await (const value of stream.fullStream) {
               input.abort.throwIfAborted()
               switch (value.type) {
@@ -79,15 +126,16 @@ export namespace SessionProcessor {
                 case "reasoning-delta":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
-                    part.text += value.text
                     if (value.providerMetadata) part.metadata = value.providerMetadata
-                    if (part.text) await Session.updatePart({ part, delta: value.text })
+                    scheduleFlush(part.id, value.text)
                   }
                   break
 
                 case "reasoning-end":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
+                    const text = finalizePart(part.id)
+                    if (text) part.text = text
                     part.text = part.text.trimEnd()
 
                     part.time = {
@@ -292,18 +340,15 @@ export namespace SessionProcessor {
 
                 case "text-delta":
                   if (currentText) {
-                    currentText.text += value.text
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
-                    if (currentText.text)
-                      await Session.updatePart({
-                        part: currentText,
-                        delta: value.text,
-                      })
+                    scheduleFlush(currentText.id, value.text)
                   }
                   break
 
                 case "text-end":
                   if (currentText) {
+                    const text = finalizePart(currentText.id)
+                    if (text) currentText.text = text
                     currentText.text = currentText.text.trimEnd()
                     const textOutput = await Plugin.trigger(
                       "experimental.text.complete",
@@ -336,6 +381,9 @@ export namespace SessionProcessor {
               }
               if (needsCompaction) break
             }
+            // Flush any remaining throttled deltas before exiting
+            if (flushTimer) clearTimeout(flushTimer)
+            flushAllDeltas()
           } catch (e: any) {
             log.error("process", {
               error: e,
