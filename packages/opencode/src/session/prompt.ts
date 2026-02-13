@@ -290,6 +290,8 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
+    const CROSS_MSG_DOOM_THRESHOLD = 4
+    const recentToolOnly: string[] = []
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -671,7 +673,7 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        tools: isLastStep ? {} : tools,
         model,
         toolChoice: format.type === "json_schema" ? "required" : undefined,
       })
@@ -709,6 +711,36 @@ export namespace SessionPrompt {
           auto: true,
         })
       }
+
+      // Cross-message doom loop detection: track whether each iteration
+      // only called a single tool type (e.g. repeated todowrite across turns)
+      const iterParts = await MessageV2.parts(processor.message.id)
+      const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+      const uniqueTools = new Set(iterTools.map((p) => p.tool))
+      if (uniqueTools.size === 1) {
+        recentToolOnly.push(uniqueTools.values().next().value!)
+      } else {
+        recentToolOnly.length = 0
+      }
+      if (recentToolOnly.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const repeatedTool = recentToolOnly[0]
+        if (recentToolOnly.every((t) => t === repeatedTool)) {
+          recentToolOnly.length = 0
+          const agent = await Agent.get(lastUser.agent)
+          await PermissionNext.ask({
+            permission: "doom_loop",
+            patterns: [repeatedTool],
+            sessionID,
+            metadata: {
+              tool: repeatedTool,
+              input: { reason: `${repeatedTool} called exclusively for ${CROSS_MSG_DOOM_THRESHOLD} consecutive turns` },
+            },
+            always: [repeatedTool],
+            ruleset: agent.permission,
+          })
+        }
+      }
+
       continue
     }
     SessionCompaction.prune({ sessionID })
