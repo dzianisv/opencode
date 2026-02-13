@@ -61,6 +61,9 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  const MAX_METADATA_LENGTH = 30_000
+  const MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 
   const state = Instance.state(
     () => {
@@ -1638,50 +1641,45 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const chunks: Buffer[] = []
     let size = 0
-    let preview = ""
-    const MAX_OUTPUT = 1024 * 1024
+    const previewParts: string[] = []
+    let previewLen = 0
+    let previewDirty = false
+    let metadataTimer: ReturnType<typeof setTimeout> | undefined
+    const MAX_PREVIEW = MAX_METADATA_LENGTH
 
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      chunks.push(chunk)
-      size += chunk.length
-      while (size > MAX_OUTPUT && chunks.length > 1) {
-        size -= chunks.shift()!.length
-      }
-      if (preview.length < MAX_OUTPUT) {
-        preview += chunk.toString()
-        if (preview.length > MAX_OUTPUT) {
-          preview = preview.slice(0, MAX_OUTPUT) + "\n\n..."
-        }
-      }
+    const flushPreview = () => {
+      metadataTimer = undefined
+      if (!previewDirty) return
+      previewDirty = false
+      const text =
+        previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
       if (part.state.status === "running") {
         part.state.metadata = {
-          output: preview,
+          output: text,
           description: "",
         }
         Session.updatePart(part)
       }
-    })
+    }
 
-    proc.stderr?.on("data", (chunk: Buffer) => {
+    const appendChunk = (chunk: Buffer) => {
       chunks.push(chunk)
       size += chunk.length
-      while (size > MAX_OUTPUT && chunks.length > 1) {
+      while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
         size -= chunks.shift()!.length
       }
-      if (preview.length < MAX_OUTPUT) {
-        preview += chunk.toString()
-        if (preview.length > MAX_OUTPUT) {
-          preview = preview.slice(0, MAX_OUTPUT) + "\n\n..."
-        }
+      if (previewLen < MAX_PREVIEW) {
+        previewParts.push(chunk.toString())
+        previewLen += chunk.length
       }
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: preview,
-          description: "",
-        }
-        Session.updatePart(part)
+      previewDirty = true
+      if (!metadataTimer) {
+        metadataTimer = setTimeout(flushPreview, 100)
       }
-    })
+    }
+
+    proc.stdout?.on("data", appendChunk)
+    proc.stderr?.on("data", appendChunk)
 
     let aborted = false
     let exited = false
@@ -1708,11 +1706,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     })
 
+    if (metadataTimer) clearTimeout(metadataTimer)
+    flushPreview()
+
     let output = Buffer.concat(chunks).toString()
 
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
     }
+
+    const finalPreview =
+      previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
+
     msg.time.completed = Date.now()
     await Session.updateMessage(msg)
     if (part.state.status === "running") {
@@ -1725,7 +1730,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input: part.state.input,
         title: "",
         metadata: {
-          output: preview,
+          output: finalPreview,
           description: "",
         },
         output,
