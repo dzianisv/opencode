@@ -359,8 +359,8 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
-    const CROSS_MSG_DOOM_THRESHOLD = 5
-    const recentDominant: string[] = []
+    const CROSS_MSG_DOOM_THRESHOLD = 4
+    const recentToolOnly: string[] = []
     let cache:
       | {
           order: string[]
@@ -790,21 +790,32 @@ export namespace SessionPrompt {
         })
       }
 
+      // Cross-message doom loop detection: track whether each iteration
+      // only called a single tool type (e.g. repeated todowrite across turns)
       const iterParts = await MessageV2.parts(processor.message.id)
       const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
-      if (iterTools.length > 0) {
-        const counts = new Map<string, number>()
-        for (const t of iterTools) counts.set(t.tool, (counts.get(t.tool) ?? 0) + 1)
-        let dominant = iterTools[0].tool
-        for (const [name, count] of counts) if (count > (counts.get(dominant) ?? 0)) dominant = name
-        recentDominant.push(dominant)
+      const uniqueTools = new Set(iterTools.map((p) => p.tool))
+      if (uniqueTools.size === 1) {
+        recentToolOnly.push(uniqueTools.values().next().value!)
+      } else {
+        recentToolOnly.length = 0
       }
-      if (recentDominant.length >= CROSS_MSG_DOOM_THRESHOLD) {
-        const candidate = recentDominant[recentDominant.length - 1]
-        const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
-        if (tail.every((t) => t === candidate)) {
-          log.info("cross-message doom loop detected, stopping", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
-          break
+      if (recentToolOnly.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const repeatedTool = recentToolOnly[0]
+        if (recentToolOnly.every((t) => t === repeatedTool)) {
+          recentToolOnly.length = 0
+          const agent = await Agent.get(lastUser.agent)
+          await PermissionNext.ask({
+            permission: "doom_loop",
+            patterns: [repeatedTool],
+            sessionID,
+            metadata: {
+              tool: repeatedTool,
+              input: { reason: `${repeatedTool} called exclusively for ${CROSS_MSG_DOOM_THRESHOLD} consecutive turns` },
+            },
+            always: [repeatedTool],
+            ruleset: agent.permission,
+          })
         }
       }
 
