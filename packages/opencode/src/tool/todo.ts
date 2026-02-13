@@ -20,9 +20,12 @@ export const TodoWriteTool = Tool.define("todowrite", {
       sessionID: ctx.sessionID,
       todos: params.todos,
     })
+    const pending = params.todos.filter((x) => x.status === "pending").length
+    const progress = params.todos.filter((x) => x.status === "in_progress").length
+    const done = params.todos.filter((x) => x.status === "completed").length
     return {
-      title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,
-      output: JSON.stringify(params.todos, null, 2),
+      title: `${pending + progress} todos`,
+      output: `Updated: ${done} completed, ${progress} in progress, ${pending} pending`,
       metadata: {
         todos: params.todos,
       },
