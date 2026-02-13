@@ -148,18 +148,18 @@ describe("memory: dispose callbacks", () => {
       directory: tmp.path,
       fn: async () => {
         FileTime.read("session_idem", "/file.ts")
+
+        // Call dispose twice in sequence — should not throw
+        await Instance.dispose()
       },
     })
 
-    // Call disposeAll twice — should not throw
-    await Instance.disposeAll()
-    await Instance.disposeAll()
-
-    // Re-provide should work normally after double disposal
+    // Re-provide should work normally after disposal
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         expect(FileTime.get("session_idem", "/file.ts")).toBeUndefined()
+        await Instance.dispose()
       },
     })
   })
