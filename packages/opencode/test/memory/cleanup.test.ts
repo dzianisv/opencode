@@ -83,14 +83,19 @@ describe("memory: cleanup", () => {
         'process.on("SIGTERM", () => graceful("SIGTERM"));',
         'process.on("SIGINT", () => graceful("SIGINT"));',
         'process.on("SIGHUP", () => graceful("SIGHUP"));',
+        // Signal readiness by writing to stdout
+        'process.stdout.write("ready\\n");',
         "setTimeout(() => process.exit(1), 10000);",
       ].join("\n"),
     )
 
     const proc = Bun.spawn(["bun", "run", script], { stdio: ["ignore", "pipe", "pipe"] })
 
-    // Give it time to register handlers
-    await Bun.sleep(500)
+    // Wait for the script to signal it has registered handlers
+    const reader = proc.stdout.getReader()
+    const { value } = await reader.read()
+    const output = new TextDecoder().decode(value)
+    expect(output.trim()).toBe("ready")
 
     // Send SIGTERM (signal 15)
     proc.kill(15)
