@@ -45,8 +45,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
-import { Database, desc, eq } from "../storage/db"
-import { MessageTable } from "./session.sql"
+import { Storage } from "../storage/storage"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -281,16 +280,7 @@ export namespace SessionPrompt {
         }
       | undefined,
   ) {
-    const order = Database.use((db) =>
-      db
-        .select({ id: MessageTable.id })
-        .from(MessageTable)
-        .where(eq(MessageTable.session_id, sessionID))
-        .orderBy(desc(MessageTable.time_created))
-        .all(),
-    ).map((row) => row.id)
-    // order is newest-first from DB; reverse so oldest is first
-    order.reverse()
+    const order = (await Storage.list(["message", sessionID])).map((item) => item[2] as string).reverse()
     if (!cached) {
       const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
       return {
@@ -792,32 +782,44 @@ export namespace SessionPrompt {
 
       const iterParts = await MessageV2.parts(processor.message.id)
       const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
-      if (iterTools.length > 0) {
-        const counts = new Map<string, number>()
-        for (const t of iterTools) counts.set(t.tool, (counts.get(t.tool) ?? 0) + 1)
-        let dominant = iterTools[0].tool
-        for (const [name, count] of counts) if (count > (counts.get(dominant) ?? 0)) dominant = name
-        recentDominant.push(dominant)
+      const toolOnly = iterParts.length > 0 && iterTools.length === iterParts.length
+      if (!toolOnly) {
+        recentToolOnly.length = 0
       }
-      if (recentDominant.length >= CROSS_MSG_DOOM_THRESHOLD) {
-        const candidate = recentDominant[recentDominant.length - 1]
-        const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
-        if (tail.every((t) => t === candidate)) {
-          log.info("cross-message doom loop detected", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
-          recentDominant.length = 0
-          const agent = await Agent.get(lastUser.agent)
-          await PermissionNext.ask({
-            permission: "doom_loop",
-            patterns: [candidate],
-            sessionID,
-            metadata: {
-              tool: candidate,
-              input: { reason: `${candidate} was the dominant tool for ${CROSS_MSG_DOOM_THRESHOLD} consecutive turns` },
-            },
-            always: [candidate],
-            ruleset: agent.permission,
-          })
+      if (toolOnly) {
+        const toolName = iterTools[0]?.tool
+        if (!toolName) {
+          recentToolOnly.length = 0
         }
+        if (toolName) {
+          const sameTool = iterTools.every((tool) => tool.tool === toolName)
+          if (!sameTool) {
+            recentToolOnly.length = 0
+          }
+          if (sameTool) {
+            if (recentToolOnly.length && recentToolOnly[recentToolOnly.length - 1] !== toolName) {
+              recentToolOnly.length = 0
+            }
+            recentToolOnly.push(toolName)
+          }
+        }
+      }
+      if (recentToolOnly.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const candidate = recentToolOnly[recentToolOnly.length - 1]
+        log.info("cross-message doom loop detected", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
+        recentToolOnly.length = 0
+        const agent = await Agent.get(lastUser.agent)
+        await PermissionNext.ask({
+          permission: "doom_loop",
+          patterns: [candidate],
+          sessionID,
+          metadata: {
+            tool: candidate,
+            input: { reason: `${candidate} was used in ${CROSS_MSG_DOOM_THRESHOLD} consecutive tool-only turns` },
+          },
+          always: [candidate],
+          ruleset: agent.permission,
+        })
       }
 
       continue
