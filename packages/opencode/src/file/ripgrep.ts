@@ -247,7 +247,7 @@ export namespace Ripgrep {
 
     const reader = proc.stdout.getReader()
     const decoder = new TextDecoder()
-    let buffer = ""
+    let remainder = ""
 
     try {
       while (true) {
@@ -256,17 +256,17 @@ export namespace Ripgrep {
         const { done, value } = await reader.read()
         if (done) break
 
-        buffer += decoder.decode(value, { stream: true })
+        const chunk = decoder.decode(value, { stream: true })
         // Handle both Unix (\n) and Windows (\r\n) line endings
-        const lines = buffer.split(/\r?\n/)
-        buffer = lines.pop() || ""
+        const lines = (remainder + chunk).split(/\r?\n/)
+        remainder = lines.pop() || ""
 
         for (const line of lines) {
           if (line) yield line
         }
       }
 
-      if (buffer) yield buffer
+      if (remainder) yield remainder
     } finally {
       reader.releaseLock()
       await proc.exited
