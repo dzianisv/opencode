@@ -109,8 +109,8 @@ export namespace SessionProcessor {
         while (true) {
           let idleTriggered = false
           let timer: ReturnType<typeof setTimeout> | undefined
-          let tick: ReturnType<typeof setTimeout> | undefined
-          let flush = () => {}
+          let flushTimer: ReturnType<typeof setTimeout> | undefined
+          let flushAllDeltas = () => {}
           try {
             const idleController = new AbortController()
             let currentText: MessageV2.TextPart | undefined
@@ -133,7 +133,6 @@ export namespace SessionProcessor {
               abort: AbortSignal.any([streamInput.abort, idleController.signal]),
             })
             resetIdle()
-
             // Throttled flush state for text/reasoning deltas.
             // ALL text is accumulated in arrays and joined only on flush
             // (at most every FLUSH_INTERVAL ms) to avoid:
@@ -145,13 +144,13 @@ export namespace SessionProcessor {
               const entry = accumulated.get(partID)
               if (entry) entry.chunks.push(delta)
               else accumulated.set(partID, { chunks: [delta], flushed: 0 })
-              if (!tick) {
-                tick = setTimeout(flush, FLUSH_INTERVAL)
+              if (!flushTimer) {
+                flushTimer = setTimeout(flushAllDeltas, FLUSH_INTERVAL)
               }
             }
 
-            flush = () => {
-              tick = undefined
+            flushAllDeltas = () => {
+              flushTimer = undefined
               for (const [partID, entry] of accumulated) {
                 if (entry.flushed >= entry.chunks.length) continue
                 const delta = entry.chunks.slice(entry.flushed).join("")
@@ -160,13 +159,13 @@ export namespace SessionProcessor {
 
                 if (currentText?.id === partID) {
                   currentText.text = text
-                  Session.updatePart(currentText)
+                  Session.updatePart({ part: currentText, delta })
                   continue
                 }
                 const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
                 if (reasoning) {
                   reasoning.text = text
-                  Session.updatePart(reasoning)
+                  Session.updatePart({ part: reasoning, delta })
                 }
               }
             }
@@ -471,12 +470,12 @@ export namespace SessionProcessor {
               if (needsCompaction) break
             }
             // Flush any remaining throttled deltas before exiting
-            if (tick) clearTimeout(tick)
-            flush()
+            if (flushTimer) clearTimeout(flushTimer)
+            flushAllDeltas()
             clearIdle()
           } catch (e: any) {
-            if (tick) clearTimeout(tick)
-            flush()
+            if (flushTimer) clearTimeout(flushTimer)
+            flushAllDeltas()
             if (timer) clearTimeout(timer)
             log.error("process", {
               error: e,
