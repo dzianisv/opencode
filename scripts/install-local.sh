@@ -45,6 +45,11 @@ fi
 cp "$DIST_BINARY" "$INSTALL_PATH"
 chmod +x "$INSTALL_PATH"
 
+# Re-sign on macOS (cp invalidates adhoc linker signatures)
+if [ "$OS" = "darwin" ]; then
+    codesign --force --sign - "$INSTALL_PATH" 2>/dev/null || true
+fi
+
 echo ""
 echo "✅ opencode installed successfully!"
 echo ""
