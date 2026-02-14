@@ -268,6 +268,8 @@ export namespace SessionPrompt {
     using _ = defer(() => cancel(sessionID))
 
     let step = 0
+    const CROSS_MSG_DOOM_THRESHOLD = 5
+    const recentDominant: string[] = []
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -514,7 +516,7 @@ export namespace SessionPrompt {
 
       // normal processing
       const agent = await Agent.get(lastUser.agent)
-      const maxSteps = agent.steps ?? Infinity
+      const maxSteps = agent.steps ?? 200
       const isLastStep = step >= maxSteps
       msgs = await insertReminders({
         messages: msgs,
@@ -614,7 +616,7 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        tools: isLastStep ? {} : tools,
         model,
       })
       if (result === "stop") break
@@ -626,6 +628,25 @@ export namespace SessionPrompt {
           auto: true,
         })
       }
+
+      const iterParts = await MessageV2.parts(processor.message.id)
+      const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+      if (iterTools.length > 0) {
+        const counts = new Map<string, number>()
+        for (const t of iterTools) counts.set(t.tool, (counts.get(t.tool) ?? 0) + 1)
+        let dominant = iterTools[0].tool
+        for (const [name, count] of counts) if (count > (counts.get(dominant) ?? 0)) dominant = name
+        recentDominant.push(dominant)
+      }
+      if (recentDominant.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const candidate = recentDominant[recentDominant.length - 1]
+        const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
+        if (tail.every((t) => t === candidate)) {
+          log.info("cross-message doom loop detected, stopping", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
+          break
+        }
+      }
+
       continue
     }
     SessionCompaction.prune({ sessionID })
