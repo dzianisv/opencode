@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install opencode from local build
-# Builds the binary and installs it to ~/.bun/bin/opencode
+# Finds the existing opencode install location and replaces it,
+# or installs to ~/.opencode/bin/opencode by default.
 
 set -e
 
@@ -30,12 +31,19 @@ if [ ! -f "$DIST_BINARY" ]; then
     exit 1
 fi
 
-# Install to bun bin directory (replacing any existing symlink or binary)
-BUN_BIN="${BUN_INSTALL:-$HOME/.bun}/bin"
-INSTALL_PATH="$BUN_BIN/opencode"
+# Find existing opencode location or default to ~/.opencode/bin
+EXISTING=$(command -v opencode 2>/dev/null || true)
+if [ -n "$EXISTING" ]; then
+    # Resolve symlinks to get the real path
+    INSTALL_PATH=$(realpath "$EXISTING" 2>/dev/null || readlink -f "$EXISTING" 2>/dev/null || echo "$EXISTING")
+    INSTALL_DIR=$(dirname "$INSTALL_PATH")
+else
+    INSTALL_DIR="$HOME/.opencode/bin"
+    INSTALL_PATH="$INSTALL_DIR/opencode"
+fi
 
 echo "📋 Installing to $INSTALL_PATH..."
-mkdir -p "$BUN_BIN"
+mkdir -p "$INSTALL_DIR"
 
 # Remove existing symlink if present
 if [ -L "$INSTALL_PATH" ]; then
@@ -47,6 +55,7 @@ chmod +x "$INSTALL_PATH"
 
 # Re-sign on macOS (cp invalidates adhoc linker signatures)
 if [ "$OS" = "darwin" ]; then
+    echo "🔏 Signing binary for macOS..."
     codesign --force --sign - "$INSTALL_PATH" 2>/dev/null || true
 fi
 
@@ -60,9 +69,9 @@ echo "Version: $VERSION"
 echo "Location: $INSTALL_PATH"
 echo ""
 
-# Check if bun bin is in PATH
-if ! echo "$PATH" | grep -q "$BUN_BIN"; then
-    echo "⚠️  Note: $BUN_BIN may not be in your PATH"
+# Check if install dir is in PATH
+if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
+    echo "⚠️  Note: $INSTALL_DIR may not be in your PATH"
     echo "   Add this to your shell profile:"
-    echo "   export PATH=\"$BUN_BIN:\$PATH\""
+    echo "   export PATH=\"$INSTALL_DIR:\$PATH\""
 fi

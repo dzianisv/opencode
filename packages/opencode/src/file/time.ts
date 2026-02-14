@@ -1,6 +1,7 @@
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { Flag } from "../flag/flag"
+import { Filesystem } from "../util/filesystem"
 
 export namespace FileTime {
   const log = Log.create({ service: "file.time" })
@@ -8,18 +9,26 @@ export namespace FileTime {
   // All tools that overwrite existing files should run their
   // assert/read/write/update sequence inside withLock(filepath, ...)
   // so concurrent writes to the same file are serialized.
-  export const state = Instance.state(() => {
-    const read: {
-      [sessionID: string]: {
-        [path: string]: Date | undefined
+  export const state = Instance.state(
+    () => {
+      const read: {
+        [sessionID: string]: {
+          [path: string]: Date | undefined
+        }
+      } = {}
+      const locks = new Map<string, Promise<void>>()
+      return {
+        read,
+        locks,
       }
-    } = {}
-    const locks = new Map<string, Promise<void>>()
-    return {
-      read,
-      locks,
-    }
-  })
+    },
+    async (current) => {
+      for (const key of Object.keys(current.read)) {
+        delete current.read[key]
+      }
+      current.locks.clear()
+    },
+  )
 
   export function read(sessionID: string, file: string) {
     log.info("read", { sessionID, file })
@@ -59,10 +68,10 @@ export namespace FileTime {
 
     const time = get(sessionID, filepath)
     if (!time) throw new Error(`You must read file ${filepath} before overwriting it. Use the Read tool first`)
-    const stats = await Bun.file(filepath).stat()
-    if (stats.mtime.getTime() > time.getTime()) {
+    const mtime = Filesystem.stat(filepath)?.mtime
+    if (mtime && mtime.getTime() > time.getTime()) {
       throw new Error(
-        `File ${filepath} has been modified since it was last read.\nLast modification: ${stats.mtime.toISOString()}\nLast read: ${time.toISOString()}\n\nPlease read the file again before modifying it.`,
+        `File ${filepath} has been modified since it was last read.\nLast modification: ${mtime.toISOString()}\nLast read: ${time.toISOString()}\n\nPlease read the file again before modifying it.`,
       )
     }
   }
