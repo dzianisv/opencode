@@ -81,6 +81,30 @@ Long-running sessions would leak memory and leave zombie processes.
 
 ---
 
+### Fork Fixes (vs upstream `anomalyco/opencode`)
+
+This fork includes the following stability fixes not yet in upstream:
+
+**Infinite Loop / Doom Loop Detection** ([#5](https://github.com/dzianisv/opencode/issues/5), [PR #6](https://github.com/dzianisv/opencode/pull/6))
+
+- **Root cause fix**: `TodoWrite` tool output changed from returning the full todo list JSON (which the model re-ingested and acted on) to a short summary string, breaking the feedback loop
+- Cross-message doom loop detection: tracks dominant tool calls across assistant turns and breaks the session after 5 consecutive single-tool turns
+- Hard step limit (`maxSteps: 200`) to prevent runaway sessions
+- Removed `isLastStep` tool‐removal guard (was dead code due to `maxSteps: Infinity`)
+
+**Memory Leak Fixes**
+
+- Eliminated O(n^2) string concatenation in `prompt.ts`, `ripgrep.ts`, and `webfetch.ts`
+- Eliminated per-token O(n^2) allocations in LLM streaming (`llm.ts`)
+- Added heap limit configuration in build
+- Added memory leak regression tests (abort-leak, cleanup, dispose)
+
+**macOS Build Fix**
+
+- `install-local.sh`: re-sign binaries after `cp` on macOS (`codesign --force --sign -`) to prevent Gatekeeper SIGKILL (exit 137)
+
+---
+
 ### Installation
 
 ```bash
