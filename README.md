@@ -5,10 +5,10 @@ Patches on top of [sst/opencode](https://github.com/sst/opencode) fixing two cri
 ### Install
 
 ```bash
-git clone https://github.com/dzianisv/opencode.git && cd opencode && bun install && bash scripts/install-local.sh
+curl -fsSL https://raw.githubusercontent.com/dzianisv/opencode/main/scripts/install.sh | bash
 ```
 
-Requires [bun](https://bun.sh). Installs the binary to your existing `opencode` location or `~/.opencode/bin/`.
+Requires `git`. Installs [bun](https://bun.sh) automatically if missing. Clones, builds, and installs to your existing `opencode` location or `~/.opencode/bin/`.
 
 ### Infinite loop fix ([#5](https://github.com/dzianisv/opencode/issues/5), upstream [#13511](https://github.com/anomalyco/opencode/issues/13511))
 
