@@ -53,7 +53,7 @@ fi
 cp "$DIST_BINARY" "$INSTALL_PATH"
 chmod +x "$INSTALL_PATH"
 
-# Sign the binary on macOS to prevent Gatekeeper from killing it
+# Re-sign on macOS (cp invalidates adhoc linker signatures)
 if [ "$OS" = "darwin" ]; then
     echo "🔏 Signing binary for macOS..."
     codesign --force --sign - "$INSTALL_PATH" 2>/dev/null || true
