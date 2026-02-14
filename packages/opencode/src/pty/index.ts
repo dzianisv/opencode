@@ -4,16 +4,43 @@ import { type IPty } from "bun-pty"
 import z from "zod"
 import { Identifier } from "../id/id"
 import { Log } from "../util/log"
-import type { WSContext } from "hono/ws"
 import { Instance } from "../project/instance"
 import { lazy } from "@opencode-ai/util/lazy"
 import { Shell } from "@/shell/shell"
+import { Plugin } from "@/plugin"
 
 export namespace Pty {
   const log = Log.create({ service: "pty" })
 
   const BUFFER_LIMIT = 1024 * 1024 * 2
   const BUFFER_CHUNK = 64 * 1024
+  const encoder = new TextEncoder()
+
+  type Socket = {
+    readyState: number
+    send: (data: string | Uint8Array<ArrayBuffer> | ArrayBuffer) => void
+    close: (code?: number, reason?: string) => void
+  }
+
+  const sockets = new WeakMap<object, number>()
+  let socketCounter = 0
+
+  const tagSocket = (ws: Socket) => {
+    if (!ws || typeof ws !== "object") return
+    const next = (socketCounter = (socketCounter + 1) % Number.MAX_SAFE_INTEGER)
+    sockets.set(ws, next)
+    return next
+  }
+
+  // WebSocket control frame: 0x00 + UTF-8 JSON (currently { cursor }).
+  const meta = (cursor: number) => {
+    const json = JSON.stringify({ cursor })
+    const bytes = encoder.encode(json)
+    const out = new Uint8Array(bytes.length + 1)
+    out[0] = 0
+    out.set(bytes, 1)
+    return out
+  }
 
   const pty = lazy(async () => {
     const { spawn } = await import("bun-pty")
@@ -66,8 +93,11 @@ export namespace Pty {
   interface ActiveSession {
     info: Info
     process: IPty
-    buffer: string
-    subscribers: Set<WSContext>
+    chunks: string[]
+    bufferLen: number
+    bufferCursor: number
+    cursor: number
+    subscribers: Map<Socket, number>
   }
 
   const state = Instance.state(
@@ -77,8 +107,12 @@ export namespace Pty {
         try {
           session.process.kill()
         } catch {}
-        for (const ws of session.subscribers) {
-          ws.close()
+        for (const ws of session.subscribers.keys()) {
+          try {
+            ws.close()
+          } catch {
+            // ignore
+          }
         }
       }
       sessions.clear()
@@ -102,9 +136,11 @@ export namespace Pty {
     }
 
     const cwd = input.cwd || Instance.directory
+    const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
     const env = {
       ...process.env,
       ...input.env,
+      ...shellEnv.env,
       TERM: "xterm-256color",
       OPENCODE_TERMINAL: "1",
     } as Record<string, string>
@@ -135,36 +171,54 @@ export namespace Pty {
     const session: ActiveSession = {
       info,
       process: ptyProcess,
-      buffer: "",
-      subscribers: new Set(),
+      chunks: [],
+      bufferLen: 0,
+      bufferCursor: 0,
+      cursor: 0,
+      subscribers: new Map(),
     }
     state().set(id, session)
     ptyProcess.onData((data) => {
-      let open = false
-      for (const ws of session.subscribers) {
+      session.cursor += data.length
+
+      for (const [ws, id] of session.subscribers) {
         if (ws.readyState !== 1) {
           session.subscribers.delete(ws)
           continue
         }
-        open = true
-        ws.send(data)
+        if (typeof ws === "object" && sockets.get(ws) !== id) {
+          session.subscribers.delete(ws)
+          continue
+        }
+        try {
+          ws.send(data)
+        } catch {
+          session.subscribers.delete(ws)
+        }
       }
-      if (open) return
-      session.buffer += data
-      if (session.buffer.length <= BUFFER_LIMIT) return
-      session.buffer = session.buffer.slice(-BUFFER_LIMIT)
+
+      session.chunks.push(data)
+      session.bufferLen += data.length
+      if (session.bufferLen <= BUFFER_LIMIT) return
+      // Drop oldest chunks until within limit
+      while (session.bufferLen > BUFFER_LIMIT && session.chunks.length > 1) {
+        const dropped = session.chunks.shift()!
+        session.bufferLen -= dropped.length
+        session.bufferCursor += dropped.length
+      }
     })
     ptyProcess.onExit(({ exitCode }) => {
       log.info("session exited", { id, exitCode })
       session.info.status = "exited"
-      for (const ws of session.subscribers) {
-        ws.close()
+      for (const ws of session.subscribers.keys()) {
+        try {
+          ws.close()
+        } catch {
+          // ignore
+        }
       }
       session.subscribers.clear()
       Bus.publish(Event.Exited, { id, exitCode })
-      for (const ws of session.subscribers) {
-        ws.close()
-      }
       state().delete(id)
     })
     Bus.publish(Event.Created, { info })
@@ -191,9 +245,14 @@ export namespace Pty {
     try {
       session.process.kill()
     } catch {}
-    for (const ws of session.subscribers) {
-      ws.close()
+    for (const ws of session.subscribers.keys()) {
+      try {
+        ws.close()
+      } catch {
+        // ignore
+      }
     }
+    session.subscribers.clear()
     state().delete(id)
     Bus.publish(Event.Deleted, { id })
   }
@@ -212,28 +271,49 @@ export namespace Pty {
     }
   }
 
-  export function connect(id: string, ws: WSContext) {
+  export function connect(id: string, ws: Socket, cursor?: number) {
     const session = state().get(id)
     if (!session) {
       ws.close()
       return
     }
     log.info("client connected to session", { id })
-    session.subscribers.add(ws)
-    if (session.buffer) {
-      const buffer = session.buffer.length <= BUFFER_LIMIT ? session.buffer : session.buffer.slice(-BUFFER_LIMIT)
-      session.buffer = ""
+
+    const start = session.bufferCursor
+    const end = session.cursor
+
+    const from =
+      cursor === -1 ? end : typeof cursor === "number" && Number.isSafeInteger(cursor) ? Math.max(0, cursor) : 0
+
+    const data = (() => {
+      if (session.bufferLen === 0) return ""
+      if (from >= end) return ""
+      const offset = Math.max(0, from - start)
+      if (offset >= session.bufferLen) return ""
+      const joined = session.chunks.join("")
+      return joined.slice(offset)
+    })()
+
+    if (data) {
       try {
-        for (let i = 0; i < buffer.length; i += BUFFER_CHUNK) {
-          ws.send(buffer.slice(i, i + BUFFER_CHUNK))
+        for (let i = 0; i < data.length; i += BUFFER_CHUNK) {
+          ws.send(data.slice(i, i + BUFFER_CHUNK))
         }
       } catch {
-        session.subscribers.delete(ws)
-        session.buffer = buffer
         ws.close()
         return
       }
     }
+
+    try {
+      ws.send(meta(end))
+    } catch {
+      ws.close()
+      return
+    }
+
+    const socketId = tagSocket(ws)
+    if (typeof socketId === "number") session.subscribers.set(ws, socketId)
     return {
       onMessage: (message: string | ArrayBuffer) => {
         session.process.write(String(message))

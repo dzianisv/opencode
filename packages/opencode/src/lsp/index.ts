@@ -3,7 +3,7 @@ import { Bus } from "@/bus"
 import { Log } from "../util/log"
 import { LSPClient } from "./client"
 import path from "path"
-import { pathToFileURL } from "url"
+import { pathToFileURL, fileURLToPath } from "url"
 import { LSPServer } from "./server"
 import z from "zod"
 import { Config } from "../config/config"
@@ -116,6 +116,7 @@ export namespace LSP {
                 cwd: root,
                 env: {
                   ...process.env,
+                  NODE_OPTIONS: [process.env["NODE_OPTIONS"], "--max-old-space-size=512"].filter(Boolean).join(" "),
                   ...item.env,
                 },
               }),
@@ -369,7 +370,7 @@ export namespace LSP {
   }
 
   export async function documentSymbol(uri: string) {
-    const file = new URL(uri).pathname
+    const file = fileURLToPath(uri)
     return run(file, (client) =>
       client.connection
         .sendRequest("textDocument/documentSymbol", {

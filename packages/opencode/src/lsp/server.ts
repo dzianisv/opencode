@@ -11,6 +11,18 @@ import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { Archive } from "../util/archive"
 
+const NODE_HEAP_LIMIT_MB = 512
+function lspEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const existing = process.env["NODE_OPTIONS"] ?? ""
+  const limit = `--max-old-space-size=${NODE_HEAP_LIMIT_MB}`
+  const options = existing.includes("--max-old-space-size") ? existing : existing ? `${existing} ${limit}` : limit
+  return {
+    ...process.env,
+    NODE_OPTIONS: options,
+    ...extra,
+  }
+}
+
 export namespace LSPServer {
   const log = Log.create({ service: "lsp.server" })
   const pathExists = async (p: string) =>
@@ -374,7 +386,7 @@ export namespace LSPServer {
         log.info("installing gopls")
         const proc = Bun.spawn({
           cmd: ["go", "install", "golang.org/x/tools/gopls@latest"],
-          env: { ...process.env, GOBIN: Global.Path.bin },
+          env: lspEnv({ GOBIN: Global.Path.bin }),
           stdout: "pipe",
           stderr: "pipe",
           stdin: "pipe",
@@ -732,7 +744,7 @@ export namespace LSPServer {
 
   export const CSharp: Info = {
     id: "csharp",
-    root: NearestRoot([".sln", ".csproj", "global.json"]),
+    root: NearestRoot([".slnx", ".sln", ".csproj", "global.json"]),
     extensions: [".cs"],
     async spawn(root) {
       let bin = Bun.which("csharp-ls", {
@@ -772,7 +784,7 @@ export namespace LSPServer {
 
   export const FSharp: Info = {
     id: "fsharp",
-    root: NearestRoot([".sln", ".fsproj", "global.json"]),
+    root: NearestRoot([".slnx", ".sln", ".fsproj", "global.json"]),
     extensions: [".fs", ".fsi", ".fsx", ".fsscript"],
     async spawn(root) {
       let bin = Bun.which("fsautocomplete", {
@@ -1206,6 +1218,7 @@ export namespace LSPServer {
         process: spawn(
           java,
           [
+            `-Xmx${NODE_HEAP_LIMIT_MB}m`,
             "-jar",
             launcherJar,
             "-configuration",
@@ -1924,9 +1937,7 @@ export namespace LSPServer {
       return {
         process: spawn(nixd, [], {
           cwd: root,
-          env: {
-            ...process.env,
-          },
+          env: lspEnv(),
         }),
       }
     },

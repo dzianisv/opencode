@@ -16,9 +16,11 @@ import { Shell } from "@/shell/shell"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
+import { Plugin } from "@/plugin"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 
 export const log = Log.create({ service: "bash-tool" })
 
@@ -128,7 +130,10 @@ export const BashTool = Tool.define("bash", async () => {
                 process.platform === "win32" && resolved.match(/^\/[a-z]\//)
                   ? resolved.replace(/^\/([a-z])\//, (_, drive) => `${drive.toUpperCase()}:\\`).replace(/\//g, "\\")
                   : resolved
-              if (!Instance.containsPath(normalized)) directories.add(normalized)
+              if (!Instance.containsPath(normalized)) {
+                const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
+                directories.add(dir)
+              }
             }
           }
         }
@@ -141,10 +146,11 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       if (directories.size > 0) {
+        const globs = Array.from(directories).map((dir) => path.join(dir, "*"))
         await ctx.ask({
           permission: "external_directory",
-          patterns: Array.from(directories),
-          always: Array.from(directories).map((x) => path.dirname(x) + "*"),
+          patterns: globs,
+          always: globs,
           metadata: {},
         })
       }
@@ -158,17 +164,24 @@ export const BashTool = Tool.define("bash", async () => {
         })
       }
 
+      const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
       const proc = spawn(params.command, {
         shell,
         cwd,
         env: {
           ...process.env,
+          ...shellEnv.env,
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       })
 
-      let output = ""
+      const chunks: Buffer[] = []
+      let size = 0
+      const previewParts: string[] = []
+      let previewLen = 0
+      let previewDirty = false
+      let metadataTimer: ReturnType<typeof setTimeout> | undefined
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -178,15 +191,39 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const append = (chunk: Buffer) => {
-        output += chunk.toString()
+      const flushPreview = () => {
+        metadataTimer = undefined
+        if (!previewDirty) return
+        previewDirty = false
+        const text =
+          previewLen > MAX_METADATA_LENGTH
+            ? previewParts.join("").slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+            : previewParts.join("")
         ctx.metadata({
           metadata: {
-            // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
-            output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
+            output: text,
             description: params.description,
           },
         })
+      }
+
+      const append = (chunk: Buffer) => {
+        chunks.push(chunk)
+        size += chunk.length
+        // Drop oldest chunks when exceeding cap so final output stays bounded
+        while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
+          size -= chunks.shift()!.length
+        }
+        // Accumulate preview text without O(n²) string concatenation.
+        // Parts are joined only on flush, which is throttled.
+        if (previewLen < MAX_METADATA_LENGTH) {
+          previewParts.push(chunk.toString())
+          previewLen += chunk.length
+        }
+        previewDirty = true
+        if (!metadataTimer) {
+          metadataTimer = setTimeout(flushPreview, 100)
+        }
       }
 
       proc.stdout?.on("data", append)
@@ -234,6 +271,11 @@ export const BashTool = Tool.define("bash", async () => {
         })
       })
 
+      if (metadataTimer) clearTimeout(metadataTimer)
+      flushPreview()
+
+      let output = Buffer.concat(chunks).toString()
+
       const resultMetadata: string[] = []
 
       if (timedOut) {
@@ -248,10 +290,15 @@ export const BashTool = Tool.define("bash", async () => {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"
       }
 
+      const finalPreview =
+        previewLen > MAX_METADATA_LENGTH
+          ? previewParts.join("").slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+          : previewParts.join("")
+
       return {
         title: params.description,
         metadata: {
-          output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
+          output: finalPreview,
           exit: proc.exitCode,
           description: params.description,
         },

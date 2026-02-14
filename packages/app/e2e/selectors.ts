@@ -10,8 +10,11 @@ export const settingsNotificationsAgentSelector = '[data-action="settings-notifi
 export const settingsNotificationsPermissionsSelector = '[data-action="settings-notifications-permissions"]'
 export const settingsNotificationsErrorsSelector = '[data-action="settings-notifications-errors"]'
 export const settingsSoundsAgentSelector = '[data-action="settings-sounds-agent"]'
+export const settingsSoundsAgentEnabledSelector = '[data-action="settings-sounds-agent-enabled"]'
 export const settingsSoundsPermissionsSelector = '[data-action="settings-sounds-permissions"]'
+export const settingsSoundsPermissionsEnabledSelector = '[data-action="settings-sounds-permissions-enabled"]'
 export const settingsSoundsErrorsSelector = '[data-action="settings-sounds-errors"]'
+export const settingsSoundsErrorsEnabledSelector = '[data-action="settings-sounds-errors-enabled"]'
 export const settingsUpdatesStartupSelector = '[data-action="settings-updates-startup"]'
 export const settingsReleaseNotesSelector = '[data-action="settings-release-notes"]'
 
@@ -27,6 +30,9 @@ export const projectMenuTriggerSelector = (slug: string) =>
 
 export const projectCloseMenuSelector = (slug: string) => `[data-action="project-close-menu"][data-project="${slug}"]`
 
+export const projectWorkspacesToggleSelector = (slug: string) =>
+  `[data-action="project-workspaces-toggle"][data-project="${slug}"]`
+
 export const titlebarRightSelector = "#opencode-titlebar-right"
 
 export const popoverBodySelector = '[data-slot="popover-body"]'
@@ -38,6 +44,15 @@ export const dropdownMenuContentSelector = '[data-component="dropdown-menu-conte
 export const inlineInputSelector = '[data-component="inline-input"]'
 
 export const sessionItemSelector = (sessionID: string) => `${sidebarNavSelector} [data-session-id="${sessionID}"]`
+
+export const workspaceItemSelector = (slug: string) =>
+  `${sidebarNavSelector} [data-component="workspace-item"][data-workspace="${slug}"]`
+
+export const workspaceMenuTriggerSelector = (slug: string) =>
+  `${sidebarNavSelector} [data-action="workspace-menu"][data-workspace="${slug}"]`
+
+export const workspaceNewSessionSelector = (slug: string) =>
+  `${sidebarNavSelector} [data-action="workspace-new-session"][data-workspace="${slug}"]`
 
 export const listItemSelector = '[data-slot="list-item"]'
 
