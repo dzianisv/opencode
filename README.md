@@ -2,7 +2,15 @@
 
 Patches on top of [sst/opencode](https://github.com/sst/opencode) fixing two critical issues.
 
-### Infinite loop fix ([#5](https://github.com/dzianisv/opencode/issues/5))
+### Install
+
+```bash
+git clone https://github.com/dzianisv/opencode.git && cd opencode && bun install && bash scripts/install-local.sh
+```
+
+Requires [bun](https://bun.sh). Installs the binary to your existing `opencode` location or `~/.opencode/bin/`.
+
+### Infinite loop fix ([#5](https://github.com/dzianisv/opencode/issues/5), upstream [#13511](https://github.com/anomalyco/opencode/issues/13511))
 
 The agent would get stuck calling `TodoWrite` in an infinite loop, consuming 200k+ tokens per session. Root cause: `TodoWrite` returned the full todo list JSON as tool output, the model saw pending items, the system prompt told it to update them, so it called `TodoWrite` again — forever.
 
@@ -12,7 +20,7 @@ The agent would get stuck calling `TodoWrite` in an infinite loop, consuming 200
 - Cross-message doom loop detection: if the same tool dominates 3 consecutive assistant messages, the session is terminated
 - Hard step limit (maxSteps: 200) as a safety net
 
-### Memory leaks and performance
+### Memory leaks and performance (upstream [#12687](https://github.com/anomalyco/opencode/issues/12687))
 
 Long-running sessions would leak memory and leave zombie processes.
 
