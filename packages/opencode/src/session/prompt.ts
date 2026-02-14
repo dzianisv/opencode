@@ -725,20 +725,8 @@ export namespace SessionPrompt {
         const candidate = recentDominant[recentDominant.length - 1]
         const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
         if (tail.every((t) => t === candidate)) {
-          log.info("cross-message doom loop detected", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
-          recentDominant.length = 0
-          const agent = await Agent.get(lastUser.agent)
-          await PermissionNext.ask({
-            permission: "doom_loop",
-            patterns: [candidate],
-            sessionID,
-            metadata: {
-              tool: candidate,
-              input: { reason: `${candidate} was the dominant tool for ${CROSS_MSG_DOOM_THRESHOLD} consecutive turns` },
-            },
-            always: [candidate],
-            ruleset: agent.permission,
-          })
+          log.info("cross-message doom loop detected, stopping", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
+          break
         }
       }
 
