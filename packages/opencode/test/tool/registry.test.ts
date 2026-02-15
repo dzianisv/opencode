@@ -87,7 +87,6 @@ describe("tool.registry", () => {
   test(
     "loads tools with external dependencies without crashing",
     async () => {
-      const prev = process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL
       await using tmp = await tmpdir({
         init: async (dir) => {
           const opencodeDir = path.join(dir, ".opencode")
@@ -96,7 +95,6 @@ describe("tool.registry", () => {
           const toolsDir = path.join(opencodeDir, "tools")
           await fs.mkdir(toolsDir, { recursive: true })
 
-          process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL = "1"
           await Bun.write(
             path.join(opencodeDir, "package.json"),
             JSON.stringify({
@@ -106,21 +104,6 @@ describe("tool.registry", () => {
                 cowsay: "^1.6.0",
               },
             }),
-          )
-
-          const nodeModulesDir = path.join(opencodeDir, "node_modules", "cowsay")
-          await fs.mkdir(nodeModulesDir, { recursive: true })
-          await Bun.write(
-            path.join(nodeModulesDir, "package.json"),
-            JSON.stringify({
-              name: "cowsay",
-              version: "1.6.0",
-              type: "module",
-            }),
-          )
-          await Bun.write(
-            path.join(nodeModulesDir, "index.js"),
-            ["export const say = ({ text }) => `cowsay ${text}`", ""].join("\n"),
           )
 
           await Bun.write(
@@ -137,10 +120,6 @@ describe("tool.registry", () => {
               "",
             ].join("\n"),
           )
-        },
-        dispose: async () => {
-          if (prev === undefined) delete process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL
-          else process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL = prev
         },
       })
 
