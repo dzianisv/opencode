@@ -33,6 +33,11 @@ export namespace UI {
     Bun.stderr.write(message.join(" "))
   }
 
+  export function setTitle(title: string) {
+    if (!process.stdout.isTTY) return
+    process.stdout.write(`\x1b]0;${title}\x07`)
+  }
+
   let blank = false
   export function empty() {
     if (blank) return
