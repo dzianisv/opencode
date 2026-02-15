@@ -1876,6 +1876,10 @@ export type Config = {
      */
     openTelemetry?: boolean
     /**
+     * Abort model streams after this many ms of inactivity
+     */
+    stream_idle_timeout?: number
+    /**
      * Tools that should only be available to primary agents.
      */
     primary_tools?: Array<string>

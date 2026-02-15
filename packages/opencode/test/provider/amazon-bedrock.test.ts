@@ -29,6 +29,7 @@ test("Bedrock: config region takes precedence over AWS_REGION env var", async ()
   await Instance.provide({
     directory: tmp.path,
     init: async () => {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token"
       Env.set("AWS_REGION", "us-east-1")
       Env.set("AWS_PROFILE", "default")
     },
@@ -54,6 +55,7 @@ test("Bedrock: falls back to AWS_REGION env var when no config region", async ()
   await Instance.provide({
     directory: tmp.path,
     init: async () => {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token"
       Env.set("AWS_REGION", "eu-west-1")
       Env.set("AWS_PROFILE", "default")
     },
@@ -109,6 +111,7 @@ test("Bedrock: loads when bearer token from auth.json is present", async () => {
     await Instance.provide({
       directory: tmp.path,
       init: async () => {
+        process.env.AWS_BEARER_TOKEN_BEDROCK = ""
         Env.set("AWS_PROFILE", "")
         Env.set("AWS_ACCESS_KEY_ID", "")
         Env.set("AWS_BEARER_TOKEN_BEDROCK", "")
@@ -155,6 +158,7 @@ test("Bedrock: config profile takes precedence over AWS_PROFILE env var", async 
   await Instance.provide({
     directory: tmp.path,
     init: async () => {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token"
       Env.set("AWS_PROFILE", "default")
       Env.set("AWS_ACCESS_KEY_ID", "test-key-id")
     },
@@ -187,6 +191,7 @@ test("Bedrock: includes custom endpoint in options when specified", async () => 
   await Instance.provide({
     directory: tmp.path,
     init: async () => {
+      process.env.AWS_BEARER_TOKEN_BEDROCK = "test-bearer-token"
       Env.set("AWS_PROFILE", "default")
     },
     fn: async () => {
