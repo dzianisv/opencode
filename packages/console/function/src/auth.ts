@@ -114,17 +114,17 @@ export default {
               "User-Agent": "opencode",
               Accept: "application/vnd.github+json",
             },
-          }).then((x) => x.json())) as any
+          }).then((x) => x.json())) as { primary: boolean; verified: boolean; email: string }[]
           const user = (await fetch("https://api.github.com/user", {
             headers: {
               Authorization: `Bearer ${response.tokenset.access}`,
               "User-Agent": "opencode",
               Accept: "application/vnd.github+json",
             },
-          }).then((x) => x.json())) as any
+          }).then((x) => x.json())) as { id: number; email: string | null }
           subject = user.id.toString()
 
-          const primaryEmail = emails.find((x: any) => x.primary)
+          const primaryEmail = emails.find((x: { primary: boolean }) => x.primary)
           if (!primaryEmail) throw new Error("No primary email found for GitHub user")
           if (!primaryEmail.verified) throw new Error("Primary email for GitHub user not verified")
           email = primaryEmail.email
@@ -157,8 +157,8 @@ export default {
                 ),
               ),
           )
-          const idByProvider = matches.find((x) => x.provider === response.provider)?.accountID
-          const idByEmail = matches.find((x) => x.provider === "email")?.accountID
+          const idByProvider = matches.find((x: { provider: string }) => x.provider === response.provider)?.accountID
+          const idByEmail = matches.find((x: { provider: string }) => x.provider === "email")?.accountID
           if (idByProvider && idByEmail) return idByProvider
 
           // create account if not found

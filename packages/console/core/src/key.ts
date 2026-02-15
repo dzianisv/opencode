@@ -34,11 +34,13 @@ export namespace Key {
         .orderBy(sql`${KeyTable.name} DESC`),
     )
     // only return value for user's keys
-    return keys.map((key) => ({
-      ...key,
-      key: key.userID === Actor.userID() ? key.key : undefined,
-      keyDisplay: `${key.key.slice(0, 7)}...${key.key.slice(-4)}`,
-    }))
+    return keys.map(
+      (key: { id: string; name: string; key: string; timeUsed: Date | null; userID: string; email: string }) => ({
+        ...key,
+        key: key.userID === Actor.userID() ? key.key : undefined,
+        keyDisplay: `${key.key.slice(0, 7)}...${key.key.slice(-4)}`,
+      }),
+    )
   })
 
   export const create = fn(

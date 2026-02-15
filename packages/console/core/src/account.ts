@@ -26,7 +26,7 @@ export namespace Account {
         .select()
         .from(AccountTable)
         .where(eq(AccountTable.id, id))
-        .then((rows) => rows[0]),
+        .then((rows: (typeof AccountTable.$inferSelect)[]) => rows[0]),
     ),
   )
 }
