@@ -45,7 +45,8 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
-import { Storage } from "../storage/storage"
+import { Database, desc, eq } from "../storage/db"
+import { MessageTable } from "./session.sql"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -280,7 +281,16 @@ export namespace SessionPrompt {
         }
       | undefined,
   ) {
-    const order = (await Storage.list(["message", sessionID])).map((item) => item[2] as string).reverse()
+    const order = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id })
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, sessionID))
+        .orderBy(desc(MessageTable.time_created))
+        .all(),
+    ).map((row) => row.id)
+    // order is newest-first from DB; reverse so oldest is first
+    order.reverse()
     if (!cached) {
       const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
       return {
