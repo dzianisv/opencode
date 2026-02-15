@@ -31,7 +31,10 @@ export namespace Database {
   export async function use<T>(callback: (trx: TxOrDb) => Promise<T>) {
     try {
       const { tx } = TransactionContext.use()
-      return tx.transaction(callback)
+      const run = tx as unknown as {
+        transaction: (fn: (inner: Transaction) => Promise<T>) => Promise<T>
+      }
+      return run.transaction(callback as (inner: Transaction) => Promise<T>)
     } catch (err) {
       if (err instanceof Context.NotFound) {
         const effects: (() => void | Promise<void>)[] = []
