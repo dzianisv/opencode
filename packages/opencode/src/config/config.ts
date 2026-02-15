@@ -307,6 +307,7 @@ export namespace Config {
   }
 
   async function needsInstall(dir: string) {
+    if (process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL === "1") return false
     // Some config dirs may be read-only.
     // Installing deps there will fail; skip installation in that case.
     const writable = await isWritable(dir)
@@ -1201,6 +1202,14 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          stream_idle_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              "Timeout in milliseconds between stream chunks from LLM. If no data is received within this period, the request will be retried. Default is 60000 (60 seconds). Set to 0 to disable.",
+            ),
         })
         .optional(),
     })
