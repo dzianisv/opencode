@@ -47,6 +47,9 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+<<<<<<< HEAD
+import { Database, desc, eq } from "../storage/db"
+import { MessageTable } from "./session.sql"
 import { decodeDataUrl } from "@/util/data-url"
 
 // @ts-ignore
@@ -283,6 +286,69 @@ export namespace SessionPrompt {
     return
   }
 
+  async function loadMessages(
+    sessionID: string,
+    cached:
+      | {
+          order: string[]
+          map: Map<string, MessageV2.WithParts>
+        }
+      | undefined,
+  ) {
+    const order = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id })
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, sessionID))
+        .orderBy(desc(MessageTable.time_created))
+        .all(),
+    ).map((row) => row.id)
+    // order is newest-first from DB; reverse so oldest is first
+    order.reverse()
+    if (!cached) {
+      const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
+      return {
+        messages,
+        cache: {
+          order,
+          map: new Map(order.map((id, index) => [id, messages[index]])),
+        },
+      }
+    }
+
+    const map = new Map<string, MessageV2.WithParts>()
+    for (const id of order) {
+      const existing = cached.map.get(id)
+      if (existing) {
+        map.set(id, existing)
+        continue
+      }
+      map.set(id, await MessageV2.get({ sessionID, messageID: id }))
+    }
+
+    return {
+      messages: order.map((id) => map.get(id)!).filter((msg): msg is MessageV2.WithParts => !!msg),
+      cache: { order, map },
+    }
+  }
+
+  function filterCompactedList(messages: MessageV2.WithParts[]) {
+    const result: MessageV2.WithParts[] = []
+    const completed = new Set<string>()
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      result.push(msg)
+      if (
+        msg.info.role === "user" &&
+        completed.has(msg.info.id) &&
+        msg.parts.some((part) => part.type === "compaction")
+      )
+        break
+      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish) completed.add(msg.info.parentID)
+    }
+    result.reverse()
+    return result
+  }
   export const LoopInput = z.object({
     sessionID: SessionID.zod,
     resume_existing: z.boolean().optional(),
