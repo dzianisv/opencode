@@ -27,3 +27,8 @@ target
 opencode-dev
 logs/
 *.bun-build
+.reflection/
+.tts/
+.tts-debug.log
+session-*.md
+packages/sdk/js/openapi.json
