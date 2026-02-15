@@ -119,7 +119,7 @@ export namespace PermissionNext {
         {
           info: Request
           resolve: () => void
-          reject: (e: any) => void
+          reject: (e: unknown) => void
         }
       > = {}
 
