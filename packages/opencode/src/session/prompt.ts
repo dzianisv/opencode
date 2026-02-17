@@ -398,8 +398,8 @@ export namespace SessionPrompt {
     }
 
     using _ = defer(() => {
-      FileTime.clear(sessionID)
       cancel(sessionID)
+      FileTime.clear(sessionID)
     })
 
     // Structured output state
@@ -841,6 +841,36 @@ export namespace SessionPrompt {
           auto: true,
           overflow: !processor.message.finish,
         })
+      }
+
+      const iterParts = await MessageV2.parts(processor.message.id)
+      const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+      if (iterTools.length > 0) {
+        const counts = new Map<string, number>()
+        for (const t of iterTools) counts.set(t.tool, (counts.get(t.tool) ?? 0) + 1)
+        let dominant = iterTools[0].tool
+        for (const [name, count] of counts) if (count > (counts.get(dominant) ?? 0)) dominant = name
+        recentDominant.push(dominant)
+      }
+      if (recentDominant.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const candidate = recentDominant[recentDominant.length - 1]
+        const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
+        if (tail.every((t) => t === candidate)) {
+          log.info("cross-message doom loop detected, stopping", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
+          break
+        }
+      }
+
+      if (iterTools.length > 0 || result === "compact") {
+        // Prune old tool outputs between iterations so subsequent
+        // loadMessages fetches compacted versions from DB, reducing
+        // peak memory when sessions run many tool calls.
+        const pruned = await SessionCompaction.prune({ sessionID })
+        if (pruned && cache) {
+          // Invalidate cached messages whose parts were pruned so
+          // the next loadMessages re-fetches them with cleared outputs.
+          for (const id of pruned) cache.map.delete(id)
+        }
       }
       continue
     }
