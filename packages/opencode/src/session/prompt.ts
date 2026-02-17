@@ -341,7 +341,10 @@ export namespace SessionPrompt {
       })
     }
 
-    using _ = defer(() => cancel(sessionID))
+    using _ = defer(() => {
+      cancel(sessionID)
+      FileTime.clear(sessionID)
+    })
 
     // Structured output state
     // Note: On session resumption, state is reset but outputFormat is preserved
@@ -820,6 +823,18 @@ export namespace SessionPrompt {
           always: [candidate],
           ruleset: agent.permission,
         })
+      }
+
+      if (iterTools.length > 0 || result === "compact") {
+        // Prune old tool outputs between iterations so subsequent
+        // loadMessages fetches compacted versions from DB, reducing
+        // peak memory when sessions run many tool calls.
+        const pruned = await SessionCompaction.prune({ sessionID })
+        if (pruned && cache) {
+          // Invalidate cached messages whose parts were pruned so
+          // the next loadMessages re-fetches them with cleared outputs.
+          for (const id of pruned) cache.map.delete(id)
+        }
       }
 
       continue
