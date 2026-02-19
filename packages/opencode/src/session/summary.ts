@@ -127,8 +127,10 @@ export namespace SessionSummary {
         tools: {},
         model: agent.model
           ? await Provider.getModel(agent.model.providerID, agent.model.modelID)
-          : ((await Provider.getSmallModel(userMsg.model.providerID)) ??
-            (await Provider.getModel(userMsg.model.providerID, userMsg.model.modelID))),
+          : await Provider.getTitleModel({
+              providerID: userMsg.model.providerID,
+              modelID: userMsg.model.modelID,
+            }),
         small: true,
         messages: [
           {

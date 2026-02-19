@@ -2035,9 +2035,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     if (!agent) return
     const model = await iife(async () => {
       if (agent.model) return await Provider.getModel(agent.model.providerID, agent.model.modelID)
-      return (
-        (await Provider.getSmallModel(input.providerID)) ?? (await Provider.getModel(input.providerID, input.modelID))
-      )
+      return Provider.getTitleModel({ providerID: input.providerID, modelID: input.modelID })
     })
     const result = await LLM.stream({
       agent,

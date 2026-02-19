@@ -1248,6 +1248,54 @@ export namespace Provider {
     return undefined
   }
 
+  function isText(model: Model) {
+    return model.capabilities.input.text && model.capabilities.output.text
+  }
+
+  export async function getTitleModel(input: { providerID: string; modelID: string }) {
+    const cfg = await Config.get()
+
+    if (cfg.small_model) {
+      const parsed = parseModel(cfg.small_model)
+      return getModel(parsed.providerID, parsed.modelID)
+    }
+
+    const providers = await list()
+    const items = Object.entries(providers).flatMap(([providerID, provider]) =>
+      Object.entries(provider.models).map(([modelID, model]) => ({
+        providerID,
+        modelID,
+        model,
+      })),
+    )
+
+    const copilot = items.filter(
+      (item) => item.providerID.startsWith("github-copilot") && item.modelID.includes("gpt-4.1"),
+    )
+    const exact = copilot.find((item) => item.modelID === "gpt-4.1")
+    if (exact) return getModel(exact.providerID, exact.modelID)
+
+    const base = copilot.find(
+      (item) => item.modelID.includes("gpt-4.1") && !item.modelID.includes("mini") && !item.modelID.includes("nano"),
+    )
+    if (base) return getModel(base.providerID, base.modelID)
+    if (copilot[0]) return getModel(copilot[0].providerID, copilot[0].modelID)
+
+    const free = items.find(
+      (item) =>
+        isText(item.model) &&
+        item.model.cost?.input === 0 &&
+        item.model.cost?.output === 0 &&
+        item.model.status === "active",
+    )
+    if (free) return getModel(free.providerID, free.modelID)
+
+    const small = await getSmallModel(input.providerID)
+    if (small) return small
+
+    return getModel(input.providerID, input.modelID)
+  }
+
   const priority = ["gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
   export function sort(models: Model[]) {
     return sortBy(
