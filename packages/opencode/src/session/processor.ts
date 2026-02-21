@@ -80,13 +80,25 @@ export namespace SessionProcessor {
 
                 if (currentText?.id === partID) {
                   currentText.text = text
-                  Session.updatePart({ part: currentText, delta })
+                  Session.updatePartDelta({
+                    sessionID: currentText.sessionID,
+                    messageID: currentText.messageID,
+                    partID: currentText.id,
+                    field: "text",
+                    delta,
+                  })
                   continue
                 }
                 const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
                 if (reasoning) {
                   reasoning.text = text
-                  Session.updatePart({ part: reasoning, delta })
+                  Session.updatePartDelta({
+                    sessionID: reasoning.sessionID,
+                    messageID: reasoning.messageID,
+                    partID: reasoning.id,
+                    field: "text",
+                    delta,
+                  })
                 }
               }
             }
