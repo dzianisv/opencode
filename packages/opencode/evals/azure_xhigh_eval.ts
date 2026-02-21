@@ -55,26 +55,26 @@ const tools = {
   grep: true,
 }
 
-const { client, server } = await createOpencode()
+const opencode = await createOpencode()
 
 type ProviderInfo = {
   id: string
   models?: Record<string, { variants?: Record<string, Record<string, unknown>> }>
 }
 
-const list = await client.provider.list()
+const list = await opencode.client.provider.list()
 const all = (list.data?.all ?? []) as ProviderInfo[]
 const azure = all.find((item) => item.id === "azure")
 if (!azure) {
   console.error("Azure provider not found in opencode provider list.")
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 const info = azure.models?.[model]
 if (!info) {
   console.error(`Azure model not found: ${model}`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
@@ -85,15 +85,15 @@ if (!variants.includes("xhigh")) {
   process.exit(1)
 }
 
-const created = await client.session.create({ body: { title: `azure-xhigh-${Date.now()}` } })
+const created = await opencode.client.session.create({ body: { title: `azure-xhigh-${Date.now()}` } })
 const sessionId = created.data?.id
 if (!sessionId) {
   console.error("Failed to create session.")
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
-const url = new URL(`/session/${sessionId}/message`, server.url)
+const url = new URL(`/session/${sessionId}/message`, opencode.server.url)
 url.searchParams.set("directory", dir)
 
 const body = {
@@ -120,7 +120,7 @@ const res = await fetch(url, {
 if (!res.ok) {
   const msg = await res.text()
   console.error(`Prompt failed: ${res.status} ${res.statusText}\n${msg}`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
@@ -132,19 +132,19 @@ type PromptResponse = {
 const data = (await res.json()) as PromptResponse
 if (!data.info) {
   console.error("Prompt response missing info.")
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 if (data.info.error) {
   console.error(`Prompt returned error: ${JSON.stringify(data.info.error)}`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 if (data.info.variant !== "xhigh") {
   console.error(`Expected variant xhigh, got: ${data.info.variant ?? "missing"}`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
@@ -153,25 +153,25 @@ const reasoning = parts.filter((part) => part.type === "reasoning")
 const reasoningTokens = data.info.tokens?.reasoning ?? 0
 if (reasoning.length === 0 && reasoningTokens <= 0) {
   console.error("No reasoning parts or reasoning tokens returned for xhigh request.")
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 const run = spawnSync("python", ["-m", "unittest", "-q"], { cwd: dir, encoding: "utf8" })
 if (run.error) {
   console.error(String(run.error))
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 const out = (run.stdout ?? "") + (run.stderr ?? "")
 if (run.status !== 0) {
   console.error(out.trim() || `unittest failed with status ${run.status}`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
 console.log(out.trim() || "unittest passed")
 console.log("Eval passed: azure gpt-5.2-codex xhigh reasoning works.")
-server.close()
+opencode.server.close()
 process.exit(0)
