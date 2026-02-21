@@ -18,6 +18,8 @@ import { Question } from "@/question"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const FLUSH_INTERVAL = 50
+  const STREAM_IDLE_TIMEOUT = 120_000
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -45,15 +47,85 @@ export namespace SessionProcessor {
       async process(streamInput: LLM.StreamInput) {
         log.info("process")
         needsCompaction = false
-        const shouldBreak = (await Config.get()).experimental?.continue_loop_on_deny !== true
+        const cfg = await Config.get()
+        const idle = cfg.experimental?.stream_idle_timeout ?? STREAM_IDLE_TIMEOUT
+        const shouldBreak = cfg.experimental?.continue_loop_on_deny !== true
         while (true) {
+          let idleTriggered = false
+          let timer: ReturnType<typeof setTimeout> | undefined
+          let tick: ReturnType<typeof setTimeout> | undefined
+          let flush = () => {}
           try {
+            const idleController = new AbortController()
             let currentText: MessageV2.TextPart | undefined
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
-            const stream = await LLM.stream(streamInput)
+            const resetIdle = () => {
+              if (!idle) return
+              if (timer) clearTimeout(timer)
+              timer = setTimeout(() => {
+                idleTriggered = true
+                idleController.abort()
+              }, idle)
+            }
+            const clearIdle = () => {
+              if (!timer) return
+              clearTimeout(timer)
+            }
+
+            const stream = await LLM.stream({
+              ...streamInput,
+              abort: AbortSignal.any([streamInput.abort, idleController.signal]),
+            })
+            resetIdle()
+
+            // Throttled flush state for text/reasoning deltas.
+            // ALL text is accumulated in arrays and joined only on flush
+            // (at most every FLUSH_INTERVAL ms) to avoid:
+            //   1. O(n²) string concatenation on part.text per token
+            //   2. Per-token Storage.write + Bus.publish serialization
+            const accumulated = new Map<string, { chunks: string[]; flushed: number }>()
+
+            const scheduleFlush = (partID: string, delta: string) => {
+              const entry = accumulated.get(partID)
+              if (entry) entry.chunks.push(delta)
+              else accumulated.set(partID, { chunks: [delta], flushed: 0 })
+              if (!tick) {
+                tick = setTimeout(flush, FLUSH_INTERVAL)
+              }
+            }
+
+            flush = () => {
+              tick = undefined
+              for (const [partID, entry] of accumulated) {
+                if (entry.flushed >= entry.chunks.length) continue
+                const delta = entry.chunks.slice(entry.flushed).join("")
+                entry.flushed = entry.chunks.length
+                const text = entry.chunks.join("")
+
+                if (currentText?.id === partID) {
+                  currentText.text = text
+                  Session.updatePart(currentText)
+                  continue
+                }
+                const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
+                if (reasoning) {
+                  reasoning.text = text
+                  Session.updatePart(reasoning)
+                }
+              }
+            }
+
+            const finalizePart = (partID: string) => {
+              const entry = accumulated.get(partID)
+              if (!entry || entry.chunks.length === 0) return
+              const text = entry.chunks.join("")
+              accumulated.delete(partID)
+              return text
+            }
 
             for await (const value of stream.fullStream) {
               input.abort.throwIfAborted()
+              resetIdle()
               switch (value.type) {
                 case "start":
                   SessionStatus.set(input.sessionID, { type: "busy" })
@@ -81,21 +153,16 @@ export namespace SessionProcessor {
                 case "reasoning-delta":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
-                    part.text += value.text
                     if (value.providerMetadata) part.metadata = value.providerMetadata
-                    await Session.updatePartDelta({
-                      sessionID: part.sessionID,
-                      messageID: part.messageID,
-                      partID: part.id,
-                      field: "text",
-                      delta: value.text,
-                    })
+                    scheduleFlush(part.id, value.text)
                   }
                   break
 
                 case "reasoning-end":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
+                    const text = finalizePart(part.id)
+                    if (text) part.text = text
                     part.text = part.text.trimEnd()
 
                     part.time = {
@@ -154,7 +221,7 @@ export namespace SessionProcessor {
                     if (
                       lastThree.length === DOOM_LOOP_THRESHOLD &&
                       lastThree.every(
-                        (p) =>
+                        (p: MessageV2.Part) =>
                           p.type === "tool" &&
                           p.tool === value.toolName &&
                           p.state.status !== "pending" &&
@@ -301,20 +368,15 @@ export namespace SessionProcessor {
 
                 case "text-delta":
                   if (currentText) {
-                    currentText.text += value.text
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
-                    await Session.updatePartDelta({
-                      sessionID: currentText.sessionID,
-                      messageID: currentText.messageID,
-                      partID: currentText.id,
-                      field: "text",
-                      delta: value.text,
-                    })
+                    scheduleFlush(currentText.id, value.text)
                   }
                   break
 
                 case "text-end":
                   if (currentText) {
+                    const text = finalizePart(currentText.id)
+                    if (text) currentText.text = text
                     currentText.text = currentText.text.trimEnd()
                     const textOutput = await Plugin.trigger(
                       "experimental.text.complete",
@@ -347,12 +409,30 @@ export namespace SessionProcessor {
               }
               if (needsCompaction) break
             }
+            // Flush any remaining throttled deltas before exiting
+            if (tick) clearTimeout(tick)
+            flush()
+            clearIdle()
           } catch (e: any) {
+            if (tick) clearTimeout(tick)
+            flush()
+            if (timer) clearTimeout(timer)
             log.error("process", {
               error: e,
               stack: JSON.stringify(e.stack),
             })
-            const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+            const error = idleTriggered
+              ? new MessageV2.APIError(
+                  {
+                    message: `Stream idle timeout after ${idle}ms`,
+                    isRetryable: true,
+                    metadata: {
+                      reason: "stream_idle_timeout",
+                    },
+                  },
+                  { cause: e },
+                ).toObject()
+              : MessageV2.fromError(e, { providerID: input.model.providerID })
             if (MessageV2.ContextOverflowError.isInstance(error)) {
               // TODO: Handle context overflow error
             }

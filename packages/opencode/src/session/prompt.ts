@@ -45,6 +45,8 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { Database, desc, eq } from "../storage/db"
+import { MessageTable } from "./session.sql"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -61,6 +63,9 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  const MAX_METADATA_LENGTH = 30_000
+  const MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 
   const state = Instance.state(
     () => {
@@ -267,6 +272,70 @@ export namespace SessionPrompt {
     return
   }
 
+  async function loadMessages(
+    sessionID: string,
+    cached:
+      | {
+          order: string[]
+          map: Map<string, MessageV2.WithParts>
+        }
+      | undefined,
+  ) {
+    const order = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id })
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, sessionID))
+        .orderBy(desc(MessageTable.time_created))
+        .all(),
+    ).map((row) => row.id)
+    // order is newest-first from DB; reverse so oldest is first
+    order.reverse()
+    if (!cached) {
+      const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
+      return {
+        messages,
+        cache: {
+          order,
+          map: new Map(order.map((id, index) => [id, messages[index]])),
+        },
+      }
+    }
+
+    const map = new Map<string, MessageV2.WithParts>()
+    for (const id of order) {
+      const existing = cached.map.get(id)
+      if (existing) {
+        map.set(id, existing)
+        continue
+      }
+      map.set(id, await MessageV2.get({ sessionID, messageID: id }))
+    }
+
+    return {
+      messages: order.map((id) => map.get(id)!).filter((msg): msg is MessageV2.WithParts => !!msg),
+      cache: { order, map },
+    }
+  }
+
+  function filterCompactedList(messages: MessageV2.WithParts[]) {
+    const result: MessageV2.WithParts[] = []
+    const completed = new Set<string>()
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      result.push(msg)
+      if (
+        msg.info.role === "user" &&
+        completed.has(msg.info.id) &&
+        msg.parts.some((part) => part.type === "compaction")
+      )
+        break
+      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish) completed.add(msg.info.parentID)
+    }
+    result.reverse()
+    return result
+  }
+
   export const LoopInput = z.object({
     sessionID: Identifier.schema("session"),
     resume_existing: z.boolean().optional(),
@@ -290,12 +359,22 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
+    const CROSS_MSG_DOOM_THRESHOLD = 5
+    const recentDominant: string[] = []
+    let cache:
+      | {
+          order: string[]
+          map: Map<string, MessageV2.WithParts>
+        }
+      | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
-      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
+      const stored = await loadMessages(sessionID, cache)
+      cache = stored.cache
+      let msgs = filterCompactedList(stored.messages)
 
       let lastUser: MessageV2.User | undefined
       let lastAssistant: MessageV2.Assistant | undefined
@@ -555,7 +634,7 @@ export namespace SessionPrompt {
 
       // normal processing
       const agent = await Agent.get(lastUser.agent)
-      const maxSteps = agent.steps ?? Infinity
+      const maxSteps = agent.steps ?? 200
       const isLastStep = step >= maxSteps
       msgs = await insertReminders({
         messages: msgs,
@@ -626,9 +705,10 @@ export namespace SessionPrompt {
         })
       }
 
+      const sessionMessages = msgs.map((msg) => ({ ...msg, parts: msg.parts.map((part) => ({ ...part })) }))
       // Ephemerally wrap queued user messages with a reminder to stay on track
       if (step > 1 && lastFinished) {
-        for (const msg of msgs) {
+        for (const msg of sessionMessages) {
           if (msg.info.role !== "user" || msg.info.id <= lastFinished.id) continue
           for (const part of msg.parts) {
             if (part.type !== "text" || part.ignored || part.synthetic) continue
@@ -645,7 +725,7 @@ export namespace SessionPrompt {
         }
       }
 
-      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
 
       // Build system prompt, adding structured output instruction if needed
       const system = [...(await SystemPrompt.environment(model)), ...(await InstructionPrompt.system())]
@@ -661,7 +741,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...MessageV2.toModelMessages(sessionMessages, model),
           ...(isLastStep
             ? [
                 {
@@ -671,7 +751,7 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        tools: isLastStep ? {} : tools,
         model,
         toolChoice: format.type === "json_schema" ? "required" : undefined,
       })
@@ -709,6 +789,25 @@ export namespace SessionPrompt {
           auto: true,
         })
       }
+
+      const iterParts = await MessageV2.parts(processor.message.id)
+      const iterTools = iterParts.filter((p): p is MessageV2.ToolPart => p.type === "tool")
+      if (iterTools.length > 0) {
+        const counts = new Map<string, number>()
+        for (const t of iterTools) counts.set(t.tool, (counts.get(t.tool) ?? 0) + 1)
+        let dominant = iterTools[0].tool
+        for (const [name, count] of counts) if (count > (counts.get(dominant) ?? 0)) dominant = name
+        recentDominant.push(dominant)
+      }
+      if (recentDominant.length >= CROSS_MSG_DOOM_THRESHOLD) {
+        const candidate = recentDominant[recentDominant.length - 1]
+        const tail = recentDominant.slice(-CROSS_MSG_DOOM_THRESHOLD)
+        if (tail.every((t) => t === candidate)) {
+          log.info("cross-message doom loop detected, stopping", { tool: candidate, turns: CROSS_MSG_DOOM_THRESHOLD })
+          break
+        }
+      }
+
       continue
     }
     SessionCompaction.prune({ sessionID })
@@ -1634,29 +1733,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     })
 
-    let output = ""
+    const chunks: Buffer[] = []
+    let size = 0
+    const previewParts: string[] = []
+    let previewLen = 0
+    let previewDirty = false
+    let metadataTimer: ReturnType<typeof setTimeout> | undefined
+    const MAX_PREVIEW = MAX_METADATA_LENGTH
 
-    proc.stdout?.on("data", (chunk) => {
-      output += chunk.toString()
+    const flushPreview = () => {
+      metadataTimer = undefined
+      if (!previewDirty) return
+      previewDirty = false
+      const text =
+        previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
       if (part.state.status === "running") {
         part.state.metadata = {
-          output: output,
+          output: text,
           description: "",
         }
         Session.updatePart(part)
       }
-    })
+    }
 
-    proc.stderr?.on("data", (chunk) => {
-      output += chunk.toString()
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: output,
-          description: "",
-        }
-        Session.updatePart(part)
+    const appendChunk = (chunk: Buffer) => {
+      chunks.push(chunk)
+      size += chunk.length
+      while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
+        size -= chunks.shift()!.length
       }
-    })
+      if (previewLen < MAX_PREVIEW) {
+        previewParts.push(chunk.toString())
+        previewLen += chunk.length
+      }
+      previewDirty = true
+      if (!metadataTimer) {
+        metadataTimer = setTimeout(flushPreview, 100)
+      }
+    }
+
+    proc.stdout?.on("data", appendChunk)
+    proc.stderr?.on("data", appendChunk)
 
     let aborted = false
     let exited = false
@@ -1683,9 +1800,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     })
 
+    if (metadataTimer) clearTimeout(metadataTimer)
+    flushPreview()
+
+    let output = Buffer.concat(chunks).toString()
+
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
     }
+
+    const finalPreview =
+      previewLen > MAX_PREVIEW ? previewParts.join("").slice(0, MAX_PREVIEW) + "\n\n..." : previewParts.join("")
+
     msg.time.completed = Date.now()
     await Session.updateMessage(msg)
     if (part.state.status === "running") {
@@ -1698,7 +1824,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input: part.state.input,
         title: "",
         metadata: {
-          output,
+          output: finalPreview,
           description: "",
         },
         output,

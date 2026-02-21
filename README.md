@@ -1,3 +1,43 @@
+## Fork: dzianisv/opencode
+
+Patches on top of [sst/opencode](https://github.com/sst/opencode) fixing two critical issues.
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dzianisv/opencode/main/scripts/install.sh | bash
+```
+
+Requires `git`. Installs [bun](https://bun.sh) automatically if missing. Clones, builds, and installs to your existing `opencode` location or `~/.opencode/bin/`.
+
+### Infinite loop fix ([#5](https://github.com/dzianisv/opencode/issues/5), upstream [#13511](https://github.com/anomalyco/opencode/issues/13511))
+
+The agent would get stuck calling `TodoWrite` in an infinite loop, consuming 200k+ tokens per session. Root cause: `TodoWrite` returned the full todo list JSON as tool output, the model saw pending items, the system prompt told it to update them, so it called `TodoWrite` again — forever.
+
+**Fixes:**
+
+- `TodoWrite` now returns a short summary (`"3 completed, 1 in progress, 2 pending"`) instead of full JSON, breaking the feedback loop
+- Cross-message doom loop detection: if the same tool dominates 3 consecutive assistant messages, the session is terminated
+- Hard step limit (maxSteps: 200) as a safety net
+
+### Memory leaks and performance (upstream [#12687](https://github.com/anomalyco/opencode/issues/12687))
+
+Long-running sessions would leak memory and leave zombie processes.
+
+**Fixes:**
+
+- Missing cleanup handlers for child processes, file watchers, and MCP connections
+- O(n^2) string concatenation in LLM streaming, ripgrep output, and webfetch (replaced with array joins)
+- Batched delta flushing to reduce per-token storage writes
+- V8 heap limit to prevent unbounded memory growth
+
+### Other
+
+- Preview version format includes repo and commit hash (`0.0.0-dzianisv.opencode.<commit>`)
+- `scripts/install-local.sh` for building and installing from source
+
+---
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

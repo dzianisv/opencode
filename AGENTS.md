@@ -106,8 +106,18 @@ const table = sqliteTable("session", {
 })
 ```
 
+## Verification
+
+- After any code change, run the full build (`bun run script/build.ts` or `./scripts/install-local.sh`), not just typecheck. Typecheck alone misses missing dependencies and runtime build failures.
+- Run `bun install` before building if dependencies may have changed (new imports, cherry-picks, branch switches).
+- Never consider a task done until the build passes.
+
 ## Testing
 
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+
+## Meta
+
+- If you make a mistake and learn something project-specific from it, append the lesson to this file under the relevant section. Keep it short and technical.

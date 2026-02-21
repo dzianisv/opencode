@@ -28,3 +28,8 @@ opencode-dev
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+.reflection/
+.tts/
+.tts-debug.log
+session-*.md
+packages/sdk/js/openapi.json
