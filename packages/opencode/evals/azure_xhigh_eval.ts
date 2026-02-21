@@ -81,7 +81,7 @@ if (!info) {
 const variants = info.variants ? Object.keys(info.variants) : []
 if (!variants.includes("xhigh")) {
   console.error(`Azure model ${model} does not expose xhigh reasoning effort.`)
-  server.close()
+  opencode.server.close()
   process.exit(1)
 }
 
