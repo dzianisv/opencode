@@ -1229,6 +1229,14 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          doom_loop_threshold: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              "Number of consecutive assistant messages dominated by a single tool before stopping the session loop. Default is 5.",
+            ),
         })
         .optional(),
     })

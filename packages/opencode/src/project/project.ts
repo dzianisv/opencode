@@ -11,6 +11,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+import fs from "fs/promises"
 import { git } from "../util/git"
 import { Glob } from "../util/glob"
 import { which } from "../util/which"
@@ -228,10 +229,30 @@ export namespace Project {
 
         sandbox = top
 
+        const worktree = await git(["rev-parse", "--git-common-dir"], {
+          cwd: sandbox,
+        })
+          .then(async (result) => {
+            const dirname = path.dirname((await result.text()).trim())
+            if (dirname === ".") return sandbox
+            return dirname
+          })
+          .catch(() => undefined)
+
+        if (!worktree) {
+          return {
+            id,
+            sandbox,
+            worktree: sandbox,
+            vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+          }
+        }
+
+        const worktreeDir = await fs.realpath(worktree).catch(() => worktree)
         return {
           id,
           sandbox,
-          worktree,
+          worktree: worktreeDir,
           vcs: "git",
         }
       }

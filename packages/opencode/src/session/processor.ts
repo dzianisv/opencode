@@ -114,6 +114,8 @@ export namespace SessionProcessor {
           let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
           const deltas = new Map<string, { all: string[]; pending: string[] }>()
           let flushTimer: ReturnType<typeof setTimeout> | undefined
+          let toolCount = 0
+          const running = new Set<string>()
 
           const part = (id: string) => currentText?.id === id ? currentText : Object.values(reasoningMap).find((x) => x.id === id)
 
@@ -158,11 +160,28 @@ export namespace SessionProcessor {
             const ctl = new AbortController()
             const resetIdle = () => {
               if (!idle) return
+              if (toolCount > 0) return
               if (timer) clearTimeout(timer)
               timer = setTimeout(() => {
                 idleTriggered = true
                 ctl.abort()
               }, idle)
+            }
+            const clearIdle = () => {
+              if (!timer) return
+              clearTimeout(timer)
+              timer = undefined
+            }
+            const startTool = (id: string) => {
+              if (running.has(id)) return
+              running.add(id)
+              toolCount += 1
+              clearIdle()
+            }
+            const finishTool = (id: string) => {
+              if (!running.delete(id)) return
+              toolCount = Math.max(0, toolCount - 1)
+              if (toolCount === 0) resetIdle()
             }
             const stream = await LLM.stream({
               ...streamInput,
@@ -251,6 +270,7 @@ export namespace SessionProcessor {
                   break
 
                 case "tool-call": {
+                  startTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match) {
                     const part = await Session.updatePart({
@@ -297,6 +317,7 @@ export namespace SessionProcessor {
                   break
                 }
                 case "tool-result": {
+                  finishTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({
@@ -321,6 +342,7 @@ export namespace SessionProcessor {
                 }
 
                 case "tool-error": {
+                  finishTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({
