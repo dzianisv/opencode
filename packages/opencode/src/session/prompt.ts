@@ -42,6 +42,7 @@ import { Tool } from "@/tool/tool"
 import { PermissionNext } from "@/permission/next"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
+import { Config } from "../config/config"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
@@ -352,7 +353,8 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
-    const CROSS_MSG_DOOM_THRESHOLD = 5
+    const cfg = await Config.get()
+    const CROSS_MSG_DOOM_THRESHOLD = cfg.experimental?.doom_loop_threshold ?? 5
     const recentDominant: string[] = []
     let cache:
       | {

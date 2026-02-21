@@ -12,6 +12,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+import fs from "fs/promises"
 import { git } from "../util/git"
 import { Glob } from "../util/glob"
 
@@ -174,10 +175,11 @@ export namespace Project {
           }
         }
 
+        const worktreeDir = await fs.realpath(worktree).catch(() => worktree)
         return {
           id,
           sandbox,
-          worktree,
+          worktree: worktreeDir,
           vcs: "git",
         }
       }
