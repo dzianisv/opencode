@@ -47,7 +47,6 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
-<<<<<<< HEAD
 import { Database, desc, eq } from "../storage/db"
 import { MessageTable } from "./session.sql"
 import { decodeDataUrl } from "@/util/data-url"
@@ -305,6 +304,20 @@ export namespace SessionPrompt {
     ).map((row) => row.id)
     // order is newest-first from DB; reverse so oldest is first
     order.reverse()
+    if (order.length === 0) {
+      const messages: MessageV2.WithParts[] = []
+      for await (const msg of MessageV2.stream(sessionID)) {
+        messages.push(msg)
+      }
+      messages.reverse()
+      return {
+        messages,
+        cache: {
+          order: messages.map((msg) => msg.info.id),
+          map: new Map(messages.map((msg) => [msg.info.id, msg])),
+        },
+      }
+    }
     if (!cached) {
       const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
       return {

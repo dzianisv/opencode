@@ -126,3 +126,6 @@ const table = sqliteTable("session", {
 ## Type Checking
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+- If you make a mistake and learn something project-specific from it, append the lesson to this file under the relevant section. Keep it short and technical.
+- Promptfoo `azure:responses` evaluations fail with `2025-04-01-preview`; use `apiVersion=preview` instead.
+- Headless `opencode serve` persists messages in SQLite only; `SessionPrompt.loadMessages` must fall back to `MessageV2.stream` when storage JSON files are absent.
