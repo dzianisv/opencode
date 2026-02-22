@@ -10,6 +10,7 @@ import { Filesystem } from "../../util/filesystem"
 import { createOpencodeClient, type Message, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
+import { Auth } from "../../auth"
 import { Agent } from "../../agent/agent"
 import { PermissionNext } from "../../permission/next"
 import { Tool } from "../../tool/tool"
@@ -309,6 +310,19 @@ export const RunCommand = cmd({
       process.exit(1)
     }
     const variant = args.variant ?? reasoningEffort
+    const { isJwtExpired } = await import("../../util/jwt")
+    const auth = await Auth.get("kilocode")
+    const defaultModel = await Provider.defaultModel().catch(() => undefined)
+    const isUsingKilocode =
+      args.model?.includes("kilocode") ||
+      (!args.model && defaultModel?.providerID === "kilocode")
+
+    if (isUsingKilocode && auth && auth.type === "api") {
+      if (isJwtExpired(auth.key)) {
+        UI.error("Kilo Code token has expired. Please run 'opencode auth login kilocode' to refresh it.")
+        process.exit(1)
+      }
+    }
 
     let message = [...args.message, ...(args["--"] || [])]
       .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
@@ -332,7 +346,8 @@ export const RunCommand = cmd({
 
       for (const filePath of list) {
         const resolvedPath = path.resolve(process.cwd(), filePath)
-        if (!(await Filesystem.exists(resolvedPath))) {
+        const file = Bun.file(resolvedPath)
+        if (!(await file.exists())) {
           UI.error(`File not found: ${filePath}`)
           process.exit(1)
         }

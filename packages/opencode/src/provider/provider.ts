@@ -367,6 +367,39 @@ export namespace Provider {
         },
       }
     },
+    kilocode: async (provider) => {
+      const auth = await Auth.get("kilocode")
+      const key = auth && (auth.type === "api" || auth.type === "wellknown") ? auth.key : undefined
+
+      // Determine base URL from token (dev vs prod)
+      const baseUrl = (() => {
+        if (!key) return "https://api.kilo.ai"
+        try {
+          const parts = key.split(".")
+          if (parts.length !== 3) return "https://api.kilo.ai"
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString())
+          if (payload.env === "development") return "http://localhost:3000"
+        } catch {}
+        return "https://api.kilo.ai"
+      })()
+
+      if (provider) provider.npm = "@ai-sdk/openai-compatible"
+
+      return {
+        autoload: true,
+        options: {
+          baseURL: `${baseUrl}/api/openrouter`,
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "x-api-key": key,
+            "HTTP-Referer": "https://kilocode.ai",
+            "X-Title": "Kilo Code",
+            "X-KiloCode-Version": "4.138.0",
+            "User-Agent": "Kilo-Code/4.138.0",
+          },
+        },
+      }
+    },
     vercel: async () => {
       return {
         autoload: false,
@@ -668,6 +701,7 @@ export namespace Provider {
       source: z.enum(["env", "config", "custom", "api"]),
       env: z.string().array(),
       key: z.string().optional(),
+      npm: z.string().optional(),
       options: z.record(z.string(), z.any()),
       models: z.record(z.string(), Model),
     })

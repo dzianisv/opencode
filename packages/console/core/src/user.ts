@@ -37,7 +37,7 @@ export namespace User {
         .select()
         .from(UserTable)
         .where(and(eq(UserTable.workspaceID, Actor.workspace()), eq(UserTable.id, id), isNull(UserTable.timeDeleted)))
-        .then((rows) => rows[0]),
+        .then((rows: (typeof UserTable.$inferSelect)[]) => rows[0]),
     ),
   )
 
@@ -50,7 +50,7 @@ export namespace User {
         .from(UserTable)
         .leftJoin(AuthTable, and(eq(UserTable.accountID, AuthTable.accountID), eq(AuthTable.provider, "email")))
         .where(and(eq(UserTable.workspaceID, Actor.workspace()), eq(UserTable.id, id)))
-        .then((rows) => rows[0]?.email),
+        .then((rows: { email: string | null }[]) => rows[0]?.email),
     ),
   )
 
@@ -72,7 +72,7 @@ export namespace User {
           })
           .from(AuthTable)
           .where(and(eq(AuthTable.provider, "email"), eq(AuthTable.subject, email)))
-          .then((rows) => rows[0]?.accountID),
+          .then((rows: { accountID: string | null }[]) => rows[0]?.accountID),
       )
       await Database.use((tx) =>
         tx
@@ -107,13 +107,13 @@ export namespace User {
             .select()
             .from(UserTable)
             .where(and(eq(UserTable.workspaceID, workspaceID), eq(UserTable.accountID, accountID)))
-            .then((rows) => rows[0])
+            .then((rows: (typeof UserTable.$inferSelect)[]) => rows[0])
 
           const key = await tx
             .select()
             .from(KeyTable)
             .where(and(eq(KeyTable.workspaceID, workspaceID), eq(KeyTable.userID, user.id)))
-            .then((rows) => rows[0])
+            .then((rows: (typeof KeyTable.$inferSelect)[]) => rows[0])
 
           if (key) return
 
@@ -135,9 +135,10 @@ export namespace User {
             .where(
               and(eq(UserTable.workspaceID, workspaceID), eq(UserTable.id, Actor.assert("user").properties.userID)),
             )
-            .then((rows) => rows[0]),
+            .then((rows: { inviterEmail: string | null; workspaceName: string }[]) => rows[0]),
         )
 
+        if (!emailInfo.inviterEmail) throw new Error("Missing inviter email")
         const { InviteEmail } = await import("@opencode-ai/console-mail/InviteEmail.jsx")
         await AWS.sendEmail({
           to: email,
@@ -180,7 +181,7 @@ export namespace User {
     })
 
     await Promise.all(
-      invitations.map((invite) =>
+      invitations.map((invite: { id: string; workspaceID: string }) =>
         Actor.provide(
           "system",
           {

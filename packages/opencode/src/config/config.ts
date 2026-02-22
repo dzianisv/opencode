@@ -307,6 +307,7 @@ export namespace Config {
   }
 
   async function needsInstall(dir: string) {
+    if (process.env.OPENCODE_TEST_DISABLE_DEP_INSTALL === "1") return false
     // Some config dirs may be read-only.
     // Installing deps there will fail; skip installation in that case.
     const writable = await isWritable(dir)

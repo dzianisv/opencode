@@ -4,24 +4,12 @@ export * from "drizzle-orm"
 import { Client } from "@planetscale/database"
 
 import { MySqlTransaction, type MySqlTransactionConfig } from "drizzle-orm/mysql-core"
-import type { ExtractTablesWithRelations } from "drizzle-orm"
-import type { EmptyRelations } from "drizzle-orm/relations"
 import type { PlanetScalePreparedQueryHKT, PlanetscaleQueryResultHKT } from "drizzle-orm/planetscale-serverless"
 import { Context } from "../context"
 import { memo } from "../util/memo"
 
 export namespace Database {
-  type Schema = Record<string, never>
-  type Relations = EmptyRelations
-  type Tables = ExtractTablesWithRelations<Record<string, never>, Schema>
-
-  export type Transaction = MySqlTransaction<
-    PlanetscaleQueryResultHKT,
-    PlanetScalePreparedQueryHKT,
-    Schema,
-    Tables,
-    Relations
-  >
+  export type Transaction = MySqlTransaction<PlanetscaleQueryResultHKT, PlanetScalePreparedQueryHKT>
 
   const client = memo(() => {
     const result = new Client({
@@ -43,7 +31,10 @@ export namespace Database {
   export async function use<T>(callback: (trx: TxOrDb) => Promise<T>) {
     try {
       const { tx } = TransactionContext.use()
-      return tx.transaction(callback)
+      const run = tx as unknown as {
+        transaction: (fn: (inner: Transaction) => Promise<T>) => Promise<T>
+      }
+      return run.transaction(callback as (inner: Transaction) => Promise<T>)
     } catch (err) {
       if (err instanceof Context.NotFound) {
         const effects: (() => void | Promise<void>)[] = []

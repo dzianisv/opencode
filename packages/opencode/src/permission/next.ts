@@ -3,8 +3,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
-import { Database, eq } from "@/storage/db"
-import { PermissionTable } from "@/session/session.sql"
+import { Storage } from "@/storage/storage"
 import { fn } from "@/util/fn"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
@@ -106,27 +105,31 @@ export namespace PermissionNext {
     ),
   }
 
-  const state = Instance.state(() => {
-    const projectID = Instance.project.id
-    const row = Database.use((db) =>
-      db.select().from(PermissionTable).where(eq(PermissionTable.project_id, projectID)).get(),
-    )
-    const stored = row?.data ?? ([] as Ruleset)
+  const state = Instance.state(
+    async () => {
+      const projectID = Instance.project.id
+      const stored = await Storage.read<Ruleset>(["permission", projectID]).catch(() => [] as Ruleset)
 
-    const pending: Record<
-      string,
-      {
-        info: Request
-        resolve: () => void
-        reject: (e: any) => void
+      const pending: Record<
+        string,
+        {
+          info: Request
+          resolve: () => void
+          reject: (e: unknown) => void
+        }
+      > = {}
+
+      return {
+        pending,
+        approved: stored,
       }
-    > = {}
-
-    return {
-      pending,
-      approved: stored,
-    }
-  })
+    },
+    async (current) => {
+      for (const item of Object.values(current.pending)) {
+        item.reject(new RejectedError())
+      }
+    },
+  )
 
   export const ask = fn(
     Request.partial({ id: true }).extend({

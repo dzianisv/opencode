@@ -182,10 +182,7 @@ export const BashTool = Tool.define("bash", async () => {
 
       const chunks: Buffer[] = []
       let size = 0
-      const previewParts: string[] = []
-      let previewLen = 0
-      let previewDirty = false
-      let metadataTimer: ReturnType<typeof setTimeout> | undefined
+      let preview = ""
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -195,22 +192,6 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const flushPreview = () => {
-        metadataTimer = undefined
-        if (!previewDirty) return
-        previewDirty = false
-        const text =
-          previewLen > MAX_METADATA_LENGTH
-            ? previewParts.join("").slice(0, MAX_METADATA_LENGTH) + "\n\n..."
-            : previewParts.join("")
-        ctx.metadata({
-          metadata: {
-            output: text,
-            description: params.description,
-          },
-        })
-      }
-
       const append = (chunk: Buffer) => {
         chunks.push(chunk)
         size += chunk.length
@@ -218,16 +199,20 @@ export const BashTool = Tool.define("bash", async () => {
         while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
           size -= chunks.shift()!.length
         }
-        // Accumulate preview text without O(n²) string concatenation.
-        // Parts are joined only on flush, which is throttled.
-        if (previewLen < MAX_METADATA_LENGTH) {
-          previewParts.push(chunk.toString())
-          previewLen += chunk.length
+        // Build a capped preview string for the TUI metadata display.
+        // Once we exceed the cap we stop appending to avoid O(n²) growth.
+        if (preview.length < MAX_METADATA_LENGTH) {
+          preview += chunk.toString()
+          if (preview.length > MAX_METADATA_LENGTH) {
+            preview = preview.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+          }
         }
-        previewDirty = true
-        if (!metadataTimer) {
-          metadataTimer = setTimeout(flushPreview, 100)
-        }
+        ctx.metadata({
+          metadata: {
+            output: preview,
+            description: params.description,
+          },
+        })
       }
 
       proc.stdout?.on("data", append)
@@ -275,9 +260,6 @@ export const BashTool = Tool.define("bash", async () => {
         })
       })
 
-      if (metadataTimer) clearTimeout(metadataTimer)
-      flushPreview()
-
       let output = Buffer.concat(chunks).toString()
 
       const resultMetadata: string[] = []
@@ -294,15 +276,10 @@ export const BashTool = Tool.define("bash", async () => {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"
       }
 
-      const finalPreview =
-        previewLen > MAX_METADATA_LENGTH
-          ? previewParts.join("").slice(0, MAX_METADATA_LENGTH) + "\n\n..."
-          : previewParts.join("")
-
       return {
         title: params.description,
         metadata: {
-          output: finalPreview,
+          output: preview,
           exit: proc.exitCode,
           description: params.description,
         },
