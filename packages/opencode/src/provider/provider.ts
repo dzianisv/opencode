@@ -408,6 +408,39 @@ export namespace Provider {
         },
       }
     },
+    kilocode: async (provider) => {
+      const auth = await Auth.get("kilocode")
+      const key = auth && (auth.type === "api" || auth.type === "wellknown") ? auth.key : undefined
+
+      // Determine base URL from token (dev vs prod)
+      const baseUrl = (() => {
+        if (!key) return "https://api.kilo.ai"
+        try {
+          const parts = key.split(".")
+          if (parts.length !== 3) return "https://api.kilo.ai"
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString())
+          if (payload.env === "development") return "http://localhost:3000"
+        } catch {}
+        return "https://api.kilo.ai"
+      })()
+
+      if (provider) provider.npm = "@ai-sdk/openai-compatible"
+
+      return {
+        autoload: true,
+        options: {
+          baseURL: `${baseUrl}/api/openrouter`,
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "x-api-key": key,
+            "HTTP-Referer": "https://kilocode.ai",
+            "X-Title": "Kilo Code",
+            "X-KiloCode-Version": "4.138.0",
+            "User-Agent": "Kilo-Code/4.138.0",
+          },
+        },
+      }
+    },
     vercel: async () => {
       return {
         autoload: false,
@@ -748,6 +781,7 @@ export namespace Provider {
       source: z.enum(["env", "config", "custom", "api"]),
       env: z.string().array(),
       key: z.string().optional(),
+      npm: z.string().optional(),
       options: z.record(z.string(), z.any()),
       models: z.record(z.string(), Model),
     })
@@ -838,6 +872,33 @@ export namespace Provider {
     using _ = log.time("state")
     const config = await Config.get()
     const modelsDev = await ModelsDev.get()
+    if (!modelsDev["kilocode"]) {
+      modelsDev["kilocode"] = {
+        id: "kilocode",
+        name: "Kilo Code",
+        env: ["KILOCODE_API_KEY"],
+        models: {
+          "anthropic/claude-3-5-sonnet": {
+            id: "anthropic/claude-3-5-sonnet",
+            name: "Claude 3.5 Sonnet",
+            release_date: "2024-06-20",
+            attachment: true,
+            reasoning: false,
+            temperature: true,
+            tool_call: true,
+            cost: {
+              input: 0,
+              output: 0,
+            },
+            limit: {
+              context: 200000,
+              output: 8192,
+            },
+            options: {},
+          },
+        },
+      }
+    }
     const database = mapValues(modelsDev, fromModelsDevProvider)
 
     const disabled = new Set(config.disabled_providers ?? [])
