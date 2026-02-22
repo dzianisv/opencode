@@ -282,6 +282,20 @@ export namespace SessionPrompt {
       | undefined,
   ) {
     const order = (await Storage.list(["message", sessionID])).map((item) => item[2] as string).reverse()
+    if (order.length === 0) {
+      const messages: MessageV2.WithParts[] = []
+      for await (const msg of MessageV2.stream(sessionID)) {
+        messages.push(msg)
+      }
+      messages.reverse()
+      return {
+        messages,
+        cache: {
+          order: messages.map((msg) => msg.info.id),
+          map: new Map(messages.map((msg) => [msg.info.id, msg])),
+        },
+      }
+    }
     if (!cached) {
       const messages = await Promise.all(order.map((id) => MessageV2.get({ sessionID, messageID: id })))
       return {
