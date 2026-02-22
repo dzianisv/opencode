@@ -473,7 +473,7 @@ export namespace ProviderTransform {
         if (id.includes("gpt-5-") || id === "gpt-5") {
           azureEfforts.unshift("minimal")
         }
-        if (id.includes("5.2") || id.includes("5.3")) {
+        if (id.startsWith("gpt-5.2") || id.startsWith("gpt-5.3")) {
           azureEfforts.push("xhigh")
         }
         return Object.fromEntries(

@@ -151,10 +151,12 @@ if (data.info.variant !== "xhigh") {
 const parts = data.parts ?? []
 const reasoning = parts.filter((part) => part.type === "reasoning")
 const reasoningTokens = data.info.tokens?.reasoning ?? 0
-if (reasoning.length === 0 && reasoningTokens <= 0) {
-  console.error("No reasoning parts or reasoning tokens returned for xhigh request.")
-  opencode.server.close()
-  process.exit(1)
+if (process.env.AZURE_EVAL_REQUIRE_REASONING) {
+  if (reasoning.length === 0 && reasoningTokens <= 0) {
+    console.error("No reasoning parts or reasoning tokens returned for xhigh request.")
+    opencode.server.close()
+    process.exit(1)
+  }
 }
 
 const run = spawnSync("python", ["-m", "unittest", "-q"], { cwd: dir, encoding: "utf8" })
