@@ -354,8 +354,8 @@ export namespace SessionPrompt {
 
     let step = 0
     const cfg = await Config.get()
-    const CROSS_MSG_DOOM_THRESHOLD = cfg.experimental?.doom_loop_threshold ?? 5
-    const recentDominant: string[] = []
+    const CROSS_MSG_DOOM_THRESHOLD = cfg.experimental?.doom_loop_threshold ?? 4
+    const recentToolOnly: string[] = []
     let cache:
       | {
           order: string[]
