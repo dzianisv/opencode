@@ -153,19 +153,18 @@ export namespace SessionProcessor {
               flushTimer = undefined
               for (const [partID, entry] of accumulated) {
                 if (entry.flushed >= entry.chunks.length) continue
-                const delta = entry.chunks.slice(entry.flushed).join("")
-                entry.flushed = entry.chunks.length
                 const text = entry.chunks.join("")
+                entry.flushed = entry.chunks.length
 
                 if (currentText?.id === partID) {
                   currentText.text = text
-                  Session.updatePart({ part: currentText, delta })
+                  Session.updatePart(currentText)
                   continue
                 }
                 const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
                 if (reasoning) {
                   reasoning.text = text
-                  Session.updatePart({ part: reasoning, delta })
+                  Session.updatePart(reasoning)
                 }
               }
             }
