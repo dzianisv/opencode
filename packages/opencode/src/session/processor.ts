@@ -111,12 +111,15 @@ export namespace SessionProcessor {
           let timer: ReturnType<typeof setTimeout> | undefined
           let flushTimer: ReturnType<typeof setTimeout> | undefined
           let flushAllDeltas = () => {}
+          let toolCount = 0
+          const running = new Set<string>()
           try {
             const idleController = new AbortController()
             let currentText: MessageV2.TextPart | undefined
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
             const resetIdle = () => {
               if (!idle) return
+              if (toolCount > 0) return
               if (timer) clearTimeout(timer)
               timer = setTimeout(() => {
                 idleTriggered = true
@@ -126,6 +129,18 @@ export namespace SessionProcessor {
             const clearIdle = () => {
               if (!timer) return
               clearTimeout(timer)
+              timer = undefined
+            }
+            const startTool = (id: string) => {
+              if (running.has(id)) return
+              running.add(id)
+              toolCount += 1
+              clearIdle()
+            }
+            const finishTool = (id: string) => {
+              if (!running.delete(id)) return
+              toolCount = Math.max(0, toolCount - 1)
+              if (toolCount === 0) resetIdle()
             }
 
             const stream = await LLM.stream({
@@ -153,18 +168,31 @@ export namespace SessionProcessor {
               flushTimer = undefined
               for (const [partID, entry] of accumulated) {
                 if (entry.flushed >= entry.chunks.length) continue
+                const delta = entry.chunks.slice(entry.flushed).join("")
                 const text = entry.chunks.join("")
                 entry.flushed = entry.chunks.length
 
                 if (currentText?.id === partID) {
                   currentText.text = text
-                  Session.updatePart(currentText)
+                  Session.updatePartDelta({
+                    sessionID: currentText.sessionID,
+                    messageID: currentText.messageID,
+                    partID: currentText.id,
+                    field: "text",
+                    delta,
+                  })
                   continue
                 }
                 const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
                 if (reasoning) {
                   reasoning.text = text
-                  Session.updatePart(reasoning)
+                  Session.updatePartDelta({
+                    sessionID: reasoning.sessionID,
+                    messageID: reasoning.messageID,
+                    partID: reasoning.id,
+                    field: "text",
+                    delta,
+                  })
                 }
               }
             }
@@ -258,6 +286,7 @@ export namespace SessionProcessor {
                   break
 
                 case "tool-call": {
+                  startTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match) {
                     const part = await Session.updatePart({
@@ -304,6 +333,7 @@ export namespace SessionProcessor {
                   break
                 }
                 case "tool-result": {
+                  finishTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({
@@ -328,6 +358,7 @@ export namespace SessionProcessor {
                 }
 
                 case "tool-error": {
+                  finishTool(value.toolCallId)
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     await Session.updatePart({

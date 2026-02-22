@@ -55,14 +55,16 @@ export namespace SessionCompaction {
   // goes backwards through parts until there are 40_000 tokens worth of tool
   // calls. then erases output of previous tool calls. idea is to throw away old
   // tool calls that are no longer relevant.
-  export async function prune(input: { sessionID: string }) {
+  // Returns the set of message IDs whose parts were pruned, or undefined if
+  // nothing was pruned.
+  export async function prune(input: { sessionID: string }): Promise<Set<string> | undefined> {
     const config = await Config.get()
     if (config.compaction?.prune === false) return
     log.info("pruning")
     const msgs = await Session.messages({ sessionID: input.sessionID })
     let total = 0
     let pruned = 0
-    const toPrune = []
+    const toPrune: { part: MessageV2.ToolPart; messageID: string }[] = []
     let turns = 0
 
     loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
@@ -81,20 +83,23 @@ export namespace SessionCompaction {
             total += estimate
             if (total > PRUNE_PROTECT) {
               pruned += estimate
-              toPrune.push(part)
+              toPrune.push({ part, messageID: msg.info.id })
             }
           }
       }
     }
     log.info("found", { pruned, total })
     if (pruned > PRUNE_MINIMUM) {
-      for (const part of toPrune) {
-        if (part.state.status === "completed") {
-          part.state.time.compacted = Date.now()
-          await Session.updatePart(part)
+      const affected = new Set<string>()
+      for (const item of toPrune) {
+        if (item.part.state.status === "completed") {
+          item.part.state.time.compacted = Date.now()
+          await Session.updatePart(item.part)
+          affected.add(item.messageID)
         }
       }
       log.info("pruned", { count: toPrune.length })
+      return affected
     }
   }
 

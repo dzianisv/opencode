@@ -1210,6 +1210,14 @@ export namespace Config {
             .describe(
               "Timeout in milliseconds between stream chunks from LLM. If no data is received within this period, the request will be retried. Default is 60000 (60 seconds). Set to 0 to disable.",
             ),
+          doom_loop_threshold: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              "Number of consecutive assistant messages dominated by a single tool before stopping the session loop. Default is 5.",
+            ),
         })
         .optional(),
     })

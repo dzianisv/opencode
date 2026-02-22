@@ -28,11 +28,11 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { Instance } from "./project/instance"
 import path from "path"
 import { Global } from "./global"
 import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
-import { Instance } from "./project/instance"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {

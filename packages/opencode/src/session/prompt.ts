@@ -42,6 +42,7 @@ import { Tool } from "@/tool/tool"
 import { PermissionNext } from "@/permission/next"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
+import { Config } from "../config/config"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
@@ -341,7 +342,10 @@ export namespace SessionPrompt {
       })
     }
 
-    using _ = defer(() => cancel(sessionID))
+    using _ = defer(() => {
+      cancel(sessionID)
+      FileTime.clear(sessionID)
+    })
 
     // Structured output state
     // Note: On session resumption, state is reset but outputFormat is preserved
@@ -349,7 +353,8 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
-    const CROSS_MSG_DOOM_THRESHOLD = 4
+    const cfg = await Config.get()
+    const CROSS_MSG_DOOM_THRESHOLD = cfg.experimental?.doom_loop_threshold ?? 4
     const recentToolOnly: string[] = []
     let cache:
       | {
@@ -820,6 +825,18 @@ export namespace SessionPrompt {
           always: [candidate],
           ruleset: agent.permission,
         })
+      }
+
+      if (iterTools.length > 0 || result === "compact") {
+        // Prune old tool outputs between iterations so subsequent
+        // loadMessages fetches compacted versions from DB, reducing
+        // peak memory when sessions run many tool calls.
+        const pruned = await SessionCompaction.prune({ sessionID })
+        if (pruned && cache) {
+          // Invalidate cached messages whose parts were pruned so
+          // the next loadMessages re-fetches them with cleared outputs.
+          for (const id of pruned) cache.map.delete(id)
+        }
       }
 
       continue
@@ -1800,7 +1817,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         resolve()
       })
     })
-
     let output = Buffer.concat(chunks).toString()
 
     if (aborted) {

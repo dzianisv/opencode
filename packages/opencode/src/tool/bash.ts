@@ -259,7 +259,6 @@ export const BashTool = Tool.define("bash", async () => {
           reject(error)
         })
       })
-
       let output = Buffer.concat(chunks).toString()
 
       const resultMetadata: string[] = []

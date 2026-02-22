@@ -121,3 +121,4 @@ const table = sqliteTable("session", {
 ## Meta
 
 - If you make a mistake and learn something project-specific from it, append the lesson to this file under the relevant section. Keep it short and technical.
+- Promptfoo `azure:responses` evaluations fail with `2025-04-01-preview`; use `apiVersion=preview` instead.
