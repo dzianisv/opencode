@@ -435,15 +435,6 @@ export namespace SessionProcessor {
               })
               SessionStatus.set(input.sessionID, { type: "idle" })
             }
-<<<<<<< HEAD
-=======
-            input.assistantMessage.error = error
-            Bus.publish(Session.Event.Error, {
-              sessionID: input.assistantMessage.sessionID,
-              error: input.assistantMessage.error,
-            })
-            SessionStatus.set(input.sessionID, { type: "idle" })
->>>>>>> fc8e09a31 (revert: remove stream idle timeout feature)
           }
           if (snapshot) {
             const patch = await Snapshot.patch(snapshot)
