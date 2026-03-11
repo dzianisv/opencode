@@ -635,23 +635,12 @@ export namespace MessageV2 {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
               const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
-<<<<<<< HEAD
               const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
               // For providers that don't support media in tool results, extract media files
               // (images, PDFs) to be sent as a separate user message
               const mediaAttachments = attachments.filter((a) => isMedia(a.mime))
               const nonMediaAttachments = attachments.filter((a) => !isMedia(a.mime))
-=======
-              const attachments = part.state.time.compacted ? [] : (part.state.attachments ?? [])
-
-              // For providers that don't support media in tool results, extract media files
-              // (images, PDFs) to be sent as a separate user message
-              const isMediaAttachment = (a: { mime: string }) =>
-                a.mime.startsWith("image/") || a.mime === "application/pdf"
-              const mediaAttachments = attachments.filter(isMediaAttachment)
-              const nonMediaAttachments = attachments.filter((a) => !isMediaAttachment(a))
->>>>>>> fc8e09a31 (revert: remove stream idle timeout feature)
               if (!supportsMediaInToolResults && mediaAttachments.length > 0) {
                 media.push(...mediaAttachments)
               }
