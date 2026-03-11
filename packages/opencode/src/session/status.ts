@@ -1,6 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Instance } from "@/project/instance"
+import { GC } from "@/util/gc"
 import z from "zod"
 
 export namespace SessionStatus {
@@ -64,12 +65,17 @@ export namespace SessionStatus {
       status,
     })
     if (status.type === "idle") {
+      GC.idle()
       // deprecated
       Bus.publish(Event.Idle, {
         sessionID,
       })
       delete state()[sessionID]
       return
+    }
+    if (status.type === "busy") {
+      GC.busy()
+      GC.touch()
     }
     state()[sessionID] = status
   }
