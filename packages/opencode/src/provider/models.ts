@@ -6,6 +6,7 @@ import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { lazy } from "@/util/lazy"
 import { Filesystem } from "../util/filesystem"
+import { Auth } from "../auth"
 
 // Try to import bundled snapshot (generated at build time)
 // Falls back to undefined in dev mode when snapshot doesn't exist
@@ -14,6 +15,7 @@ import { Filesystem } from "../util/filesystem"
 export namespace ModelsDev {
   const log = Log.create({ service: "models.dev" })
   const filepath = path.join(Global.Path.cache, "models.json")
+  const kilocodeFilepath = path.join(Global.Path.cache, "kilocode-models.json")
 
   export const Model = z.object({
     id: z.string(),
@@ -99,14 +101,7 @@ export namespace ModelsDev {
   })
 
   export async function get() {
-<<<<<<< HEAD
-    const result = await Data()
-    return result as Record<string, Provider>
-=======
-    refresh()
-    const file = Bun.file(filepath)
-    const result = (await file.json().catch(() => { })) || JSON.parse(await data())
-    const database = result as Record<string, Provider>
+    const database = (await Data()) as Record<string, Provider>
 
     if (!database["kilocode"]) {
       database["kilocode"] = {
@@ -137,11 +132,9 @@ export namespace ModelsDev {
     }
 
     // Try to load from local cache first
-    const kilocodeCache = await Bun.file(kilocodeFilepath)
-      .json()
-      .catch(() => null)
-    if (kilocodeCache) {
-      Object.assign(database["kilocode"].models, kilocodeCache)
+    const cache = await Filesystem.readJson<Record<string, Model>>(kilocodeFilepath).catch(() => null)
+    if (cache) {
+      Object.assign(database["kilocode"].models, cache)
     }
 
     const auth = await Auth.get("kilocode")
@@ -178,9 +171,9 @@ export namespace ModelsDev {
             const json = (await response.json()) as any
             const models = json.data
             if (Array.isArray(models)) {
-              const newModels: Record<string, Model> = {}
+              const discovered: Record<string, Model> = {}
               for (const model of models) {
-                newModels[model.id] = {
+                discovered[model.id] = {
                   id: model.id,
                   name: model.name,
                   release_date: "2024-01-01",
@@ -199,8 +192,8 @@ export namespace ModelsDev {
                   options: {},
                 }
               }
-              Object.assign(database["kilocode"].models, newModels)
-              await Bun.write(kilocodeFilepath, JSON.stringify(newModels, null, 2))
+              Object.assign(database["kilocode"].models, discovered)
+              await Filesystem.write(kilocodeFilepath, JSON.stringify(discovered, null, 2))
             }
           } else if (response.status === 401 || response.status === 403) {
             log.error("Kilo Code authentication failed. The token might be expired or invalid.")
@@ -210,7 +203,7 @@ export namespace ModelsDev {
         }
       }
 
-      if (!kilocodeCache) {
+      if (!cache) {
         // Block if no cache exists yet
         await refreshModels()
       } else {
@@ -220,7 +213,6 @@ export namespace ModelsDev {
     }
 
     return database
->>>>>>> d339174b7 (fix(kilocode): improve authentication flow and token refresh)
   }
 
   export async function refresh() {
