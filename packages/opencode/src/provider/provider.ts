@@ -438,8 +438,6 @@ export namespace Provider {
         return "https://api.kilo.ai"
       })()
 
-      if (provider) provider.npm = "@ai-sdk/openai-compatible"
-
       return {
         autoload: true,
         options: {

@@ -48,14 +48,9 @@ process.on("uncaughtException", (e) => {
   })
 })
 
-<<<<<<< HEAD
 // Ensure the process exits on terminal hangup (eg. closing the terminal tab).
 // Without this, long-running commands like `serve` block on a never-resolving
 // promise and survive as orphaned processes.
-process.on("SIGHUP", () => process.exit())
-
-let cli = yargs(hideBin(process.argv))
-=======
 let disposing = false
 const graceful = async (signal: string) => {
   if (disposing) return
@@ -71,8 +66,7 @@ for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
   process.on(signal, () => void graceful(signal))
 }
 
-const cli = yargs(hideBin(process.argv))
->>>>>>> dcb0d7fb1 (fix: resolve memory leaks and zombie processes from missing cleanup handlers)
+let cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
   .scriptName("opencode")
   .wrap(100)

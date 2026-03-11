@@ -107,6 +107,7 @@ export namespace ModelsDev {
       database["kilocode"] = {
         id: "kilocode",
         name: "Kilo Code",
+        npm: "@ai-sdk/openai-compatible",
         env: ["KILOCODE_API_KEY"],
         models: {
           "minimax/max-m2": {

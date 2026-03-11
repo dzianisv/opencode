@@ -2,13 +2,9 @@ import { Server } from "../../server/server"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
-<<<<<<< HEAD
 import { Workspace } from "../../control-plane/workspace"
 import { Project } from "../../project/project"
-import { Installation } from "../../installation"
-=======
 import { Instance } from "../../project/instance"
->>>>>>> dcb0d7fb1 (fix: resolve memory leaks and zombie processes from missing cleanup handlers)
 
 export const ServeCommand = cmd({
   command: "serve",
@@ -22,12 +18,7 @@ export const ServeCommand = cmd({
     const server = Server.listen(opts)
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
 
-<<<<<<< HEAD
-    await new Promise(() => {})
-=======
     // Wait for a termination signal instead of blocking forever.
-    // The original `await new Promise(() => {})` made all cleanup
-    // code below it unreachable dead code.
     await new Promise<void>((resolve) => {
       for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
         process.on(signal, () => resolve())
@@ -35,7 +26,6 @@ export const ServeCommand = cmd({
     })
 
     await Instance.disposeAll().catch(() => {})
->>>>>>> dcb0d7fb1 (fix: resolve memory leaks and zombie processes from missing cleanup handlers)
     await server.stop()
   },
 })

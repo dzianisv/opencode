@@ -396,14 +396,8 @@ export namespace LSPServer {
         if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
 
         log.info("installing gopls")
-<<<<<<< HEAD
         const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
-          env: { ...process.env, GOBIN: Global.Path.bin },
-=======
-        const proc = Bun.spawn({
-          cmd: ["go", "install", "golang.org/x/tools/gopls@latest"],
           env: lspEnv({ GOBIN: Global.Path.bin }),
->>>>>>> b08f44e30 (Set heap limit)
           stdout: "pipe",
           stderr: "pipe",
           stdin: "pipe",
