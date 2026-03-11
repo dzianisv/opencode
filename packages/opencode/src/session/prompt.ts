@@ -350,17 +350,14 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
-<<<<<<< HEAD
     const CROSS_MSG_DOOM_THRESHOLD = 5
     const recentDominant: string[] = []
-=======
     let cache:
       | {
           order: string[]
           map: Map<string, MessageV2.WithParts>
         }
       | undefined
->>>>>>> b08f44e30 (Set heap limit)
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
