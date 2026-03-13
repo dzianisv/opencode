@@ -97,20 +97,20 @@ export namespace Installation {
 
     const checks = [
       {
-        name: "npm" as const,
-        command: () => text(["npm", "list", "-g", "--depth=0"]),
+        name: "bun" as const,
+        command: () => text(["bun", "pm", "ls", "-g"]),
       },
       {
-        name: "yarn" as const,
-        command: () => text(["yarn", "global", "list"]),
+        name: "npm" as const,
+        command: () => text(["npm", "list", "-g", "--depth=0"]),
       },
       {
         name: "pnpm" as const,
         command: () => text(["pnpm", "list", "-g", "--depth=0"]),
       },
       {
-        name: "bun" as const,
-        command: () => text(["bun", "pm", "ls", "-g"]),
+        name: "yarn" as const,
+        command: () => text(["yarn", "global", "list"]),
       },
       {
         name: "brew" as const,

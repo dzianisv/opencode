@@ -65,7 +65,7 @@ export namespace SessionStatus {
       status,
     })
     if (status.type === "idle") {
-      GC.idle()
+      GC.set(sessionID, false)
       // deprecated
       Bus.publish(Event.Idle, {
         sessionID,
@@ -74,9 +74,12 @@ export namespace SessionStatus {
       return
     }
     if (status.type === "busy") {
-      GC.busy()
-      GC.touch()
+      GC.set(sessionID, true)
+      state()[sessionID] = status
+      return
     }
+    GC.set(sessionID, false)
+    GC.touch()
     state()[sessionID] = status
   }
 }
