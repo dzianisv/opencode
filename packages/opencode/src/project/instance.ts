@@ -21,7 +21,7 @@ const seen = new Map<string, number>()
 const max = (() => {
   const val = Number(process.env.OPENCODE_INSTANCE_MAX)
   if (Number.isFinite(val)) return val
-  return 4
+  return 2
 })()
 
 const idle = (() => {
