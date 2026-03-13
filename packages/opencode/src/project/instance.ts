@@ -15,9 +15,27 @@ interface Context {
 }
 const context = Context.create<Context>("instance")
 const cache = new Map<string, Promise<Context>>()
+const refs = new Map<string, number>()
+const seen = new Map<string, number>()
+
+const max = (() => {
+  const val = Number(process.env.OPENCODE_INSTANCE_MAX)
+  if (Number.isFinite(val)) return val
+  return 4
+})()
+
+const idle = (() => {
+  const val = Number(process.env.OPENCODE_INSTANCE_IDLE_MS)
+  if (Number.isFinite(val)) return val
+  return 10 * 60 * 1000
+})()
 
 const disposal = {
   all: undefined as Promise<void> | undefined,
+}
+
+const sweep_state = {
+  run: undefined as Promise<void> | undefined,
 }
 
 function emit(directory: string) {
@@ -53,13 +71,81 @@ function boot(input: { directory: string; init?: () => Promise<any>; project?: P
   })
 }
 
+function stamp(directory: string) {
+  seen.set(directory, Date.now())
+}
+
 function track(directory: string, next: Promise<Context>) {
   const task = next.catch((error) => {
-    if (cache.get(directory) === task) cache.delete(directory)
+    if (cache.get(directory) === task) {
+      cache.delete(directory)
+      refs.delete(directory)
+      seen.delete(directory)
+    }
     throw error
   })
   cache.set(directory, task)
+  refs.set(directory, 0)
+  stamp(directory)
   return task
+}
+
+async function drop(directory: string, force = false, task?: Promise<Context>) {
+  const current = cache.get(directory)
+  if (!current) return false
+  if (task && current !== task) return false
+  if (!force && (refs.get(directory) ?? 0) > 0) return false
+
+  cache.delete(directory)
+  refs.delete(directory)
+  seen.delete(directory)
+
+  const ctx = await current.catch((error) => {
+    Log.Default.warn("instance dispose failed", { directory, error })
+    return undefined
+  })
+  if (!ctx) return true
+
+  await context.provide(ctx, async () => {
+    await Promise.all([State.dispose(directory), Effect.runPromise(InstanceState.dispose(directory))])
+  })
+  emit(directory)
+  return true
+}
+
+function sorted() {
+  return [...cache.keys()].sort((a, b) => (seen.get(a) ?? 0) - (seen.get(b) ?? 0))
+}
+
+function sweep() {
+  if (sweep_state.run) return sweep_state.run
+
+  sweep_state.run = iife(async () => {
+    const now = Date.now()
+
+    if (idle > 0) {
+      for (const key of sorted()) {
+        if ((refs.get(key) ?? 0) > 0) continue
+        const age = now - (seen.get(key) ?? now)
+        if (age < idle) continue
+        Log.Default.info("disposing idle instance", { key, idle_ms: age })
+        await drop(key)
+      }
+    }
+
+    if (max <= 0) return
+
+    while (cache.size > max) {
+      const victim = sorted().find((key) => (refs.get(key) ?? 0) === 0)
+      if (!victim) return
+      Log.Default.warn("disposing instance due to limit", { key: victim, limit: max, size: cache.size })
+      await drop(victim)
+    }
+  }).finally(() => {
+    sweep_state.run = undefined
+  })
+
+  return sweep_state.run
 }
 
 export const Instance = {
@@ -67,6 +153,7 @@ export const Instance = {
     const directory = Filesystem.resolve(input.directory)
     let existing = cache.get(directory)
     if (!existing) {
+      await sweep()
       Log.Default.info("creating instance", { directory })
       existing = track(
         directory,
@@ -76,10 +163,25 @@ export const Instance = {
         }),
       )
     }
-    const ctx = await existing
-    return context.provide(ctx, async () => {
-      return input.fn()
-    })
+    refs.set(directory, (refs.get(directory) ?? 0) + 1)
+    stamp(directory)
+
+    try {
+      const ctx = await existing
+      return context.provide(ctx, async () => {
+        return input.fn()
+      })
+    } finally {
+      if (!cache.has(directory)) {
+        refs.delete(directory)
+        seen.delete(directory)
+      }
+      if (cache.has(directory)) {
+        refs.set(directory, Math.max(0, (refs.get(directory) ?? 1) - 1))
+        stamp(directory)
+        void sweep()
+      }
+    }
   },
   get directory() {
     return context.use().directory
@@ -108,17 +210,15 @@ export const Instance = {
   async reload(input: { directory: string; init?: () => Promise<any>; project?: Project.Info; worktree?: string }) {
     const directory = Filesystem.resolve(input.directory)
     Log.Default.info("reloading instance", { directory })
-    await Promise.all([State.dispose(directory), Effect.runPromise(InstanceState.dispose(directory))])
-    cache.delete(directory)
+    const done = await drop(directory, true)
+    if (!done) emit(directory)
     const next = track(directory, boot({ ...input, directory }))
-    emit(directory)
     return await next
   },
   async dispose() {
     Log.Default.info("disposing instance", { directory: Instance.directory })
-    await Promise.all([State.dispose(Instance.directory), Effect.runPromise(InstanceState.dispose(Instance.directory))])
-    cache.delete(Instance.directory)
-    emit(Instance.directory)
+    const done = await drop(Instance.directory, true)
+    if (!done) emit(Instance.directory)
   },
   async disposeAll() {
     if (disposal.all) return disposal.all
@@ -126,24 +226,8 @@ export const Instance = {
     disposal.all = iife(async () => {
       Log.Default.info("disposing all instances")
       const entries = [...cache.entries()]
-      for (const [key, value] of entries) {
-        if (cache.get(key) !== value) continue
-
-        const ctx = await value.catch((error) => {
-          Log.Default.warn("instance dispose failed", { key, error })
-          return undefined
-        })
-
-        if (!ctx) {
-          if (cache.get(key) === value) cache.delete(key)
-          continue
-        }
-
-        if (cache.get(key) !== value) continue
-
-        await context.provide(ctx, async () => {
-          await Instance.dispose()
-        })
+      for (const [key, task] of entries) {
+        await drop(key, true, task)
       }
     }).finally(() => {
       disposal.all = undefined
