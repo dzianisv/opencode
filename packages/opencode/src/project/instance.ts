@@ -38,6 +38,19 @@ const sweep_state = {
   run: undefined as Promise<void> | undefined,
 }
 
+type Entry = {
+  directory: string
+  refs: number
+  idle_ms: number
+}
+
+type Stats = {
+  size: number
+  max: number
+  idle_ms: number
+  entries: Entry[]
+}
+
 function emit(directory: string) {
   GlobalBus.emit("event", {
     directory,
@@ -234,5 +247,18 @@ export const Instance = {
     })
 
     return disposal.all
+  },
+  stats(): Stats {
+    const now = Date.now()
+    return {
+      size: cache.size,
+      max,
+      idle_ms: idle,
+      entries: sorted().map((directory) => ({
+        directory,
+        refs: refs.get(directory) ?? 0,
+        idle_ms: now - (seen.get(directory) ?? now),
+      })),
+    }
   },
 }
