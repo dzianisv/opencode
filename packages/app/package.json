@@ -20,6 +20,7 @@
     "test:e2e": "playwright test",
     "test:e2e:local": "bun script/e2e-local.ts",
     "test:e2e:smoke": "bun script/e2e-smoke.ts",
+    "test:e2e:live-smoke": "bun script/e2e-live-smoke.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report e2e/playwright-report"
   },
