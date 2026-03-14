@@ -1,4 +1,5 @@
-import { spawn as launch, type ChildProcessWithoutNullStreams } from "child_process"
+import { spawn as launch, type ChildProcessByStdio } from "child_process"
+import type { Readable, Writable } from "stream"
 import path from "path"
 import os from "os"
 import { Global } from "../global"
@@ -15,8 +16,17 @@ import { which } from "../util/which"
 import { Module } from "@opencode-ai/util/module"
 
 const spawn = ((cmd, args, opts) => {
-  if (Array.isArray(args)) return launch(cmd, [...args], { ...(opts ?? {}), windowsHide: true })
-  return launch(cmd, { ...(args ?? {}), windowsHide: true })
+  if (Array.isArray(args))
+    return launch(cmd, [...args], {
+      ...(opts ?? {}),
+      windowsHide: true,
+      stdio: (opts as any)?.stdio ?? ["pipe", "pipe", "ignore"],
+    })
+  return launch(cmd, {
+    ...(args ?? {}),
+    windowsHide: true,
+    stdio: (args as any)?.stdio ?? ["pipe", "pipe", "ignore"],
+  })
 }) as typeof launch
 
 export namespace LSPServer {
@@ -30,7 +40,7 @@ export namespace LSPServer {
   const output = (cmd: string[], opts: Process.RunOptions = {}) => Process.text(cmd, { ...opts, nothrow: true })
 
   export interface Handle {
-    process: ChildProcessWithoutNullStreams
+    process: ChildProcessByStdio<Writable, Readable, Readable | null>
     initialization?: Record<string, any>
   }
 

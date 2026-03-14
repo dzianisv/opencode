@@ -32,6 +32,7 @@ export namespace ShareNext {
 
   const legacyApi = apiEndpoints("share")
   const consoleApi = apiEndpoints("shares")
+  let initialized = false
 
   export async function url() {
     const req = await request()
@@ -65,6 +66,8 @@ export namespace ShareNext {
 
   export async function init() {
     if (disabled) return
+    if (initialized) return
+    initialized = true
     Bus.subscribe(Session.Event.Updated, async (evt) => {
       await sync(evt.properties.info.id, [
         {

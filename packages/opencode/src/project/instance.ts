@@ -21,7 +21,7 @@ const seen = new Map<string, number>()
 const max = (() => {
   const val = Number(process.env.OPENCODE_INSTANCE_MAX)
   if (Number.isFinite(val)) return val
-  return 12
+  return 4
 })()
 
 const idle = (() => {
@@ -36,6 +36,30 @@ const disposal = {
 
 const sweep_state = {
   run: undefined as Promise<void> | undefined,
+}
+
+const poll = {
+  timer: undefined as NodeJS.Timeout | undefined,
+}
+
+function pulse() {
+  if (poll.timer) return
+  const ms = Math.max(1_000, Math.min(60_000, idle > 0 ? Math.floor(idle / 2) : 60_000))
+  poll.timer = setInterval(() => {
+    if (cache.size === 0) {
+      if (poll.timer) clearInterval(poll.timer)
+      poll.timer = undefined
+      return
+    }
+    void sweep()
+  }, ms)
+  poll.timer.unref?.()
+}
+
+function pause() {
+  if (!poll.timer) return
+  clearInterval(poll.timer)
+  poll.timer = undefined
 }
 
 type Entry = {
@@ -100,6 +124,7 @@ function track(directory: string, next: Promise<Context>) {
   cache.set(directory, task)
   refs.set(directory, 0)
   stamp(directory)
+  pulse()
   return task
 }
 
@@ -112,6 +137,7 @@ async function drop(directory: string, force = false, task?: Promise<Context>) {
   cache.delete(directory)
   refs.delete(directory)
   seen.delete(directory)
+  if (cache.size === 0) pause()
 
   const ctx = await current.catch((error) => {
     Log.Default.warn("instance dispose failed", { directory, error })
@@ -134,6 +160,7 @@ function sweep() {
   if (sweep_state.run) return sweep_state.run
 
   sweep_state.run = iife(async () => {
+    if (cache.size === 0) return
     const now = Date.now()
 
     if (idle > 0) {

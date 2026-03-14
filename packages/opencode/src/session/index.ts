@@ -25,6 +25,7 @@ import { WorkspaceContext } from "../control-plane/workspace-context"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
+import { FileTime } from "@/file/time"
 
 import type { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
@@ -678,6 +679,7 @@ export namespace Session {
           }),
         )
       })
+      FileTime.clear(sessionID)
     } catch (e) {
       log.error(e)
     }
@@ -768,7 +770,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
-          part: structuredClone(part),
+          part,
         }),
       )
     })
