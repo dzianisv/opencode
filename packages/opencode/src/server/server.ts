@@ -591,7 +591,7 @@ export namespace Server {
     mdns?: boolean
     mdnsDomain?: string
     cors?: string[]
-  }) {
+  }): Bun.Server<any> {
     const app = createApp(opts)
     const args = {
       hostname: opts.hostname,
@@ -599,15 +599,27 @@ export namespace Server {
       fetch: app.fetch,
       websocket: websocket,
     } as const
-    const tryServe = (port: number) => {
+    const ports = opts.port === 0 ? [4096, 0] : [opts.port]
+    const list = ports.map((port) => {
       try {
-        return Bun.serve({ ...args, port })
-      } catch {
-        return undefined
+        return { port, server: Bun.serve({ ...args, port }) }
+      } catch (err) {
+        return {
+          port,
+          error: err instanceof Error ? err.message : String(err),
+        }
       }
+    })
+    const hit = list.find(
+      (item): item is { port: number; server: Bun.Server<any> } => "server" in item && item.server !== undefined,
+    )
+    if (!hit) {
+      const detail = list
+        .map((item) => `${opts.hostname}:${item.port} ${"error" in item ? item.error : "unknown error"}`)
+        .join("; ")
+      throw new Error(`Failed to start server on ${opts.hostname} (requested port ${opts.port}). ${detail}`)
     }
-    const server = opts.port === 0 ? (tryServe(4096) ?? tryServe(0)) : tryServe(opts.port)
-    if (!server) throw new Error(`Failed to start server on port ${opts.port}`)
+    const server = hit.server
 
     const shouldPublishMDNS =
       opts.mdns &&

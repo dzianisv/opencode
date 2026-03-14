@@ -90,9 +90,12 @@ export namespace Pty {
     subscribers: Map<unknown, Socket>
   }
 
+  let total = 0
+
   const state = Instance.state(
     () => new Map<string, ActiveSession>(),
     async (sessions) => {
+      total = Math.max(0, total - sessions.size)
       for (const session of sessions.values()) {
         try {
           session.process.kill()
@@ -115,6 +118,10 @@ export namespace Pty {
 
   export function get(id: string) {
     return state().get(id)?.info
+  }
+
+  export function count() {
+    return total
   }
 
   export async function create(input: CreateInput) {
@@ -167,6 +174,7 @@ export namespace Pty {
       subscribers: new Map(),
     }
     state().set(id, session)
+    total += 1
     ptyProcess.onData((chunk) => {
       session.cursor += chunk.length
 
@@ -222,6 +230,7 @@ export namespace Pty {
     const session = state().get(id)
     if (!session) return
     state().delete(id)
+    total = Math.max(0, total - 1)
     log.info("removing session", { id })
     try {
       session.process.kill()

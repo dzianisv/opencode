@@ -10,6 +10,7 @@ import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
+import { Memory } from "@/diagnostic/memory"
 
 const log = Log.create({ service: "server" })
 
@@ -180,6 +181,34 @@ export const GlobalRoutes = lazy(() =>
           },
         })
         return c.json(true)
+      },
+    )
+    .get(
+      "/memory",
+      describeRoute({
+        summary: "Get memory diagnostics",
+        description: "Returns process memory, instance cache state, session counts, and optional process-tree memory.",
+        operationId: "global.memory",
+        responses: {
+          200: {
+            description: "Memory diagnostics",
+            content: {
+              "application/json": {
+                schema: resolver(Memory.Sample),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          children: z.coerce.boolean().optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        return c.json(await Memory.sample({ children: query.children }))
       },
     ),
 )
