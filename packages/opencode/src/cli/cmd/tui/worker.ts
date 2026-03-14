@@ -10,7 +10,6 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
-import { setTimeout as sleep } from "node:timers/promises"
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -34,9 +33,10 @@ process.on("uncaughtException", (e) => {
 })
 
 // Subscribe to global events and forward them via RPC
-GlobalBus.on("event", (event) => {
+const onglobal = (event: any) => {
   Rpc.emit("global.event", event)
-})
+}
+GlobalBus.on("event", onglobal)
 
 let server: Bun.Server<BunWebSocketData> | undefined
 
@@ -66,28 +66,17 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
   })
 
   ;(async () => {
-    while (!signal.aborted) {
-      const events = await Promise.resolve(
-        sdk.event.subscribe(
-          {},
-          {
-            signal,
-          },
-        ),
-      ).catch(() => undefined)
-
-      if (!events) {
-        await sleep(250)
-        continue
-      }
-
-      for await (const event of events.stream) {
-        Rpc.emit("event", event as Event)
-      }
-
-      if (!signal.aborted) {
-        await sleep(250)
-      }
+    const events = await Promise.resolve(
+      sdk.event.subscribe(
+        {},
+        {
+          signal,
+        },
+      ),
+    ).catch(() => undefined)
+    if (!events) return
+    for await (const event of events.stream) {
+      Rpc.emit("event", event as Event)
     }
   })().catch((error) => {
     Log.Default.error("event stream error", {
@@ -142,6 +131,7 @@ export const rpc = {
   },
   async shutdown() {
     Log.Default.info("worker shutting down")
+    GlobalBus.off("event", onglobal)
     if (eventStream.abort) eventStream.abort.abort()
     await Instance.disposeAll()
     if (server) server.stop(true)

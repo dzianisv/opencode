@@ -23,6 +23,7 @@ import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
 import { WorkspaceContext } from "../control-plane/workspace-context"
+import { FileTime } from "@/file/time"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
@@ -675,6 +676,7 @@ export namespace Session {
           }),
         )
       })
+      FileTime.clear(sessionID)
     } catch (e) {
       log.error(e)
     }

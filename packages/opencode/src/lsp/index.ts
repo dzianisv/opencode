@@ -13,6 +13,8 @@ import { Flag } from "@/flag/flag"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
+  const BROKEN_TTL_MS = 5 * 60 * 1000
+  const BROKEN_MAX = 2048
 
   export const Event = {
     Updated: BusEvent.define("lsp.updated", z.object({})),
@@ -85,7 +87,7 @@ export namespace LSP {
       if (cfg.lsp === false) {
         log.info("all LSPs are disabled")
         return {
-          broken: new Set<string>(),
+          broken: new Map<string, number>(),
           servers,
           clients,
           spawning: new Map<string, Promise<LSPClient.Info | undefined>>(),
@@ -115,6 +117,7 @@ export namespace LSP {
               process: spawn(item.command[0], item.command.slice(1), {
                 cwd: root,
                 windowsHide: true,
+                stdio: ["pipe", "pipe", "ignore"],
                 env: {
                   ...process.env,
                   ...item.env,
@@ -133,14 +136,18 @@ export namespace LSP {
       })
 
       return {
-        broken: new Set<string>(),
+        broken: new Map<string, number>(),
         servers,
         clients,
         spawning: new Map<string, Promise<LSPClient.Info | undefined>>(),
       }
     },
     async (state) => {
-      await Promise.all(state.clients.map((client) => client.shutdown()))
+      const list = [...state.clients]
+      state.clients.length = 0
+      state.spawning.clear()
+      state.broken.clear()
+      await Promise.all(list.map((client) => client.shutdown()))
     },
   )
 
@@ -175,6 +182,28 @@ export namespace LSP {
     })
   }
 
+  type State = Awaited<ReturnType<typeof state>>
+
+  function mark(state: State, key: string) {
+    state.broken.set(key, Date.now())
+    if (state.broken.size <= BROKEN_MAX) return
+    const cut = state.broken.size - BROKEN_MAX
+    let i = 0
+    for (const stale of state.broken.keys()) {
+      state.broken.delete(stale)
+      i += 1
+      if (i >= cut) return
+    }
+  }
+
+  function broken(state: State, key: string) {
+    const hit = state.broken.get(key)
+    if (hit === undefined) return false
+    if (Date.now() - hit <= BROKEN_TTL_MS) return true
+    state.broken.delete(key)
+    return false
+  }
+
   async function getClients(file: string) {
     const s = await state()
     const extension = path.parse(file).ext || file
@@ -184,16 +213,17 @@ export namespace LSP {
       const handle = await server
         .spawn(root)
         .then((value) => {
-          if (!value) s.broken.add(key)
+          if (!value) mark(s, key)
           return value
         })
         .catch((err) => {
-          s.broken.add(key)
+          mark(s, key)
           log.error(`Failed to spawn LSP server ${server.id}`, { error: err })
           return undefined
         })
 
       if (!handle) return undefined
+      s.broken.delete(key)
       log.info("spawned lsp server", { serverID: server.id })
 
       const client = await LSPClient.create({
@@ -201,7 +231,7 @@ export namespace LSP {
         server: handle,
         root,
       }).catch((err) => {
-        s.broken.add(key)
+        mark(s, key)
         handle.process.kill()
         log.error(`Failed to initialize LSP client ${server.id}`, { error: err })
         return undefined
@@ -219,6 +249,12 @@ export namespace LSP {
       }
 
       s.clients.push(client)
+      handle.process.once("exit", () => {
+        const index = s.clients.indexOf(client)
+        if (index === -1) return
+        s.clients.splice(index, 1)
+        Bus.publish(Event.Updated, {})
+      })
       return client
     }
 
@@ -227,7 +263,7 @@ export namespace LSP {
 
       const root = await server.root(file)
       if (!root) continue
-      if (s.broken.has(root + server.id)) continue
+      if (broken(s, root + server.id)) continue
 
       const match = s.clients.find((x) => x.root === root && x.serverID === server.id)
       if (match) {
@@ -269,7 +305,7 @@ export namespace LSP {
       if (server.extensions.length && !server.extensions.includes(extension)) continue
       const root = await server.root(file)
       if (!root) continue
-      if (s.broken.has(root + server.id)) continue
+      if (broken(s, root + server.id)) continue
       return true
     }
     return false

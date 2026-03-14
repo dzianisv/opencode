@@ -155,6 +155,22 @@ export namespace Pty {
       cwd,
       env,
     })
+    let session: ActiveSession | undefined
+    let pendingExit: number | undefined
+
+    const exited = (exitCode: number) => {
+      if (!session) {
+        pendingExit = exitCode
+        return
+      }
+      if (session.info.status === "exited") return
+      log.info("session exited", { id, exitCode })
+      session.info.status = "exited"
+      Bus.publish(Event.Exited, { id, exitCode })
+      remove(id)
+    }
+
+    ptyProcess.onExit(({ exitCode }) => exited(exitCode))
 
     const info = {
       id,
@@ -165,7 +181,7 @@ export namespace Pty {
       status: "running",
       pid: ptyProcess.pid,
     } as const
-    const session: ActiveSession = {
+    session = {
       info,
       process: ptyProcess,
       buffer: "",
@@ -202,13 +218,7 @@ export namespace Pty {
       session.buffer = session.buffer.slice(excess)
       session.bufferCursor += excess
     })
-    ptyProcess.onExit(({ exitCode }) => {
-      if (session.info.status === "exited") return
-      log.info("session exited", { id, exitCode })
-      session.info.status = "exited"
-      Bus.publish(Event.Exited, { id, exitCode })
-      remove(id)
-    })
+    if (pendingExit !== undefined) exited(pendingExit)
     Bus.publish(Event.Created, { info })
     return info
   }
