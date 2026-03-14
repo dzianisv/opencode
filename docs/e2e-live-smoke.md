@@ -52,9 +52,11 @@ ${TMPDIR:-/tmp}/opencode-live-smoke-ui.png
 - `OPENCODE_SMOKE_DIRECTORY` (optional override for API calls)
 - `OPENCODE_SERVER_USERNAME` (optional, for basic auth protected servers)
 - `OPENCODE_SERVER_PASSWORD` (optional, for basic auth protected servers)
+- `OPENCODE_DISABLE_CHANNEL_DB=1` (recommended when running a preview/custom channel binary but you want to validate against your default `opencode.db` sessions)
 
 ## Notes
 
 - The script creates and deletes one temporary session.
 - The script creates and deletes one temporary PTY.
 - If the smoke fails, it exits with non-zero and prints the failing step.
+- OpenCode stores sessions in channel-specific DB files for non-`latest`/`beta` channels. If your sessions appear "missing" after switching binaries, set `OPENCODE_DISABLE_CHANNEL_DB=1` before starting `opencode serve`.
