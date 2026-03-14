@@ -70,6 +70,25 @@ describe("file/time", () => {
         },
       })
     })
+
+    test("clears timestamps for a session", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "content", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          FileTime.read("session-clear-1", filepath)
+          FileTime.read("session-clear-2", filepath)
+
+          FileTime.clear("session-clear-1")
+
+          expect(FileTime.get("session-clear-1", filepath)).toBeUndefined()
+          expect(FileTime.get("session-clear-2", filepath)).toBeInstanceOf(Date)
+        },
+      })
+    })
   })
 
   describe("assert()", () => {

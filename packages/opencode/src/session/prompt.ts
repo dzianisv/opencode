@@ -62,6 +62,12 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+const TOOL_HISTORY_MAX = (() => {
+  const value = Number(process.env.OPENCODE_TOOL_HISTORY_MAX)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 128
+})()
+
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
@@ -285,7 +291,10 @@ export namespace SessionPrompt {
       })
     }
 
-    using _ = defer(() => cancel(sessionID))
+    using _ = defer(() => {
+      FileTime.clear(sessionID)
+      cancel(sessionID)
+    })
 
     // Structured output state
     // Note: On session resumption, state is reset but outputFormat is preserved
@@ -349,6 +358,7 @@ export namespace SessionPrompt {
         throw e
       })
       const task = tasks.pop()
+      const history = toolHistory(msgs)
 
       // pending subtask
       // TODO: centralize "invoke tool" logic
@@ -424,7 +434,7 @@ export namespace SessionPrompt {
           abort,
           callID: part.callID,
           extra: { bypassAgentCheck: true },
-          messages: msgs,
+          messages: history,
           async metadata(input) {
             part = (await Session.updatePart({
               ...part,
@@ -610,7 +620,7 @@ export namespace SessionPrompt {
         tools: lastUser.tools,
         processor,
         bypassAgentCheck,
-        messages: msgs,
+        messages: history,
       })
 
       // Inject StructuredOutput tool if JSON schema mode enabled
@@ -739,6 +749,11 @@ export namespace SessionPrompt {
       if (item.info.role === "user" && item.info.model) return item.info.model
     }
     return Provider.defaultModel()
+  }
+
+  function toolHistory(messages: MessageV2.WithParts[]) {
+    if (messages.length <= TOOL_HISTORY_MAX) return messages
+    return messages.slice(-TOOL_HISTORY_MAX)
   }
 
   /** @internal Exported for testing */
