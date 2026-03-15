@@ -9,7 +9,7 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import type { SQL } from "../storage/db"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
@@ -895,6 +895,41 @@ export namespace Session {
 
   const sweep = {
     timer: undefined as NodeJS.Timeout | undefined,
+  }
+
+  export function recover() {
+    const now = Date.now()
+    const rows = Database.use((db) =>
+      db
+        .select({ id: PartTable.id, data: PartTable.data })
+        .from(PartTable)
+        .where(
+          or(
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'running'`,
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'pending'`,
+          ),
+        )
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("recovering orphaned tool parts", { count: rows.length })
+    for (const row of rows) {
+      const data = row.data as any
+      if (data?.type !== "tool" || !data?.state) continue
+      const patched = {
+        ...data,
+        state: {
+          ...data.state,
+          status: "error",
+          error: "Tool execution aborted: server restarted",
+          time: { ...data.state.time, end: now },
+        },
+      }
+      Database.use((db) =>
+        db.update(PartTable).set({ data: patched }).where(eq(PartTable.id, row.id)).run(),
+      )
+    }
+    log.info("recovered orphaned tool parts", { count: rows.length })
   }
 
   export function startSweep() {

@@ -19,6 +19,7 @@ export const ServeCommand = cmd({
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
+    Session.recover()
     Memory.start("serve")
     Session.startSweep()
     const server = Server.listen(opts)
