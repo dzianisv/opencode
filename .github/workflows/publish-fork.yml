@@ -1,0 +1,43 @@
+name: Publish Fork
+run-name: "Publish Fork"
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  id-token: write
+  contents: write
+  packages: write
+
+jobs:
+  publish-cli:
+    runs-on: ubuntu-latest
+    if: github.repository == 'dzianisv/opencode'
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Build
+        id: build
+        run: |
+          ./packages/opencode/script/build.ts
+
+      - name: Setup npm auth
+        run: |
+          echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" > ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish Fork
+        run: |
+          bun run ./script/publish-fork.ts
+        working-directory: packages/opencode
