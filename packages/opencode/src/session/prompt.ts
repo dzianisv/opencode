@@ -453,11 +453,17 @@ export namespace SessionPrompt {
             } satisfies MessageV2.ToolPart)) as MessageV2.ToolPart
           },
           async ask(req) {
-            await PermissionNext.ask({
-              ...req,
-              sessionID: sessionID,
-              ruleset: PermissionNext.merge(taskAgent.permission, session.permission ?? []),
-            })
+            await Promise.race([
+              PermissionNext.ask({
+                ...req,
+                sessionID: sessionID,
+                ruleset: PermissionNext.merge(taskAgent.permission, session.permission ?? []),
+              }),
+              new Promise<never>((_, reject) => {
+                if (abort.aborted) return reject(new Error("aborted"))
+                abort.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+              }),
+            ])
           },
         }
         const result = await taskTool.execute(taskArgs, taskCtx).catch((error) => {
@@ -801,12 +807,20 @@ export namespace SessionPrompt {
         }
       },
       async ask(req) {
-        await PermissionNext.ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: PermissionNext.merge(input.agent.permission, input.session.permission ?? []),
-        })
+        await Promise.race([
+          PermissionNext.ask({
+            ...req,
+            sessionID: input.session.id,
+            tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+            ruleset: PermissionNext.merge(input.agent.permission, input.session.permission ?? []),
+          }),
+          new Promise<never>((_, reject) => {
+            const signal = options.abortSignal
+            if (!signal) return
+            if (signal.aborted) return reject(new Error("aborted"))
+            signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+          }),
+        ])
       },
     })
 
