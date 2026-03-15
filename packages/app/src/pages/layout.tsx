@@ -2426,15 +2426,8 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-      renderRecentTile={() => (
-        <RecentTile
-          selected={() => state.recent}
-          onClick={() => {
-            setState("recent", true)
-            layout.sidebar.open()
-          }}
-        />
-      )}
+      recentLabel={() => "Recently Active"}
+      onOpenRecent={() => navigate("/recent")}
       renderPanel={() =>
         state.recent ? (
           <RecentSidebarPanel

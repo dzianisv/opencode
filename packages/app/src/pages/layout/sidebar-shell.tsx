@@ -30,7 +30,8 @@ export const SidebarContent = (props: {
   onOpenSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
-  renderRecentTile: () => JSX.Element
+  recentLabel: Accessor<string>
+  onOpenRecent: () => void
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
@@ -92,6 +93,15 @@ export const SidebarContent = (props: {
           </DragDropProvider>
         </div>
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
+          <Tooltip placement={placement()} value={props.recentLabel()}>
+            <IconButton
+              icon="status"
+              variant="ghost"
+              size="large"
+              onClick={props.onOpenRecent}
+              aria-label={props.recentLabel()}
+            />
+          </Tooltip>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
             <IconButton
               icon="settings-gear"
