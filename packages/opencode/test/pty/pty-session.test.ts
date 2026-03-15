@@ -15,7 +15,6 @@ const wait = async (fn: () => boolean, ms = 5000) => {
   throw new Error("timeout waiting for pty events")
 }
 
-const pick = (log: Array<{ type: "created" | "exited" | "deleted"; id: PtyID }>, id: PtyID) => {
 const poll = async (fn: () => boolean, ms = 2000) => {
   try {
     await wait(fn, ms)
@@ -50,11 +49,10 @@ describe("pty", () => {
           const info = await Pty.create({ command: "/bin/ls", title: "ls" })
           id = info.id
 
-          await wait(() => pick(log, id!).includes("exited"))
-          await poll(() => pick(log, id).includes("exited"), 1500)
+          await poll(() => pick(log, id!).includes("exited"), 1500)
           await Pty.remove(id)
-          await wait(() => pick(log, id).includes("deleted"))
-          const events = pick(log, id)
+          await wait(() => pick(log, id!).includes("deleted"))
+          const events = pick(log, id!)
           expect(events[0]).toBe("created")
           expect(events.includes("deleted")).toBe(true)
           if (events.includes("exited")) {
