@@ -163,3 +163,15 @@ Behavior note:
   - connect explicitly via `POST /mcp/:name/connect` (UI toggle uses this).
 
 If tree process count spikes, capture a snapshot immediately and inspect which MCP command family spawned.
+
+## 9) High-output shell guardrails (2026-03-15)
+
+Shell-heavy workloads can produce large stdout/stderr bursts.
+To keep memory bounded, output capture is now capped in-memory before persistence/truncation:
+
+- `OPENCODE_SHELL_CAPTURE_MAX_BYTES` (default `2097152`)
+- `OPENCODE_BASH_CAPTURE_MAX_BYTES` (default `2097152`)
+
+Notes:
+- This protects long-running sessions from runaway in-memory output accumulation.
+- Extremely large command output may be clipped in-memory; if full output is required, redirect command output to a file and inspect it with `Read`/`Grep`.
