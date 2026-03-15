@@ -21,7 +21,7 @@ const seen = new Map<string, number>()
 const max = (() => {
   const val = Number(process.env.OPENCODE_INSTANCE_MAX)
   if (Number.isFinite(val)) return val
-  return 4
+  return 16
 })()
 
 const idle = (() => {
@@ -33,6 +33,8 @@ const idle = (() => {
 const disposal = {
   all: undefined as Promise<void> | undefined,
 }
+
+const opening = new Map<string, Promise<Context>>()
 
 const sweep_state = {
   run: undefined as Promise<void> | undefined,
@@ -128,6 +130,35 @@ function track(directory: string, next: Promise<Context>) {
   return task
 }
 
+function ensure(input: { directory: string; init?: () => Promise<any> }) {
+  const current = cache.get(input.directory)
+  if (current) return current
+
+  const run = opening.get(input.directory)
+  if (run) return run
+
+  const next = iife(async () => {
+    await sweep()
+    const cached = cache.get(input.directory)
+    if (cached) return cached
+
+    Log.Default.info("creating instance", { directory: input.directory })
+    return track(
+      input.directory,
+      boot({
+        directory: input.directory,
+        init: input.init,
+      }),
+    )
+  }).finally(() => {
+    if (opening.get(input.directory) !== next) return
+    opening.delete(input.directory)
+  })
+
+  opening.set(input.directory, next)
+  return next
+}
+
 async function drop(directory: string, force = false, task?: Promise<Context>) {
   const current = cache.get(directory)
   if (!current) return false
@@ -191,18 +222,7 @@ function sweep() {
 export const Instance = {
   async provide<R>(input: { directory: string; init?: () => Promise<any>; fn: () => R }): Promise<R> {
     const directory = Filesystem.resolve(input.directory)
-    let existing = cache.get(directory)
-    if (!existing) {
-      await sweep()
-      Log.Default.info("creating instance", { directory })
-      existing = track(
-        directory,
-        boot({
-          directory,
-          init: input.init,
-        }),
-      )
-    }
+    const existing = ensure({ directory, init: input.init })
     refs.set(directory, (refs.get(directory) ?? 0) + 1)
     stamp(directory)
 
