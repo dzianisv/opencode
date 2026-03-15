@@ -11,6 +11,7 @@ import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
 import { Memory } from "@/diagnostic/memory"
+import { Session } from "../../session"
 
 const log = Log.create({ service: "server" })
 
@@ -209,6 +210,46 @@ export const GlobalRoutes = lazy(() =>
       async (c) => {
         const query = c.req.valid("query")
         return c.json(await Memory.sample({ children: query.children }))
+      },
+    )
+    .get(
+      "/session",
+      describeRoute({
+        summary: "List sessions globally",
+        description: "List sessions across all projects, sorted by most recently updated.",
+        operationId: "global.session.list",
+        responses: {
+          200: {
+            description: "List of sessions",
+            content: {
+              "application/json": {
+                schema: resolver(Session.GlobalInfo.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          start: z.coerce.number().optional(),
+          search: z.string().optional(),
+          limit: z.coerce.number().optional(),
+          roots: z.coerce.boolean().optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        const sessions: Session.GlobalInfo[] = []
+        for (const session of Session.listGlobal({
+          roots: query.roots,
+          start: query.start,
+          search: query.search,
+          limit: query.limit ?? 50,
+        })) {
+          sessions.push(session)
+        }
+        return c.json(sessions)
       },
     ),
 )
