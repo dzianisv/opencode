@@ -440,6 +440,29 @@ Notice that this only works if it was not installed using a package manager such
 
 ---
 
+### Snapshots
+
+OpenCode tracks workspace snapshots (via an internal Git store) to power step review and revert behavior. You can disable this with the `snapshot` option.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "snapshot": false
+}
+```
+
+When disabled:
+
+- Step snapshot diffs are not generated.
+- Revert flows that depend on snapshots are limited.
+- Session history still works, but without snapshot-based file state restore.
+
+:::note
+This is different from memory profiling snapshots created by `opencode debug memory --snapshot`.
+:::
+
+---
+
 ### Formatters
 
 You can configure code formatters through the `formatter` option.

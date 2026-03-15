@@ -1052,7 +1052,10 @@ export namespace Config {
         })
         .optional(),
       plugin: z.string().array().optional(),
-      snapshot: z.boolean().optional(),
+      snapshot: z
+        .boolean()
+        .optional()
+        .describe("Enable workspace Git snapshots for step diff/review and revert features (default true)."),
       share: z
         .enum(["manual", "auto", "disabled"])
         .optional()
