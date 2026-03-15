@@ -7,7 +7,8 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { TodoWriteTool } from "./todo"
+import { TodoWriteTool, TodoReadTool } from "./todo"
+import { RenameTool } from "./rename"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
@@ -205,7 +206,43 @@ export namespace ToolRegistry {
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function register(tool: Tool.Info) {
-    return runPromise((svc) => svc.register(tool))
+    const { custom } = await state()
+    const idx = custom.findIndex((t) => t.id === tool.id)
+    if (idx >= 0) {
+      custom.splice(idx, 1, tool)
+      return
+    }
+    custom.push(tool)
+  }
+
+  async function all(): Promise<Tool.Info[]> {
+    const custom = await state().then((x) => x.custom)
+    const config = await Config.get()
+    const question = ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
+
+    return [
+      InvalidTool,
+      ...(question ? [QuestionTool] : []),
+      BashTool,
+      ReadTool,
+      GlobTool,
+      GrepTool,
+      EditTool,
+      WriteTool,
+      TaskTool,
+      WebFetchTool,
+      TodoWriteTool,
+      RenameTool,
+      // TodoReadTool,
+      WebSearchTool,
+      CodeSearchTool,
+      SkillTool,
+      ApplyPatchTool,
+      ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
+      ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
+      ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
+      ...custom,
+    ]
   }
 
   export async function ids() {
