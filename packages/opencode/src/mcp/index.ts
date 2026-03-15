@@ -364,6 +364,106 @@ export namespace MCP {
     }
   }
 
+  const shared = new Map<
+    string,
+    {
+      refs: number
+      client: MCPClient
+    }
+  >()
+  const opening = new Map<string, Promise<{ mcpClient: MCPClient | undefined; status: Status }>>()
+
+  function alive(pid: number) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function close(name: string, client: MCPClient) {
+    const pid = (client.transport as any)?.pid
+    const pids = typeof pid === "number" ? [...(await descendants(pid)), pid] : []
+    await client.close().catch((error) => {
+      log.error("Failed to close MCP client", {
+        name,
+        error,
+      })
+    })
+    if (!pids.length) return
+    for (const id of pids) {
+      try {
+        process.kill(id, "SIGTERM")
+      } catch {}
+    }
+    await Bun.sleep(150)
+    for (const id of pids) {
+      if (!alive(id)) continue
+      try {
+        process.kill(id, "SIGKILL")
+      } catch {}
+    }
+  }
+
+  async function release(name: string) {
+    const item = shared.get(name)
+    if (!item) return
+    item.refs = Math.max(0, item.refs - 1)
+    if (item.refs > 0) return
+    shared.delete(name)
+    log.info("closing shared mcp client", { name })
+    await close(name, item.client)
+  }
+
+  async function acquire(name: string, mcp: Config.Mcp) {
+    const item = shared.get(name)
+    if (item) {
+      item.refs += 1
+      log.info("reusing shared mcp client", { name, refs: item.refs })
+      return {
+        mcpClient: item.client,
+        status: { status: "connected" as const },
+      }
+    }
+    let run = opening.get(name)
+    if (!run) {
+      const next = create(name, mcp)
+        .then((result) => {
+          if (!result?.mcpClient) return result
+          const hit = shared.get(name)
+          if (!hit) {
+            shared.set(name, {
+              refs: 0,
+              client: result.mcpClient,
+            })
+            log.info("created shared mcp client", { name, refs: 0 })
+            return result
+          }
+          if (hit.client === result.mcpClient) return result
+          void close(name, result.mcpClient)
+          return {
+            mcpClient: hit.client,
+            status: { status: "connected" as const },
+          }
+        })
+        .finally(() => {
+          opening.delete(name)
+        })
+      opening.set(name, next)
+      run = next
+    }
+    const result = await run
+    const hit = shared.get(name)
+    if (!hit) return result
+    hit.refs += 1
+    log.info("reusing shared mcp client", { name, refs: hit.refs })
+    return {
+      mcpClient: hit.client,
+      status: { status: "connected" as const },
+    }
+  }
+
   const state = Instance.state(
     async () => {
       const cfg = await Config.get()
@@ -714,7 +814,7 @@ export namespace MCP {
       }
     },
     async (state) => {
-      await Promise.all(Object.entries(state.clients).map(([name, client]) => release(name, client)))
+      await Promise.all(Object.keys(state.clients).map((name) => release(name)))
       pendingOAuthTransports.clear()
     },
   )
@@ -767,7 +867,7 @@ export namespace MCP {
   export async function add(name: string, mcp: Config.Mcp) {
     const s = await state()
     if (s.clients[name]) {
-      await release(name, s.clients[name])
+      await release(name)
       delete s.clients[name]
     }
     const result = await acquire(name, mcp)
@@ -1172,7 +1272,7 @@ export namespace MCP {
 
     const s = await state()
     if (s.clients[name]) {
-      await release(name, s.clients[name])
+      await release(name)
       delete s.clients[name]
     }
     const result = await acquire(name, { ...mcp, enabled: true })
@@ -1195,7 +1295,7 @@ export namespace MCP {
     const s = await state()
     const client = s.clients[name]
     if (client) {
-      await release(name, client)
+      await release(name)
       delete s.clients[name]
     }
     s.status[name] = { status: "disabled" }
@@ -1222,7 +1322,7 @@ export namespace MCP {
             error: e instanceof Error ? e.message : String(e),
           }
           s.status[clientName] = failedStatus
-          await release(clientName, client, true)
+          await release(clientName)
           delete s.clients[clientName]
           return undefined
         })
