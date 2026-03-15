@@ -116,6 +116,27 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
+### Fork Memory Optimizations (dzianisv/dev)
+
+The `dzianisv/opencode` fork currently carries memory-focused patches and profiling tools on top of `upstream/dev`.
+
+Critical commits:
+
+- [`a5578e1f3`](https://github.com/dzianisv/opencode/commit/a5578e1f3) - bound instance cache to prevent serve memory blowups
+- [`250abd030`](https://github.com/dzianisv/opencode/commit/250abd030) - cap runtime state growth and harden stream cleanup
+- [`7720454da`](https://github.com/dzianisv/opencode/commit/7720454da) - share and hard-close MCP clients across instances
+- [`1be122485`](https://github.com/dzianisv/opencode/commit/1be122485) - dedupe instance bootstraps and restore cache headroom
+- [`597dc7d40`](https://github.com/dzianisv/opencode/commit/597dc7d40) - lazy-load MCP clients for status and bootstrap paths
+- [`ee069fc52`](https://github.com/dzianisv/opencode/commit/ee069fc52) - cap file read timestamps per session
+- [`8e30a85ec`](https://github.com/dzianisv/opencode/commit/8e30a85ec) - cap/throttle shell output metadata streaming
+- [`9b16b0c33`](https://github.com/dzianisv/opencode/commit/9b16b0c33) - spool bash tool output to disk instead of in-memory capping
+- [`41c594673`](https://github.com/dzianisv/opencode/commit/41c594673) - add memory diagnostics endpoints and monitor hooks
+- [`1f1ddc86e`](https://github.com/dzianisv/opencode/commit/1f1ddc86e) - add serve memory workload profiler
+
+Related docs:
+
+- [`docs/memory-forensics.md`](docs/memory-forensics.md)
+
 ### Contributing
 
 If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
