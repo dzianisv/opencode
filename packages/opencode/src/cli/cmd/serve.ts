@@ -4,6 +4,8 @@ import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
 import { Memory } from "../../diagnostic/memory"
 import { Session } from "../../session"
+import { MCP } from "../../mcp"
+import { Instance } from "../../project/instance"
 import { Log } from "../../util/log"
 
 const log = Log.create({ service: "serve" })
@@ -29,6 +31,12 @@ export const ServeCommand = cmd({
         log.error("shutdown snapshot failed", { error: e })
       })
       Memory.stop()
+      await Instance.disposeAll().catch((e: unknown) => {
+        log.error("instance disposal failed", { error: e })
+      })
+      await MCP.closeAll().catch((e: unknown) => {
+        log.error("mcp close failed", { error: e })
+      })
       await server.stop()
       process.exit(0)
     }

@@ -228,6 +228,20 @@ export namespace MCP {
     }
   }
 
+  export function stopMcpSweep() {
+    if (!mcpSweep.timer) return
+    clearInterval(mcpSweep.timer)
+    mcpSweep.timer = undefined
+  }
+
+  export async function closeAll() {
+    stopMcpSweep()
+    for (const [name, item] of shared) {
+      shared.delete(name)
+      await close(name, item.client)
+    }
+  }
+
   function alive(pid: number) {
     try {
       process.kill(pid, 0)
