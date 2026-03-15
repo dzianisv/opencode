@@ -12,6 +12,7 @@ import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
+import { Session } from "../../session"
 
 const log = Log.create({ service: "server" })
 
@@ -252,61 +253,52 @@ export const GlobalRoutes = lazy(() =>
         return c.json(true)
       },
     )
-    .post(
-      "/upgrade",
+    .get(
+      "/session",
       describeRoute({
-        summary: "Upgrade opencode",
-        description: "Upgrade opencode to the specified version or latest if not specified.",
-        operationId: "global.upgrade",
+        summary: "List sessions globally",
+        description: "List sessions across all projects, sorted by most recently updated.",
+        operationId: "global.session.list",
         responses: {
           200: {
-            description: "Upgrade result",
+            description: "List of sessions",
             content: {
               "application/json": {
-                schema: resolver(
-                  z.union([
-                    z.object({
-                      success: z.literal(true),
-                      version: z.string(),
-                    }),
-                    z.object({
-                      success: z.literal(false),
-                      error: z.string(),
-                    }),
-                  ]),
-                ),
+                schema: resolver(Session.GlobalInfo.array()),
               },
             },
           },
-          ...errors(400),
         },
       }),
       validator(
-        "json",
+        "query",
         z.object({
-          target: z.string().optional(),
+          start: z.coerce.number().optional(),
+          cursor: z.coerce.number().optional(),
+          search: z.string().optional(),
+          limit: z.coerce.number().optional(),
+          roots: z.coerce.boolean().optional(),
         }),
       ),
       async (c) => {
-        const method = await Installation.method()
-        if (method === "unknown") {
-          return c.json({ success: false, error: "Unknown installation method" }, 400)
+        const query = c.req.valid("query")
+        const limit = query.limit ?? 50
+        const sessions: Session.GlobalInfo[] = []
+        for (const session of Session.listGlobal({
+          roots: query.roots,
+          start: query.start,
+          cursor: query.cursor,
+          search: query.search,
+          limit: limit + 1,
+        })) {
+          sessions.push(session)
         }
-        const target = c.req.valid("json").target || (await Installation.latest(method))
-        const result = await Installation.upgrade(method, target)
-          .then(() => ({ success: true as const, version: target }))
-          .catch((e) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
-        if (result.success) {
-          GlobalBus.emit("event", {
-            directory: "global",
-            payload: {
-              type: Installation.Event.Updated.type,
-              properties: { version: target },
-            },
-          })
-          return c.json(result)
+        if (sessions.length > limit) {
+          const next = sessions[limit - 1]
+          sessions.length = limit
+          if (next) c.header("x-next-cursor", String(next.time.updated))
         }
-        return c.json(result, 500)
+        return c.json(sessions)
       },
     ),
 )
