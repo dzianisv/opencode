@@ -555,9 +555,35 @@ export namespace Server {
         },
       )
       .all("/*", async (c) => {
-        const path = c.req.path
+        const reqpath = c.req.path
+        const { resolve, join } = await import("path")
 
-        const response = await proxy(`https://app.opencode.ai${path}`, {
+        // Serve from local build if available
+        const dir = resolve(import.meta.dir, "../../../app/dist")
+        const target = reqpath === "/" ? "index.html" : reqpath.slice(1)
+        const file = Bun.file(join(dir, target))
+        if (await file.exists()) {
+          return new Response(file, {
+            headers: {
+              "Content-Type": file.type,
+              "Content-Security-Policy":
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:",
+            },
+          })
+        }
+        // SPA fallback — serve index.html for client-side routes
+        const index = Bun.file(join(dir, "index.html"))
+        if (await index.exists()) {
+          return new Response(index, {
+            headers: {
+              "Content-Type": "text/html",
+              "Content-Security-Policy":
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:",
+            },
+          })
+        }
+
+        const response = await proxy(`https://app.opencode.ai${reqpath}`, {
           ...c.req,
           headers: {
             ...c.req.raw.headers,
