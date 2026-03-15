@@ -2015,55 +2015,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     })
 
-    const chunks: Buffer[] = []
+    let output = ""
     let bytes = 0
     let clipped = false
-    let dirty = false
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let update_at = 0
+    let update_bytes = 0
     const cap = shellCap()
-    const preview: string[] = []
-    let previewLen = 0
 
-    const renderPreview = () => {
-      const text = preview.join("")
-      if (previewLen > SHELL_METADATA_MAX) {
-        return text.slice(0, SHELL_METADATA_MAX) + "\n\n..."
-      }
-      return text
-    }
+    const preview = () =>
+      output.length > SHELL_METADATA_MAX ? output.slice(0, SHELL_METADATA_MAX) + "\n\n..." : output
 
-    const update = () => {
-      timer = undefined
-      if (!dirty) return
-      dirty = false
+    const update = (force = false) => {
+      const now = Date.now()
+      if (!force && bytes - update_bytes < 8 * 1024 && now - update_at < 150) return
+      update_at = now
+      update_bytes = bytes
       if (part.state.status !== "running") return
       part.state.metadata = {
-        output: renderPreview(),
+        output: preview(),
         description: "",
         clipped,
       }
-      void Session.updatePart(part)
+      Session.updatePart(part)
     }
 
     const append = (chunk: Buffer) => {
-      const text = chunk.toString()
-      if (!clipped && bytes < cap) {
+      if (!clipped) {
         const room = cap - bytes
-        if (chunk.byteLength <= room) {
-          chunks.push(chunk)
+        if (room <= 0) {
+          clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+        } else if (chunk.byteLength <= room) {
+          output += chunk.toString()
           bytes += chunk.byteLength
         } else {
-          chunks.push(chunk.subarray(0, room))
+          output += chunk.subarray(0, room).toString()
           bytes = cap
           clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
         }
       }
-      if (previewLen <= SHELL_METADATA_MAX) {
-        preview.push(text)
-        previewLen += text.length
-      }
-      dirty = true
-      if (!timer) timer = setTimeout(update, 100)
+      update()
     }
 
     proc.stdout?.on("data", append)
