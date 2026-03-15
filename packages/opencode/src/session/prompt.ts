@@ -64,6 +64,18 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+const TOOL_HISTORY_MAX = (() => {
+  const value = Number(process.env.OPENCODE_TOOL_HISTORY_MAX)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 128
+})()
+
+const SHELL_METADATA_MAX = 30_000
+const shellCap = () => {
+  const value = Number(process.env.OPENCODE_SHELL_CAPTURE_MAX_BYTES)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 2 * 1024 * 1024
+}
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
@@ -1839,7 +1851,268 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   export type ShellInput = z.infer<typeof ShellInput>
 
   export async function shell(input: ShellInput) {
-    return runPromise((svc) => svc.shell(ShellInput.parse(input)))
+    const abort = start(input.sessionID)
+    if (!abort) {
+      throw new Session.BusyError(input.sessionID)
+    }
+
+    using _ = defer(() => {
+      // If no queued callbacks, cancel (the default)
+      const callbacks = state()[input.sessionID]?.callbacks ?? []
+      if (callbacks.length === 0) {
+        cancel(input.sessionID)
+      } else {
+        // Otherwise, trigger the session loop to process queued items
+        loop({ sessionID: input.sessionID, resume_existing: true }).catch((error) => {
+          log.error("session loop failed to resume after shell command", { sessionID: input.sessionID, error })
+        })
+      }
+    })
+
+    const session = await Session.get(input.sessionID)
+    if (session.revert) {
+      await SessionRevert.cleanup(session)
+    }
+    const agent = await Agent.get(input.agent)
+    const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    const userMsg: MessageV2.User = {
+      id: MessageID.ascending(),
+      sessionID: input.sessionID,
+      time: {
+        created: Date.now(),
+      },
+      role: "user",
+      agent: input.agent,
+      model: {
+        providerID: model.providerID,
+        modelID: model.modelID,
+      },
+    }
+    await Session.updateMessage(userMsg)
+    const userPart: MessageV2.Part = {
+      type: "text",
+      id: PartID.ascending(),
+      messageID: userMsg.id,
+      sessionID: input.sessionID,
+      text: "The following tool was executed by the user",
+      synthetic: true,
+    }
+    await Session.updatePart(userPart)
+
+    const msg: MessageV2.Assistant = {
+      id: MessageID.ascending(),
+      sessionID: input.sessionID,
+      parentID: userMsg.id,
+      mode: input.agent,
+      agent: input.agent,
+      cost: 0,
+      path: {
+        cwd: Instance.directory,
+        root: Instance.worktree,
+      },
+      time: {
+        created: Date.now(),
+      },
+      role: "assistant",
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+      modelID: model.modelID,
+      providerID: model.providerID,
+    }
+    await Session.updateMessage(msg)
+    const part: MessageV2.Part = {
+      type: "tool",
+      id: PartID.ascending(),
+      messageID: msg.id,
+      sessionID: input.sessionID,
+      tool: "bash",
+      callID: ulid(),
+      state: {
+        status: "running",
+        time: {
+          start: Date.now(),
+        },
+        input: {
+          command: input.command,
+        },
+      },
+    }
+    await Session.updatePart(part)
+    const shell = Shell.preferred()
+    const shellName = (
+      process.platform === "win32" ? path.win32.basename(shell, ".exe") : path.basename(shell)
+    ).toLowerCase()
+
+    const invocations: Record<string, { args: string[] }> = {
+      nu: {
+        args: ["-c", input.command],
+      },
+      fish: {
+        args: ["-c", input.command],
+      },
+      zsh: {
+        args: [
+          "-c",
+          "-l",
+          `
+            [[ -f ~/.zshenv ]] && source ~/.zshenv >/dev/null 2>&1 || true
+            [[ -f "\${ZDOTDIR:-$HOME}/.zshrc" ]] && source "\${ZDOTDIR:-$HOME}/.zshrc" >/dev/null 2>&1 || true
+            eval ${JSON.stringify(input.command)}
+          `,
+        ],
+      },
+      bash: {
+        args: [
+          "-c",
+          "-l",
+          `
+            shopt -s expand_aliases
+            [[ -f ~/.bashrc ]] && source ~/.bashrc >/dev/null 2>&1 || true
+            eval ${JSON.stringify(input.command)}
+          `,
+        ],
+      },
+      // Windows cmd
+      cmd: {
+        args: ["/c", input.command],
+      },
+      // Windows PowerShell
+      powershell: {
+        args: ["-NoProfile", "-Command", input.command],
+      },
+      pwsh: {
+        args: ["-NoProfile", "-Command", input.command],
+      },
+      // Fallback: any shell that doesn't match those above
+      //  - No -l, for max compatibility
+      "": {
+        args: ["-c", `${input.command}`],
+      },
+    }
+
+    const matchingInvocation = invocations[shellName] ?? invocations[""]
+    const args = matchingInvocation?.args
+
+    const cwd = Instance.directory
+    const shellEnv = await Plugin.trigger(
+      "shell.env",
+      { cwd, sessionID: input.sessionID, callID: part.callID },
+      { env: {} },
+    )
+    const proc = spawn(shell, args, {
+      cwd,
+      detached: process.platform !== "win32",
+      windowsHide: process.platform === "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        ...shellEnv.env,
+        TERM: "dumb",
+      },
+    })
+
+    let output = ""
+    let bytes = 0
+    let clipped = false
+    let update_at = 0
+    let update_bytes = 0
+    const cap = shellCap()
+
+    const preview = () =>
+      output.length > SHELL_METADATA_MAX ? output.slice(0, SHELL_METADATA_MAX) + "\n\n..." : output
+
+    const update = (force = false) => {
+      const now = Date.now()
+      if (!force && bytes - update_bytes < 8 * 1024 && now - update_at < 150) return
+      update_at = now
+      update_bytes = bytes
+      if (part.state.status !== "running") return
+      part.state.metadata = {
+        output: preview(),
+        description: "",
+        clipped,
+      }
+      Session.updatePart(part)
+    }
+
+    const append = (chunk: Buffer) => {
+      if (!clipped) {
+        const room = cap - bytes
+        if (room <= 0) {
+          clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+        } else if (chunk.byteLength <= room) {
+          output += chunk.toString()
+          bytes += chunk.byteLength
+        } else {
+          output += chunk.subarray(0, room).toString()
+          bytes = cap
+          clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+        }
+      }
+      update()
+    }
+
+    proc.stdout?.on("data", append)
+    proc.stderr?.on("data", append)
+
+    let aborted = false
+    let exited = false
+
+    const kill = () => Shell.killTree(proc, { exited: () => exited })
+
+    if (abort.aborted) {
+      aborted = true
+      await kill()
+    }
+
+    const abortHandler = () => {
+      aborted = true
+      void kill()
+    }
+
+    abort.addEventListener("abort", abortHandler, { once: true })
+
+    await new Promise<void>((resolve) => {
+      proc.on("close", () => {
+        exited = true
+        abort.removeEventListener("abort", abortHandler)
+        resolve()
+      })
+    })
+
+    if (aborted) {
+      output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
+    }
+    msg.time.completed = Date.now()
+    await Session.updateMessage(msg)
+    if (part.state.status === "running") {
+      const truncated = await Truncate.output(output, {}, agent)
+      part.state = {
+        status: "completed",
+        time: {
+          ...part.state.time,
+          end: Date.now(),
+        },
+        input: part.state.input,
+        title: "",
+        metadata: {
+          output: truncated.content,
+          description: "",
+          clipped,
+          truncated: truncated.truncated,
+          ...(truncated.truncated && { outputPath: truncated.outputPath }),
+        },
+        output: truncated.content,
+      }
+      await Session.updatePart(part)
+    }
+    return { info: msg, parts: [part] }
   }
 
   export const CommandInput = z.object({
