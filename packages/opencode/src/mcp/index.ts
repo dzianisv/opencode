@@ -10,6 +10,7 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "../config/config"
+import { Flag } from "../flag/flag"
 import { Log } from "../util/log"
 import { NamedError } from "@opencode-ai/util/error"
 import z from "zod/v4"
@@ -187,9 +188,45 @@ export namespace MCP {
     {
       refs: number
       client: MCPClient
+      used: number
     }
   >()
   const opening = new Map<string, Promise<{ mcpClient: MCPClient | undefined; status: Status }>>()
+
+  const mcpIdle = (() => {
+    const val = Flag.OPENCODE_MCP_IDLE_MS
+    if (val && val > 0) return val
+    return 10 * 60 * 1000
+  })()
+
+  const mcpSweep = {
+    timer: undefined as NodeJS.Timeout | undefined,
+  }
+
+  function startMcpSweep() {
+    if (mcpSweep.timer) return
+    const ms = Math.max(5_000, Math.floor(mcpIdle / 2))
+    mcpSweep.timer = setInterval(() => {
+      if (shared.size === 0) {
+        if (mcpSweep.timer) clearInterval(mcpSweep.timer)
+        mcpSweep.timer = undefined
+        return
+      }
+      void sweepMcp()
+    }, ms)
+    mcpSweep.timer.unref?.()
+  }
+
+  async function sweepMcp() {
+    const now = Date.now()
+    for (const [name, item] of shared) {
+      if (item.refs > 0) continue
+      if (now - item.used < mcpIdle) continue
+      log.info("disposing idle mcp client", { name, idle_ms: now - item.used })
+      shared.delete(name)
+      await close(name, item.client)
+    }
+  }
 
   function alive(pid: number) {
     try {
@@ -224,20 +261,23 @@ export namespace MCP {
     }
   }
 
-  async function release(name: string) {
+  async function release(name: string, force?: boolean) {
     const item = shared.get(name)
     if (!item) return
     item.refs = Math.max(0, item.refs - 1)
-    if (item.refs > 0) return
-    shared.delete(name)
-    log.info("closing shared mcp client", { name })
-    await close(name, item.client)
+    item.used = Date.now()
+    if (force || item.refs <= 0) {
+      shared.delete(name)
+      log.info("closing shared mcp client", { name, force: !!force })
+      await close(name, item.client)
+    }
   }
 
   async function acquire(name: string, mcp: Config.Mcp) {
     const item = shared.get(name)
     if (item) {
       item.refs += 1
+      item.used = Date.now()
       log.info("reusing shared mcp client", { name, refs: item.refs })
       return {
         mcpClient: item.client,
@@ -254,8 +294,10 @@ export namespace MCP {
             shared.set(name, {
               refs: 0,
               client: result.mcpClient,
+              used: Date.now(),
             })
             log.info("created shared mcp client", { name, refs: 0 })
+            startMcpSweep()
             return result
           }
           if (hit.client === result.mcpClient) return result
@@ -275,6 +317,7 @@ export namespace MCP {
     const hit = shared.get(name)
     if (!hit) return result
     hit.refs += 1
+    hit.used = Date.now()
     log.info("reusing shared mcp client", { name, refs: hit.refs })
     return {
       mcpClient: hit.client,
@@ -293,7 +336,7 @@ export namespace MCP {
       clients: {},
     }),
     async (state) => {
-      await Promise.all(Object.keys(state.clients).map((name) => release(name)))
+      await Promise.all(Object.keys(state.clients).map((name) => release(name, true)))
       pendingOAuthTransports.clear()
     },
   )

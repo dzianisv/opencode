@@ -892,4 +892,46 @@ export namespace Session {
       })
     },
   )
+
+  const sweep = {
+    timer: undefined as NodeJS.Timeout | undefined,
+  }
+
+  export function startSweep() {
+    if (sweep.timer) return
+    const idle = Flag.OPENCODE_SESSION_IDLE_MS ?? 30 * 60 * 1000
+    if (idle <= 0) return
+    const ms = Math.max(30_000, Math.floor(idle / 2))
+    log.info("session sweep started", { idle_ms: idle, interval_ms: ms })
+    sweep.timer = setInterval(() => {
+      void sweepIdle(idle).catch((e) => {
+        log.error("session sweep failed", { error: e })
+      })
+    }, ms)
+    sweep.timer.unref?.()
+  }
+
+  export function stopSweep() {
+    if (!sweep.timer) return
+    clearInterval(sweep.timer)
+    sweep.timer = undefined
+  }
+
+  async function sweepIdle(idle: number) {
+    const cutoff = Date.now() - idle
+    const rows = Database.use((db) =>
+      db
+        .select({ id: SessionTable.id, title: SessionTable.title })
+        .from(SessionTable)
+        .where(and(isNull(SessionTable.time_archived), lt(SessionTable.time_updated, cutoff)))
+        .limit(50)
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("archiving idle sessions", { count: rows.length, cutoff: new Date(cutoff).toISOString() })
+    const now = Date.now()
+    for (const row of rows) {
+      await setArchived({ sessionID: row.id as SessionID, time: now })
+    }
+  }
 }
