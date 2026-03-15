@@ -5,16 +5,27 @@ import { Filesystem } from "../util/filesystem"
 
 export namespace FileTime {
   const log = Log.create({ service: "file.time" })
+
+  function size(key: string, fallback: number) {
+    const value = Number(process.env[key])
+    if (Number.isFinite(value) && value > 0) return Math.floor(value)
+    return fallback
+  }
+
+  function sessionMax() {
+    return size("OPENCODE_FILETIME_SESSION_MAX", 256)
+  }
+
+  function fileMax() {
+    return size("OPENCODE_FILETIME_FILE_MAX", 1024)
+  }
+
   // Per-session read times plus per-file write locks.
   // All tools that overwrite existing files should run their
   // assert/read/write/update sequence inside withLock(filepath, ...)
   // so concurrent writes to the same file are serialized.
   export const state = Instance.state(() => {
-    const read: {
-      [sessionID: string]: {
-        [path: string]: Date | undefined
-      }
-    } = {}
+    const read = new Map<string, Map<string, number>>()
     const locks = new Map<string, Promise<void>>()
     return {
       read,
@@ -25,16 +36,33 @@ export namespace FileTime {
   export function read(sessionID: string, file: string) {
     log.info("read", { sessionID, file })
     const { read } = state()
-    read[sessionID] = read[sessionID] || {}
-    read[sessionID][file] = new Date()
+    const files = read.get(sessionID) ?? new Map<string, number>()
+    files.delete(file)
+    files.set(file, Date.now())
+    const max = fileMax()
+    while (files.size > max) {
+      const stale = files.keys().next().value as string | undefined
+      if (!stale) break
+      files.delete(stale)
+    }
+    read.delete(sessionID)
+    read.set(sessionID, files)
+    const sessions = sessionMax()
+    while (read.size > sessions) {
+      const stale = read.keys().next().value as string | undefined
+      if (!stale) break
+      read.delete(stale)
+    }
   }
 
   export function get(sessionID: string, file: string) {
-    return state().read[sessionID]?.[file]
+    const value = state().read.get(sessionID)?.get(file)
+    if (value === undefined) return undefined
+    return new Date(value)
   }
 
   export function clear(sessionID: string) {
-    delete state().read[sessionID]
+    state().read.delete(sessionID)
   }
 
   export async function withLock<T>(filepath: string, fn: () => Promise<T>): Promise<T> {
