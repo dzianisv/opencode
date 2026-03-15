@@ -1,5 +1,6 @@
 import { createResource, createSignal, For, Show, createMemo } from "solid-js"
 import { useNavigate } from "@solidjs/router"
+import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { useGlobalSync } from "@/context/global-sync"
@@ -9,6 +10,7 @@ export default function Recent() {
   const navigate = useNavigate()
   const sync = useGlobalSync()
   const [search, setSearch] = createSignal("")
+  const homedir = createMemo(() => sync.data.path.home)
 
   const [sessions] = createResource(
     () => search(),
@@ -31,21 +33,13 @@ export default function Recent() {
     },
   )
 
-  const projects = createMemo(() => {
-    const map = new Map<string, string>()
-    for (const p of sync.data.project) {
-      map.set(p.worktree, p.name || p.worktree.split("/").pop() || p.worktree)
-    }
-    return map
-  })
-
   function ago(ts: number) {
     return DateTime.fromMillis(ts).toRelative() ?? ""
   }
 
   function label(session: { directory: string; project?: { name?: string; worktree: string } | null }) {
     if (session.project?.name) return session.project.name
-    return projects().get(session.directory) || session.directory.split("/").pop() || session.directory
+    return session.directory.replace(homedir(), "~")
   }
 
   function open(session: { id: string; directory: string }) {
@@ -60,75 +54,63 @@ export default function Recent() {
   }
 
   return (
-    <div class="flex flex-col h-full bg-background-base">
-      <div class="flex items-center gap-3 px-6 py-4 border-b border-border-base">
-        <button
-          class="flex items-center gap-1.5 text-color-secondary-base hover:text-color-primary-base transition-colors"
-          onClick={() => navigate("/")}
-        >
-          <Icon name="arrow-left" class="size-4" />
-        </button>
-        <h1 class="text-16-semibold text-color-primary-base">Recently Active</h1>
-        <div class="flex-1" />
-        <div class="relative">
-          <Icon name="magnifying-glass" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-color-dimmed-base" />
-          <input
-            type="text"
-            placeholder="Search sessions..."
-            class="pl-8 pr-3 py-1.5 text-13-regular bg-background-surface-base border border-border-base rounded-md w-56 text-color-primary-base placeholder:text-color-dimmed-base focus:outline-none focus:border-border-focus-base"
-            onInput={(e) => onSearch(e.currentTarget.value)}
-          />
+    <div class="mx-auto mt-20 w-full md:w-auto px-4 max-w-2xl">
+      <div class="flex gap-2 items-center justify-between pl-3 mb-6">
+        <div class="flex items-center gap-2">
+          <Button icon="arrow-left" size="normal" variant="ghost" onClick={() => navigate("/")}>
+            Back
+          </Button>
+          <div class="text-14-medium text-text-strong">Recently Active Sessions</div>
         </div>
       </div>
 
-      <div class="flex-1 overflow-y-auto">
-        <Show when={sessions.loading}>
-          <div class="flex items-center justify-center py-12 text-color-dimmed-base text-13-regular">Loading...</div>
-        </Show>
+      <div class="mb-4 px-3">
+        <input
+          type="text"
+          placeholder="Search sessions..."
+          class="w-full px-3 py-2 text-14-regular bg-transparent border border-border rounded-md text-text-strong placeholder:text-text-weak focus:outline-none focus:border-text-weak"
+          onInput={(e) => onSearch(e.currentTarget.value)}
+        />
+      </div>
 
-        <Show when={!sessions.loading && sessions()?.length === 0}>
-          <div class="flex items-center justify-center py-12 text-color-dimmed-base text-13-regular">
-            No sessions found
-          </div>
-        </Show>
+      <Show when={sessions.loading}>
+        <div class="flex items-center justify-center py-12 text-text-weak text-14-regular">Loading...</div>
+      </Show>
 
-        <div class="divide-y divide-border-base">
-          <For each={sessions()}>
-            {(session) => (
-              <button
-                class="w-full flex items-start gap-3 px-6 py-3 hover:bg-background-hover-base transition-colors text-left"
-                onClick={() => open(session)}
-              >
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-13-medium text-color-primary-base truncate">{session.title}</span>
-                    <Show when={session.summary && session.summary.files}>
-                      <span class="shrink-0 text-11-regular text-color-dimmed-base">
-                        {session.summary!.files} file{session.summary!.files !== 1 ? "s" : ""}
-                      </span>
+      <Show when={!sessions.loading && sessions()?.length === 0}>
+        <div class="flex items-center justify-center py-12 text-text-weak text-14-regular">No sessions found</div>
+      </Show>
+
+      <ul class="flex flex-col gap-2">
+        <For each={sessions()}>
+          {(session) => (
+            <Button
+              size="large"
+              variant="ghost"
+              class="text-14-mono text-left justify-between px-3"
+              onClick={() => open(session)}
+            >
+              <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                <div class="text-14-regular text-text-strong truncate">{session.title}</div>
+                <div class="text-12-regular text-text-weak truncate">{label(session)}</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <Show when={session.summary && (session.summary.additions || session.summary.deletions)}>
+                  <div class="flex items-center gap-1">
+                    <Show when={session.summary!.additions}>
+                      <span class="text-12-regular text-green-500">+{session.summary!.additions}</span>
+                    </Show>
+                    <Show when={session.summary!.deletions}>
+                      <span class="text-12-regular text-red-400">-{session.summary!.deletions}</span>
                     </Show>
                   </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-12-regular text-color-secondary-base truncate">{label(session)}</span>
-                    <span class="text-11-regular text-color-dimmed-base">{ago(session.time.updated)}</span>
-                  </div>
-                  <Show when={session.summary && (session.summary.additions || session.summary.deletions)}>
-                    <div class="flex items-center gap-1.5 mt-1">
-                      <Show when={session.summary!.additions}>
-                        <span class="text-11-regular text-icon-success-base">+{session.summary!.additions}</span>
-                      </Show>
-                      <Show when={session.summary!.deletions}>
-                        <span class="text-11-regular text-icon-critical-base">-{session.summary!.deletions}</span>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-                <Icon name="chevron-right" class="size-4 text-color-dimmed-base shrink-0 mt-1" />
-              </button>
-            )}
-          </For>
-        </div>
-      </div>
+                </Show>
+                <div class="text-14-regular text-text-weak">{ago(session.time.updated)}</div>
+              </div>
+            </Button>
+          )}
+        </For>
+      </ul>
     </div>
   )
 }
