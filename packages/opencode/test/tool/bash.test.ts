@@ -400,4 +400,30 @@ describe("tool.bash truncation", () => {
       },
     })
   })
+
+  test("caps in-memory output when capture limit is exceeded", async () => {
+    const prev = process.env.OPENCODE_BASH_CAPTURE_MAX_BYTES
+    process.env.OPENCODE_BASH_CAPTURE_MAX_BYTES = "2048"
+    try {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const result = await bash.execute(
+            {
+              command: "head -c 100000 /dev/zero | tr '\\0' 'a'",
+              description: "Generate large output",
+            },
+            ctx,
+          )
+          expect((result.metadata as any).clipped).toBe(true)
+          expect(result.output).toContain("output clipped in-memory")
+          expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThan(5000)
+        },
+      })
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_BASH_CAPTURE_MAX_BYTES
+      else process.env.OPENCODE_BASH_CAPTURE_MAX_BYTES = prev
+    }
+  })
 })

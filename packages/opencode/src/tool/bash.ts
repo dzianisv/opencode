@@ -20,6 +20,11 @@ import { Plugin } from "@/plugin"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const captureMax = () => {
+  const value = Number(process.env.OPENCODE_BASH_CAPTURE_MAX_BYTES)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 2 * 1024 * 1024
+}
 
 export const log = Log.create({ service: "bash-tool" })
 
@@ -177,6 +182,11 @@ export const BashTool = Tool.define("bash", async () => {
       })
 
       let output = ""
+      let bytes = 0
+      let clipped = false
+      const max = captureMax()
+      let meta_at = 0
+      let meta_bytes = 0
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -186,15 +196,38 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const append = (chunk: Buffer) => {
-        output += chunk.toString()
+      const publish = (force = false) => {
+        const now = Date.now()
+        if (!force && bytes - meta_bytes < 8 * 1024 && now - meta_at < 150) return
+        meta_at = now
+        meta_bytes = bytes
         ctx.metadata({
           metadata: {
             // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
             output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
             description: params.description,
+            clipped,
           },
         })
+      }
+
+      const append = (chunk: Buffer) => {
+        if (clipped) return
+
+        const room = max - bytes
+        if (room <= 0) {
+          clipped = true
+          output += `\n\n<bash_metadata>\noutput clipped in-memory after ${max} bytes\n</bash_metadata>`
+        } else if (chunk.byteLength <= room) {
+          output += chunk.toString()
+          bytes += chunk.byteLength
+        } else {
+          output += chunk.subarray(0, room).toString()
+          bytes = max
+          clipped = true
+          output += `\n\n<bash_metadata>\noutput clipped in-memory after ${max} bytes\n</bash_metadata>`
+        }
+        publish()
       }
 
       proc.stdout?.on("data", append)
@@ -255,6 +288,7 @@ export const BashTool = Tool.define("bash", async () => {
       if (resultMetadata.length > 0) {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"
       }
+      publish(true)
 
       return {
         title: params.description,
@@ -262,6 +296,7 @@ export const BashTool = Tool.define("bash", async () => {
           output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
           exit: proc.exitCode,
           description: params.description,
+          clipped,
         },
         output,
       }
