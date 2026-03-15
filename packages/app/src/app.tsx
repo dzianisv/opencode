@@ -61,6 +61,12 @@ const RecentRoute = () => (
   </Suspense>
 )
 
+const RecentRoute = () => (
+  <Suspense fallback={<Loading />}>
+    <Recent />
+  </Suspense>
+)
+
 const SessionRoute = () => (
   <SessionProviders>
     <Session />

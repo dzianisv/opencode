@@ -2,33 +2,50 @@ import { createResource, createSignal, For, Show, createMemo } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { base64Encode } from "@opencode-ai/util/encode"
-import { type GlobalSession } from "@opencode-ai/sdk/v2/client"
-import { useGlobalSDK } from "@/context/global-sdk"
+import { useGlobalSync } from "@/context/global-sync"
 import { DateTime } from "luxon"
-import { flattenRecentRoots, organizeRecentSessions, recentPrefix, recentTime } from "@/utils/recent-session"
 
 export default function Recent() {
   const navigate = useNavigate()
-  const globalSDK = useGlobalSDK()
+  const sync = useGlobalSync()
   const [search, setSearch] = createSignal("")
 
   const [sessions] = createResource(
     () => search(),
     async (query) => {
-      return globalSDK.client.global.session
-        .list({
-          limit: 100,
-          search: query || undefined,
-        })
-        .then((x) => (x.data ?? []) as GlobalSession[])
-        .catch(() => [])
+      const res = await fetch(
+        `/global/session?roots=true&limit=50${query ? `&search=${encodeURIComponent(query)}` : ""}`,
+      )
+      if (!res.ok) return []
+      return res.json() as Promise<
+        Array<{
+          id: string
+          title: string
+          directory: string
+          project?: { id: string; name?: string; worktree: string } | null
+          time: { created: number; updated: number; archived?: number }
+          summary?: { additions?: number; deletions?: number; files?: number }
+          parentID?: string
+        }>
+      >
     },
   )
 
-  const data = createMemo(() => organizeRecentSessions(sessions() ?? []))
+  const projects = createMemo(() => {
+    const map = new Map<string, string>()
+    for (const p of sync.data.project) {
+      map.set(p.worktree, p.name || p.worktree.split("/").pop() || p.worktree)
+    }
+    return map
+  })
 
   function ago(ts: number) {
     return DateTime.fromMillis(ts).toRelative() ?? ""
+  }
+
+  function label(session: { directory: string; project?: { name?: string; worktree: string } | null }) {
+    if (session.project?.name) return session.project.name
+    return projects().get(session.directory) || session.directory.split("/").pop() || session.directory
   }
 
   function open(session: { id: string; directory: string }) {
@@ -54,10 +71,7 @@ export default function Recent() {
         <h1 class="text-16-semibold text-color-primary-base">Recently Active</h1>
         <div class="flex-1" />
         <div class="relative">
-          <Icon
-            name="magnifying-glass"
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-color-dimmed-base"
-          />
+          <Icon name="magnifying-glass" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-color-dimmed-base" />
           <input
             type="text"
             placeholder="Search sessions..."
@@ -78,82 +92,40 @@ export default function Recent() {
           </div>
         </Show>
 
-        <div class="flex flex-col gap-6 px-4 py-4">
-          <For each={data().sections}>
-            {(group) => {
-              const list = () =>
-                flattenRecentRoots({
-                  roots: group.items,
-                  lookup: data().lookup,
-                  children: data().children,
-                })
-
-              return (
-                <section class="flex flex-col gap-1">
-                  <div class="px-2 pb-1 text-[11px] leading-4 text-color-dimmed-base uppercase tracking-[0.08em]">
-                    {group.label}
+        <div class="divide-y divide-border-base">
+          <For each={sessions()}>
+            {(session) => (
+              <button
+                class="w-full flex items-start gap-3 px-6 py-3 hover:bg-background-hover-base transition-colors text-left"
+                onClick={() => open(session)}
+              >
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-13-medium text-color-primary-base truncate">{session.title}</span>
+                    <Show when={session.summary && session.summary.files}>
+                      <span class="shrink-0 text-11-regular text-color-dimmed-base">
+                        {session.summary!.files} file{session.summary!.files !== 1 ? "s" : ""}
+                      </span>
+                    </Show>
                   </div>
-                  <div class="overflow-hidden rounded-xl border border-border-base">
-                    <For each={list()}>
-                      {(entry, index) => (
-                        <button
-                          classList={{
-                            "w-full flex items-start gap-3 py-3 hover:bg-background-hover-base transition-colors text-left":
-                              true,
-                            "border-t border-border-base": index() > 0,
-                          }}
-                          style={{ "padding-left": `${16 + entry.depth * 18}px`, "padding-right": "16px" }}
-                          onClick={() => open(entry.session)}
-                        >
-                          <div class="mt-0.5 shrink-0 text-color-dimmed-base">
-                            <Show when={entry.depth > 0} fallback={<Icon name="status" class="size-3.5" />}>
-                              <Icon name="fork" class="size-3.5" />
-                            </Show>
-                          </div>
-                          <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2">
-                              <span class="text-13-medium text-color-primary-base truncate">{entry.session.title}</span>
-                              <Show when={entry.session.summary && entry.session.summary.files}>
-                                <span class="shrink-0 text-11-regular text-color-dimmed-base">
-                                  {entry.session.summary!.files} file{entry.session.summary!.files !== 1 ? "s" : ""}
-                                </span>
-                              </Show>
-                            </div>
-                            <div class="flex items-center gap-2 mt-0.5 min-w-0">
-                              <span class="text-11-regular text-color-secondary-base truncate">
-                                {recentPrefix(entry.session)}
-                              </span>
-                              <span class="shrink-0 text-11-regular text-color-dimmed-base">
-                                {ago(recentTime(entry.session))}
-                              </span>
-                            </div>
-                            <Show
-                              when={
-                                entry.session.summary && (entry.session.summary.additions || entry.session.summary.deletions)
-                              }
-                            >
-                              <div class="flex items-center gap-1.5 mt-1">
-                                <Show when={entry.session.summary!.additions}>
-                                  <span class="text-11-regular text-icon-success-base">
-                                    +{entry.session.summary!.additions}
-                                  </span>
-                                </Show>
-                                <Show when={entry.session.summary!.deletions}>
-                                  <span class="text-11-regular text-icon-critical-base">
-                                    -{entry.session.summary!.deletions}
-                                  </span>
-                                </Show>
-                              </div>
-                            </Show>
-                          </div>
-                          <Icon name="chevron-right" class="size-4 text-color-dimmed-base shrink-0 mt-1" />
-                        </button>
-                      )}
-                    </For>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-12-regular text-color-secondary-base truncate">{label(session)}</span>
+                    <span class="text-11-regular text-color-dimmed-base">{ago(session.time.updated)}</span>
                   </div>
-                </section>
-              )
-            }}
+                  <Show when={session.summary && (session.summary.additions || session.summary.deletions)}>
+                    <div class="flex items-center gap-1.5 mt-1">
+                      <Show when={session.summary!.additions}>
+                        <span class="text-11-regular text-icon-success-base">+{session.summary!.additions}</span>
+                      </Show>
+                      <Show when={session.summary!.deletions}>
+                        <span class="text-11-regular text-icon-critical-base">-{session.summary!.deletions}</span>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+                <Icon name="chevron-right" class="size-4 text-color-dimmed-base shrink-0 mt-1" />
+              </button>
+            )}
           </For>
         </div>
       </div>
