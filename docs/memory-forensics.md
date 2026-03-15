@@ -132,3 +132,34 @@ A 1-hour synthetic run (sessions + prompts + shell churn) produced:
 Interpretation:
 - No monotonic JS heap growth pattern was observed.
 - RSS drift exists, but stayed far from multi-GB runaway behavior in this reproduction.
+
+## 8) MCP status fanout check (2026-03-14)
+
+`GET /mcp` is now lazy and should not spawn MCP subprocesses by itself.
+
+Quick probe:
+
+```bash
+# before
+curl -s "http://127.0.0.1:4096/global/memory?children=true" | jq '{tree_mb:(.tree.rss_bytes/1048576),count:.tree.process_count}'
+
+# hit /mcp in multiple directories
+for d in /path/a /path/b /path/c; do
+  curl -s --get --data-urlencode "directory=$d" "http://127.0.0.1:4096/mcp" >/dev/null
+done
+
+# after
+curl -s "http://127.0.0.1:4096/global/memory?children=true" | jq '{tree_mb:(.tree.rss_bytes/1048576),count:.tree.process_count}'
+```
+
+Expected behavior:
+- process count stays flat (no MCP child-process fanout on status/command bootstrap paths)
+- tree RSS changes only slightly from normal request overhead
+
+Behavior note:
+- MCP servers are now opt-in for tool runtime.
+- To enable a server for tool usage, either:
+  - set `mcp.<name>.enabled: true` in config, or
+  - connect explicitly via `POST /mcp/:name/connect` (UI toggle uses this).
+
+If tree process count spikes, capture a snapshot immediately and inspect which MCP command family spawned.

@@ -282,46 +282,50 @@ export namespace MCP {
     }
   }
 
+  type McpState = {
+    status: Record<string, Status>
+    clients: Record<string, MCPClient>
+  }
+
   const state = Instance.state(
-    async () => {
-      const cfg = await Config.get()
-      const config = cfg.mcp ?? {}
-      const clients: Record<string, MCPClient> = {}
-      const status: Record<string, Status> = {}
-
-      await Promise.all(
-        Object.entries(config).map(async ([key, mcp]) => {
-          if (!isMcpConfigured(mcp)) {
-            log.error("Ignoring MCP config entry without type", { key })
-            return
-          }
-
-          // If disabled by config, mark as disabled without trying to connect
-          if (mcp.enabled === false) {
-            status[key] = { status: "disabled" }
-            return
-          }
-
-          const result = await acquire(key, mcp).catch(() => undefined)
-          if (!result) return
-
-          status[key] = result.status
-
-          if (result.mcpClient) {
-            clients[key] = result.mcpClient
-          }
-        }),
-      )
-      return {
-        status,
-        clients,
-      }
-    },
+    async (): Promise<McpState> => ({
+      status: {},
+      clients: {},
+    }),
     async (state) => {
       await Promise.all(Object.keys(state.clients).map((name) => release(name)))
       pendingOAuthTransports.clear()
     },
   )
+
+  async function prune(state: McpState, config: Record<string, McpEntry>) {
+    const keys = Object.keys(state.clients)
+    for (const name of keys) {
+      const mcp = config[name]
+      if (mcp && isMcpConfigured(mcp) && mcp.enabled !== false) continue
+      await release(name)
+      delete state.clients[name]
+      if (!mcp) delete state.status[name]
+      if (mcp && isMcpConfigured(mcp) && mcp.enabled === false) {
+        state.status[name] = { status: "disabled" }
+      }
+    }
+  }
+
+  async function ensure(state: McpState, name: string, mcp: Config.Mcp) {
+    const existing = state.clients[name]
+    if (existing) {
+      state.status[name] = { status: "connected" }
+      return {
+        mcpClient: existing,
+        status: state.status[name],
+      }
+    }
+    const result = await acquire(name, mcp)
+    state.status[name] = result.status
+    if (result.mcpClient) state.clients[name] = result.mcpClient
+    return result
+  }
 
   // Helper function to fetch prompts for a specific client
   async function fetchPromptsForClient(clientName: string, client: Client) {
@@ -374,7 +378,17 @@ export namespace MCP {
       await release(name)
       delete s.clients[name]
     }
-    const result = await acquire(name, mcp)
+    const result = await ensure(s, name, mcp).catch((error) => {
+      const status = {
+        status: "failed" as const,
+        error: error instanceof Error ? error.message : String(error),
+      }
+      s.status[name] = status
+      return {
+        mcpClient: undefined,
+        status,
+      }
+    })
     if (!result) {
       const status = {
         status: "failed" as const,
@@ -611,18 +625,36 @@ export namespace MCP {
     const cfg = await Config.get()
     const config = cfg.mcp ?? {}
     const result: Record<string, Status> = {}
+    await prune(s, config)
 
     // Include all configured MCPs from config, not just connected ones
     for (const [key, mcp] of Object.entries(config)) {
       if (!isMcpConfigured(mcp)) continue
-      result[key] = s.status[key] ?? { status: "disabled" }
+      const current = s.status[key]
+      if (current) {
+        result[key] = current
+        continue
+      }
+      if (mcp.enabled === false) {
+        result[key] = { status: "disabled" }
+        continue
+      }
+      if (s.clients[key] || shared.has(key)) {
+        result[key] = { status: "connected" }
+        continue
+      }
+      result[key] = { status: "disabled" }
     }
 
     return result
   }
 
   export async function clients() {
-    return state().then((state) => state.clients)
+    const s = await state()
+    const cfg = await Config.get()
+    const config = cfg.mcp ?? {}
+    await prune(s, config)
+    return s.clients
   }
 
   export async function connect(name: string) {
@@ -644,20 +676,12 @@ export namespace MCP {
       await release(name)
       delete s.clients[name]
     }
-    const result = await acquire(name, { ...mcp, enabled: true })
-
-    if (!result) {
+    await ensure(s, name, { ...mcp, enabled: true }).catch((error) => {
       s.status[name] = {
         status: "failed",
-        error: "Unknown error during connection",
+        error: error instanceof Error ? error.message : String(error),
       }
-      return
-    }
-
-    s.status[name] = result.status
-    if (result.mcpClient) {
-      s.clients[name] = result.mcpClient
-    }
+    })
   }
 
   export async function disconnect(name: string) {
@@ -675,10 +699,36 @@ export namespace MCP {
     const s = await state()
     const cfg = await Config.get()
     const config = cfg.mcp ?? {}
-    const clientsSnapshot = await clients()
     const defaultTimeout = cfg.experimental?.mcp_timeout
+    await prune(s, config)
 
-    const connectedClients = Object.entries(clientsSnapshot).filter(
+    await Promise.all(
+      Object.entries(config).map(async ([clientName, mcpConfig]) => {
+        if (!isMcpConfigured(mcpConfig)) return
+        if (mcpConfig.enabled === false) {
+          s.status[clientName] = { status: "disabled" }
+          return
+        }
+        const on =
+          mcpConfig.enabled === true ||
+          s.status[clientName]?.status === "connected" ||
+          !!s.clients[clientName] ||
+          shared.has(clientName)
+        if (!on) {
+          s.status[clientName] = s.status[clientName] ?? { status: "disabled" }
+          return
+        }
+
+        await ensure(s, clientName, mcpConfig).catch((e) => {
+          s.status[clientName] = {
+            status: "failed",
+            error: e instanceof Error ? e.message : String(e),
+          }
+        })
+      }),
+    )
+
+    const connectedClients = Object.entries(s.clients).filter(
       ([clientName]) => s.status[clientName]?.status === "connected",
     )
 
