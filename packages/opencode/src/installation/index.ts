@@ -7,6 +7,7 @@ import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
 import { Process } from "@/util/process"
 import { buffer } from "node:stream/consumers"
+import { execSync } from "node:child_process"
 
 declare global {
   const OPENCODE_VERSION: string
@@ -231,7 +232,20 @@ export namespace Installation {
     await Process.text([process.execPath, "--version"], { nothrow: true })
   }
 
-  export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
+  export const VERSION =
+    typeof OPENCODE_VERSION === "string"
+      ? OPENCODE_VERSION
+      : (() => {
+          try {
+            const remote = execSync("git config --get remote.origin.url", { encoding: "utf8", stdio: "pipe" }).trim()
+            const match = remote.match(/[:\/]([^\/]+\/[^\/]+?)(\.git)?$/)
+            const repo = match ? match[1] : "local"
+            const tags = execSync("git describe --tags", { encoding: "utf8", stdio: "pipe" }).trim()
+            return `${repo} ${tags}`
+          } catch (e) {
+            return "local"
+          }
+        })()
   export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
