@@ -2259,6 +2259,8 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+      recentLabel={() => "Recently Active"}
+      onOpenRecent={() => navigate("/recent")}
       renderPanel={() =>
         mobile ? (
           <SidebarPanel project={currentProject} mobile />
