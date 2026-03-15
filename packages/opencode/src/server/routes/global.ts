@@ -10,6 +10,7 @@ import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
+import { Session } from "../../session"
 
 const log = Log.create({ service: "server" })
 
@@ -180,6 +181,54 @@ export const GlobalRoutes = lazy(() =>
           },
         })
         return c.json(true)
+      },
+    )
+    .get(
+      "/session",
+      describeRoute({
+        summary: "List sessions globally",
+        description: "List sessions across all projects, sorted by most recently updated.",
+        operationId: "global.session.list",
+        responses: {
+          200: {
+            description: "List of sessions",
+            content: {
+              "application/json": {
+                schema: resolver(Session.GlobalInfo.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          start: z.coerce.number().optional(),
+          cursor: z.coerce.number().optional(),
+          search: z.string().optional(),
+          limit: z.coerce.number().optional(),
+          roots: z.coerce.boolean().optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        const limit = query.limit ?? 50
+        const sessions: Session.GlobalInfo[] = []
+        for (const session of Session.listGlobal({
+          roots: query.roots,
+          start: query.start,
+          cursor: query.cursor,
+          search: query.search,
+          limit: limit + 1,
+        })) {
+          sessions.push(session)
+        }
+        if (sessions.length > limit) {
+          const next = sessions[limit - 1]
+          sessions.length = limit
+          if (next) c.header("x-next-cursor", String(next.time.updated))
+        }
+        return c.json(sessions)
       },
     ),
 )
