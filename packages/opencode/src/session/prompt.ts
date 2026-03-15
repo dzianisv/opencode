@@ -62,6 +62,18 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+const TOOL_HISTORY_MAX = (() => {
+  const value = Number(process.env.OPENCODE_TOOL_HISTORY_MAX)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 128
+})()
+
+const SHELL_METADATA_MAX = 30_000
+const shellCap = () => {
+  const value = Number(process.env.OPENCODE_SHELL_CAPTURE_MAX_BYTES)
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return 2 * 1024 * 1024
+}
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
@@ -1647,28 +1659,50 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     let output = ""
+    let bytes = 0
+    let clipped = false
+    let update_at = 0
+    let update_bytes = 0
+    const cap = shellCap()
 
-    proc.stdout?.on("data", (chunk) => {
-      output += chunk.toString()
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: output,
-          description: "",
-        }
-        Session.updatePart(part)
-      }
-    })
+    const preview = () =>
+      output.length > SHELL_METADATA_MAX ? output.slice(0, SHELL_METADATA_MAX) + "\n\n..." : output
 
-    proc.stderr?.on("data", (chunk) => {
-      output += chunk.toString()
-      if (part.state.status === "running") {
-        part.state.metadata = {
-          output: output,
-          description: "",
-        }
-        Session.updatePart(part)
+    const update = (force = false) => {
+      const now = Date.now()
+      if (!force && bytes - update_bytes < 8 * 1024 && now - update_at < 150) return
+      update_at = now
+      update_bytes = bytes
+      if (part.state.status !== "running") return
+      part.state.metadata = {
+        output: preview(),
+        description: "",
+        clipped,
       }
-    })
+      Session.updatePart(part)
+    }
+
+    const append = (chunk: Buffer) => {
+      if (!clipped) {
+        const room = cap - bytes
+        if (room <= 0) {
+          clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+        } else if (chunk.byteLength <= room) {
+          output += chunk.toString()
+          bytes += chunk.byteLength
+        } else {
+          output += chunk.subarray(0, room).toString()
+          bytes = cap
+          clipped = true
+          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+        }
+      }
+      update()
+    }
+
+    proc.stdout?.on("data", append)
+    proc.stderr?.on("data", append)
 
     let aborted = false
     let exited = false
@@ -1701,6 +1735,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     msg.time.completed = Date.now()
     await Session.updateMessage(msg)
     if (part.state.status === "running") {
+      const truncated = await Truncate.output(output, {}, agent)
       part.state = {
         status: "completed",
         time: {
@@ -1710,10 +1745,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         input: part.state.input,
         title: "",
         metadata: {
-          output,
+          output: truncated.content,
           description: "",
+          clipped,
+          truncated: truncated.truncated,
+          ...(truncated.truncated && { outputPath: truncated.outputPath }),
         },
-        output,
+        output: truncated.content,
       }
       await Session.updatePart(part)
     }
