@@ -125,6 +125,21 @@ describe("session.retry.retryable", () => {
 
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
+
+  test("retries aborted errors when the session is still active", () => {
+    const ctl = new AbortController()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, ctl.signal)).toBe("The operation was aborted.")
+  })
+
+  test("does not retry aborted errors after session cancellation", () => {
+    const ctl = new AbortController()
+    ctl.abort()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, ctl.signal)).toBeUndefined()
+  })
 })
 
 describe("session.message-v2.fromError", () => {
