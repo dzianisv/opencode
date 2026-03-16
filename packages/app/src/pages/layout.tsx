@@ -90,6 +90,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { RecentTile, RecentSidebarPanel } from "./layout/sidebar-recent"
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(
@@ -149,6 +150,7 @@ export default function Layout(props: ParentProps) {
     sizing: false,
     peek: undefined as string | undefined,
     peeked: false,
+    recent: false,
   })
 
   const editor = createInlineEditorController()
@@ -1231,6 +1233,7 @@ export default function Layout(props: ParentProps) {
 
   async function navigateToProject(directory: string | undefined) {
     if (!directory) return
+    setState("recent", false)
     const root = projectRoot(directory)
     server.projects.touch(root)
     const project = layout.projects.list().find((item) => item.worktree === root)
@@ -2236,6 +2239,18 @@ export default function Layout(props: ParentProps) {
     )
   }
 
+  const recentSessionProps: typeof projectSidebarCtx.sessionProps = {
+    navList: currentSessions,
+    sidebarExpanded,
+    sidebarHovering,
+    nav: () => state.nav,
+    hoverSession: () => state.hoverSession,
+    setHoverSession,
+    clearHoverProjectSoon,
+    prefetchSession,
+    archiveSession,
+  }
+
   const projects = () => layout.projects.list()
   const projectOverlay = () => <ProjectDragOverlay projects={projects} activeProject={() => store.activeProject} />
   const sidebarContent = (mobile?: boolean) => (
@@ -2259,10 +2274,26 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-      recentLabel={() => "Recently Active"}
-      onOpenRecent={() => navigate("/recent")}
+      renderRecentTile={() => (
+        <RecentTile
+          selected={() => state.recent}
+          onClick={() => {
+            setState("recent", true)
+            layout.sidebar.open()
+          }}
+        />
+      )}
       renderPanel={() =>
-        mobile ? (
+        state.recent ? (
+          <RecentSidebarPanel
+            mobile={mobile}
+            merged={mobile ? undefined : layout.sidebar.opened() ? true : undefined}
+            sessionProps={recentSessionProps}
+            sidebarWidth={() => layout.sidebar.width()}
+            sidebarOpened={() => layout.sidebar.opened()}
+            sidebarHovering={sidebarHovering}
+          />
+        ) : mobile ? (
           <SidebarPanel project={currentProject} mobile />
         ) : (
           <Show when={currentProject()}>
