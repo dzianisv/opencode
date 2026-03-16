@@ -207,7 +207,7 @@ describe("session recovery", () => {
         expect(recovered.info.error?.data.message).toContain("Server restarted")
         expect(tool?.state.status).toBe("error")
         if (!tool || tool.state.status !== "error") throw new Error("expected recovered tool error")
-        expect(tool?.state.error).toBe("Tool execution aborted: server restarted")
+        expect(tool.state.error).toBe("Tool execution aborted: server restarted")
 
         await Session.remove(session.id)
       },
