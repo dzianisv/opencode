@@ -934,7 +934,7 @@ export namespace Session {
 
   export function startSweep() {
     if (sweep.timer) return
-    const idle = Flag.OPENCODE_SESSION_IDLE_MS ?? 30 * 60 * 1000
+    const idle = Flag.OPENCODE_SESSION_IDLE_MS ?? 3 * 24 * 60 * 60 * 1000
     if (idle <= 0) return
     const ms = Math.max(30_000, Math.floor(idle / 2))
     log.info("session sweep started", { idle_ms: idle, interval_ms: ms })
