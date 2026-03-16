@@ -236,15 +236,16 @@ export function MessageTimeline(props: {
     if (!id) return emptyMessages
     return sync.data.message[id] ?? emptyMessages
   })
-  const pending = createMemo(() =>
-    sessionMessages().findLast(
-      (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
-    ),
-  )
   const sessionStatus = createMemo(() => {
     const id = sessionID()
     if (!id) return idle
     return sync.data.session_status[id] ?? idle
+  })
+  const pending = createMemo(() => {
+    if (sessionStatus().type === "idle") return undefined
+    return sessionMessages().findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
+    )
   })
   const working = createMemo(() => !!pending() || sessionStatus().type !== "idle")
   const tint = createMemo(() => messageAgentColor(sessionMessages(), sync.data.agent))
