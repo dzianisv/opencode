@@ -30,6 +30,24 @@ await $`cp -r ./bin ./dist/${baseName}/bin`
 await $`cp ./script/postinstall.mjs ./dist/${baseName}/postinstall.mjs`
 await Bun.file(`./dist/${baseName}/LICENSE`).write(await Bun.file("../../LICENSE").text())
 
+// Patch bin/opencode to resolve scoped package names under node_modules/@vibetechnologies/
+const bin = await Bun.file(`./dist/${baseName}/bin/${baseName}`).text()
+await Bun.file(`./dist/${baseName}/bin/${baseName}`).write(
+  bin.replace(
+    `const base = "opencode-" + platform + "-" + arch`,
+    `const base = "${scope}/opencode-" + platform + "-" + arch`,
+  ),
+)
+
+// Patch postinstall.mjs to resolve scoped package names
+const postinstall = await Bun.file(`./dist/${baseName}/postinstall.mjs`).text()
+await Bun.file(`./dist/${baseName}/postinstall.mjs`).write(
+  postinstall.replace(
+    "const packageName = `opencode-${platform}-${arch}`",
+    "const packageName = `" + scope + "/opencode-${platform}-${arch}`",
+  ),
+)
+
 await Bun.file(`./dist/${baseName}/package.json`).write(
   JSON.stringify(
     {
