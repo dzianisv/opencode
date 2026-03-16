@@ -116,11 +116,43 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
-### Fork Memory Optimizations (dzianisv/dev)
+### Fork Enhancements (dzianisv/dev)
 
-The `dzianisv/opencode` fork currently carries memory-focused patches and profiling tools on top of `upstream/dev`.
+The `dzianisv/opencode` fork carries memory lifecycle, reliability, and UX patches on top of `upstream/dev`.
 
-Critical commits:
+#### Memory Lifecycle
+
+Upstream opencode has no process lifecycle management for MCP servers or sessions in serve mode. Long-running instances accumulate leaked MCP child processes, orphaned sessions, and unbounded in-memory state — leading to OOM crashes (see [#16697](https://github.com/anomalyco/opencode/issues/16697)).
+
+| Feature | Env Variable | Default |
+|---|---|---|
+| MCP idle disconnect — shuts down MCP servers after inactivity | `OPENCODE_MCP_IDLE_MS` | 10 min |
+| Session idle archival — archives stale sessions to reduce memory | `OPENCODE_SESSION_IDLE_MS` | 3 days |
+| Graceful shutdown — disposes instances and closes MCP clients on SIGTERM/SIGINT | — | always on |
+| Startup recovery — marks orphaned running/pending tools as error on restart | — | always on |
+| External watchdog — launchd-compatible script that kills runaway processes | — | opt-in (`script/memory-watchdog.sh`) |
+
+Set any `*_MS` variable to `0` to disable that sweep.
+
+#### Tool Execution Reliability
+
+- **Permission/Question deadlock fix** — upstream `Question.ask()` and `PermissionNext.ask()` block indefinitely with no timeout. When the AI SDK issues multiple tool calls and one is a permission prompt, the entire stream deadlocks. Fix: race both against the abort signal.
+
+#### Web UI Enhancements
+
+- **Recently Active dashboard** — new `/recent` page showing sessions across all projects, accessible from sidebar and home page
+- **Local app serving** — server serves from `packages/app/dist` first instead of proxying to `app.opencode.ai`, enabling local UI development
+- **Session rename tool** — AI agents can rename sessions to reflect current task via a built-in tool; system prompt instructs agents to do so early
+
+#### npm Publishing Fix
+
+- **Scoped package resolution** — fork publishes as `@vibetechnologies/opencode`; upstream `bin/opencode` and `postinstall.mjs` hardcode unscoped package names. Fix: `publish-fork.ts` patches both files to use `@vibetechnologies/` scope.
+
+```bash
+bun add -g @vibetechnologies/opencode@dev
+```
+
+#### Memory Optimization Commits
 
 - [`a5578e1f3`](https://github.com/dzianisv/opencode/commit/a5578e1f3) - bound instance cache to prevent serve memory blowups
 - [`250abd030`](https://github.com/dzianisv/opencode/commit/250abd030) - cap runtime state growth and harden stream cleanup
@@ -133,9 +165,7 @@ Critical commits:
 - [`41c594673`](https://github.com/dzianisv/opencode/commit/41c594673) - add memory diagnostics endpoints and monitor hooks
 - [`1f1ddc86e`](https://github.com/dzianisv/opencode/commit/1f1ddc86e) - add serve memory workload profiler
 
-Related docs:
-
-- [`docs/memory-forensics.md`](docs/memory-forensics.md)
+Related docs: [`docs/memory-forensics.md`](docs/memory-forensics.md)
 
 ### Contributing
 
