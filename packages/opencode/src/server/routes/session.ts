@@ -58,7 +58,6 @@ export const SessionRoutes = lazy(() =>
         const query = c.req.valid("query")
         const sessions: Session.Info[] = []
         for await (const session of Session.list({
-          directory: query.directory,
           roots: query.roots,
           start: query.start,
           search: query.search,

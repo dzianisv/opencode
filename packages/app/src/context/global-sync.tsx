@@ -202,7 +202,7 @@ function createGlobalSync() {
     const promise = loadRootSessionsWithFallback({
       directory,
       limit,
-      list: (query) => globalSDK.client.session.list(query),
+      list: (query) => globalSDK.client.experimental.session.list(query),
     })
       .then((x) => {
         const nonArchived = (x.data ?? [])
