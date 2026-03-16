@@ -911,25 +911,53 @@ export namespace Session {
         )
         .all(),
     )
-    if (rows.length === 0) return
-    log.info("recovering orphaned tool parts", { count: rows.length })
-    for (const row of rows) {
-      const data = row.data as any
-      if (data?.type !== "tool" || !data?.state) continue
-      const patched = {
-        ...data,
-        state: {
-          ...data.state,
-          status: "error",
-          error: "Tool execution aborted: server restarted",
-          time: { ...data.state.time, end: now },
-        },
+    if (rows.length > 0) {
+      log.info("recovering orphaned tool parts", { count: rows.length })
+      for (const row of rows) {
+        const data = row.data as any
+        if (data?.type !== "tool" || !data?.state) continue
+        const patched = {
+          ...data,
+          state: {
+            ...data.state,
+            status: "error",
+            error: "Tool execution aborted: server restarted",
+            time: { ...data.state.time, end: now },
+          },
+        }
+        Database.use((db) =>
+          db.update(PartTable).set({ data: patched }).where(eq(PartTable.id, row.id)).run(),
+        )
       }
-      Database.use((db) =>
-        db.update(PartTable).set({ data: patched }).where(eq(PartTable.id, row.id)).run(),
-      )
+      log.info("recovered orphaned tool parts", { count: rows.length })
     }
-    log.info("recovered orphaned tool parts", { count: rows.length })
+
+    // Complete orphaned assistant messages that never got time.completed
+    const msgs = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id, updated: MessageTable.time_updated })
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') IS NULL`,
+          ),
+        )
+        .all(),
+    )
+    if (msgs.length > 0) {
+      log.info("recovering orphaned assistant messages", { count: msgs.length })
+      for (const msg of msgs) {
+        Database.use((db) =>
+          db
+            .update(MessageTable)
+            .set({ data: sql`json_set(${MessageTable.data}, '$.time.completed', ${msg.updated})` })
+            .where(eq(MessageTable.id, msg.id))
+            .run(),
+        )
+      }
+      log.info("recovered orphaned assistant messages", { count: msgs.length })
+    }
   }
 
   export function startSweep() {
