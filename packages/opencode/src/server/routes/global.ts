@@ -244,6 +244,7 @@ export const GlobalRoutes = lazy(() =>
         "query",
         z.object({
           start: z.coerce.number().optional(),
+          cursor: z.coerce.number().optional(),
           search: z.string().optional(),
           limit: z.coerce.number().optional(),
           roots: z.coerce.boolean().optional(),
@@ -251,14 +252,21 @@ export const GlobalRoutes = lazy(() =>
       ),
       async (c) => {
         const query = c.req.valid("query")
+        const limit = query.limit ?? 50
         const sessions: Session.GlobalInfo[] = []
         for (const session of Session.listGlobal({
           roots: query.roots,
           start: query.start,
+          cursor: query.cursor,
           search: query.search,
-          limit: query.limit ?? 50,
+          limit: limit + 1,
         })) {
           sessions.push(session)
+        }
+        if (sessions.length > limit) {
+          const next = sessions[limit - 1]
+          sessions.length = limit
+          if (next) c.header("x-next-cursor", String(next.time.updated))
         }
         return c.json(sessions)
       },
