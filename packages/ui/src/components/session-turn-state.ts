@@ -1,6 +1,7 @@
 import type { AssistantMessage, Part as PartType } from "@opencode-ai/sdk/v2/client"
 
 const hidden = new Set(["todowrite", "todoread"])
+const shown = new Set(["compaction"])
 
 export function partState(part: PartType, show: boolean) {
   if (part.type === "tool") {
@@ -13,7 +14,8 @@ export function partState(part: PartType, show: boolean) {
     if (show && part.text?.trim()) return "visible" as const
     return
   }
-  return "visible" as const
+  if (shown.has(part.type)) return "visible" as const
+  return
 }
 
 type AbortErr = Extract<NonNullable<AssistantMessage["error"]>, { name: "MessageAbortedError" }>

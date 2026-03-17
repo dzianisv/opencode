@@ -49,6 +49,15 @@ function reasoning(messageID: string, value: string): Part {
   } as Part
 }
 
+function step(messageID: string): Part {
+  return {
+    id: `part_${messageID}_step`,
+    sessionID: "ses_1",
+    messageID,
+    type: "step-start",
+  } as Part
+}
+
 function aborted(source: "server_restart" | "user_cancel" | "client_disconnect" | "timeout" | "unknown") {
   return {
     name: "MessageAbortedError" as const,
@@ -98,5 +107,17 @@ describe("abortCard", () => {
         false,
       ),
     ).toEqual(aborted("timeout"))
+  })
+
+  test("ignores non-rendered structural parts when deciding whether to show the abort card", () => {
+    expect(
+      abortCard(
+        [assistant("msg_assistant", aborted("unknown"))],
+        {
+          msg_assistant: [step("msg_assistant")],
+        },
+        true,
+      ),
+    ).toEqual(aborted("unknown"))
   })
 })
