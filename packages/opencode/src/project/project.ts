@@ -95,6 +95,33 @@ export namespace Project {
       .catch(() => undefined)
   }
 
+  function clean(root: string, list: string[]) {
+    const seen = new Set<string>()
+    return list
+      .flatMap((item) => {
+        if (!item || item === root) return []
+        if (!existsSync(item)) return []
+        if (seen.has(item)) return []
+        seen.add(item)
+        return [item]
+      })
+      .toSorted()
+  }
+
+  async function scan(root: string) {
+    const list = await git(["worktree", "list", "--porcelain"], {
+      cwd: root,
+    })
+    if (list.exitCode !== 0) return []
+    return clean(
+      root,
+      list
+        .text()
+        .split("\n")
+        .flatMap((line) => (line.startsWith("worktree ") ? [gitpath(root, line.slice("worktree ".length))] : [])),
+    )
+  }
+
   export async function fromDirectory(directory: string) {
     log.info("fromDirectory", { directory })
 
@@ -233,18 +260,17 @@ export namespace Project {
 
     if (Flag.OPENCODE_EXPERIMENTAL_ICON_DISCOVERY) discover(existing)
 
+    const live = data.vcs === "git" ? await scan(data.worktree) : []
     const result: Info = {
       ...existing,
       worktree: data.worktree,
       vcs: data.vcs as Info["vcs"],
+      sandboxes: clean(data.worktree, [...existing.sandboxes, ...live, data.sandbox]),
       time: {
         ...existing.time,
         updated: Date.now(),
       },
     }
-    if (data.sandbox !== result.worktree && !result.sandboxes.includes(data.sandbox))
-      result.sandboxes.push(data.sandbox)
-    result.sandboxes = result.sandboxes.filter((x) => existsSync(x))
     const insert = {
       id: result.id,
       worktree: result.worktree,
@@ -329,13 +355,29 @@ export namespace Project {
     )
   }
 
-  export function list() {
-    return Database.use((db) =>
-      db
-        .select()
-        .from(ProjectTable)
-        .all()
-        .map((row) => fromRow(row)),
+  export async function list() {
+    const rows = Database.use((db) => db.select().from(ProjectTable).all())
+    return Promise.all(
+      rows.map(async (row) => {
+        const data = fromRow(row)
+        if (data.vcs !== "git") return data
+        const sandboxes = clean(data.worktree, [...data.sandboxes, ...(await scan(data.worktree))])
+        if (sandboxes.length === data.sandboxes.length && sandboxes.every((item, i) => item === data.sandboxes[i])) {
+          return data
+        }
+        const next = Database.use((db) =>
+          db
+            .update(ProjectTable)
+            .set({
+              sandboxes,
+              time_updated: Date.now(),
+            })
+            .where(eq(ProjectTable.id, data.id))
+            .returning()
+            .get(),
+        )
+        return next ? fromRow(next) : { ...data, sandboxes }
+      }),
     )
   }
 
@@ -399,12 +441,21 @@ export namespace Project {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return []
     const data = fromRow(row)
-    const valid: string[] = []
-    for (const dir of data.sandboxes) {
-      const s = Filesystem.stat(dir)
-      if (s?.isDirectory()) valid.push(dir)
+    const sandboxes = clean(data.worktree, [...data.sandboxes, ...(data.vcs === "git" ? await scan(data.worktree) : [])])
+    if (sandboxes.length === data.sandboxes.length && sandboxes.every((item, i) => item === data.sandboxes[i])) {
+      return sandboxes
     }
-    return valid
+    Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({
+          sandboxes,
+          time_updated: Date.now(),
+        })
+        .where(eq(ProjectTable.id, id))
+        .run(),
+    )
+    return sandboxes
   }
 
   export async function addSandbox(id: ProjectID, directory: string) {

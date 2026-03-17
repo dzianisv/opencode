@@ -7,6 +7,8 @@ import { tmpdir } from "../fixture/fixture"
 import { Filesystem } from "../../src/util/filesystem"
 import { GlobalBus } from "../../src/bus/global"
 import { ProjectID } from "../../src/project/schema"
+import { Database, eq } from "../../src/storage/db"
+import { ProjectTable } from "../../src/project/project.sql"
 
 Log.init({ print: false })
 
@@ -241,6 +243,56 @@ describe("Project.fromDirectory with worktrees", () => {
         .quiet()
         .catch(() => {})
       await $`git worktree remove ${worktree2}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("should repair empty sandboxes from git when booting the root", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project } = await p.fromDirectory(tmp.path)
+    const worktree = path.join(tmp.path, "..", path.basename(tmp.path) + "-repair")
+    try {
+      await $`git worktree add ${worktree} -b repair-${Date.now()}`.cwd(tmp.path).quiet()
+
+      Database.use((db) =>
+        db.update(ProjectTable).set({ sandboxes: [] }).where(eq(ProjectTable.id, project.id)).run(),
+      )
+
+      const { project: next } = await p.fromDirectory(tmp.path)
+      expect(next.sandboxes).toContain(worktree)
+      expect(next.sandboxes).not.toContain(tmp.path)
+    } finally {
+      await $`git worktree remove ${worktree}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("should repair empty sandboxes when listing projects", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project } = await p.fromDirectory(tmp.path)
+    const worktree = path.join(tmp.path, "..", path.basename(tmp.path) + "-listed")
+    try {
+      await $`git worktree add ${worktree} -b listed-${Date.now()}`.cwd(tmp.path).quiet()
+
+      Database.use((db) =>
+        db.update(ProjectTable).set({ sandboxes: [] }).where(eq(ProjectTable.id, project.id)).run(),
+      )
+
+      const list = await p.list()
+      const next = list.find((item) => item.id === project.id)
+      expect(next).toBeDefined()
+      expect(next!.sandboxes).toContain(worktree)
+      expect(next!.sandboxes).not.toContain(tmp.path)
+    } finally {
+      await $`git worktree remove ${worktree}`
         .cwd(tmp.path)
         .quiet()
         .catch(() => {})

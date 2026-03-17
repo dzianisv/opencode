@@ -647,7 +647,7 @@ export namespace SessionPrompt {
       }
 
       if (step === 1) {
-        SessionSummary.summarize({
+        SessionSummary.schedule({
           sessionID: sessionID,
           messageID: lastUser.id,
         })
@@ -744,7 +744,7 @@ export namespace SessionPrompt {
       }
       continue
     }
-    SessionCompaction.prune({ sessionID })
+    SessionCompaction.schedule({ sessionID })
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
       const queued = state()[sessionID]?.callbacks ?? []

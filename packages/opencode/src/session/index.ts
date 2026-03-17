@@ -935,7 +935,7 @@ export namespace Session {
     // Complete orphaned assistant messages that never got time.completed
     const msgs = Database.use((db) =>
       db
-        .select({ id: MessageTable.id, updated: MessageTable.time_updated })
+        .select({ id: MessageTable.id, data: MessageTable.data, updated: MessageTable.time_updated })
         .from(MessageTable)
         .where(
           and(
@@ -948,10 +948,25 @@ export namespace Session {
     if (msgs.length > 0) {
       log.info("recovering orphaned assistant messages", { count: msgs.length })
       for (const msg of msgs) {
+        const data = msg.data as MessageV2.Assistant
+        if (data?.role !== "assistant" || !data?.time) continue
+        const patched: MessageV2.Assistant = {
+          ...data,
+          role: "assistant",
+          time: {
+            ...data.time,
+            completed: msg.updated,
+          },
+          error:
+            data.error ??
+            new MessageV2.AbortedError({
+              message: "Server restarted while the response was in progress",
+            }).toObject(),
+        }
         Database.use((db) =>
           db
             .update(MessageTable)
-            .set({ data: sql`json_set(${MessageTable.data}, '$.time.completed', ${msg.updated})` })
+            .set({ data: patched })
             .where(eq(MessageTable.id, msg.id))
             .run(),
         )
