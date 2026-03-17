@@ -24,14 +24,20 @@ export namespace FileTime {
   // All tools that overwrite existing files should run their
   // assert/read/write/update sequence inside withLock(filepath, ...)
   // so concurrent writes to the same file are serialized.
-  export const state = Instance.state(() => {
-    const read = new Map<string, Map<string, number>>()
-    const locks = new Map<string, Promise<void>>()
-    return {
-      read,
-      locks,
-    }
-  })
+  export const state = Instance.state(
+    () => {
+      const read = new Map<string, Map<string, number>>()
+      const locks = new Map<string, Promise<void>>()
+      return {
+        read,
+        locks,
+      }
+    },
+    async (current) => {
+      current.read.clear()
+      current.locks.clear()
+    },
+  )
 
   export function read(sessionID: string, file: string) {
     log.info("read", { sessionID, file })

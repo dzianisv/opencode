@@ -117,6 +117,12 @@ const table = sqliteTable("session", {
 })
 ```
 
+## Verification
+
+- After any code change, run the full build (`bun run script/build.ts` or `./scripts/install-local.sh`), not just typecheck. Typecheck alone misses missing dependencies and runtime build failures.
+- Run `bun install` before building if dependencies may have changed (new imports, cherry-picks, branch switches).
+- Never consider a task done until the build passes.
+
 ## Testing
 
 - Avoid mocks as much as possible
@@ -126,6 +132,9 @@ const table = sqliteTable("session", {
 ## Type Checking
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+
+## Meta
+
 - If you make a mistake and learn something project-specific from it, append the lesson to this file under the relevant section. Keep it short and technical.
 - Promptfoo `azure:responses` evaluations fail with `2025-04-01-preview`; use `apiVersion=preview` instead.
 - Headless `opencode serve` persists messages in SQLite only; `SessionPrompt.loadMessages` must fall back to `MessageV2.stream` when storage JSON files are absent.

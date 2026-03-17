@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenCode Eval Runner"
+  short_description: "Run and evaluate the hello world promptfoo eval in this repo."
+  default_prompt: "Run the hello world eval (bun run eval:hello) and summarize the output, noting pass/fail and any errors."

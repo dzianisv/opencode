@@ -199,6 +199,12 @@ for (const item of targets) {
     },
   })
 
+  const outfile = path.join(dir, "dist", name, "bin", "opencode")
+  if (item.os === "darwin") {
+    await $`codesign --remove-signature ${outfile}`.nothrow()
+    await $`codesign --force --sign - ${outfile}`
+  }
+
   await $`rm -rf ./dist/${name}/bin/tui`
   await Bun.file(`dist/${name}/package.json`).write(
     JSON.stringify(

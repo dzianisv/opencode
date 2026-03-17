@@ -29,6 +29,19 @@ const spawn = ((cmd, args, opts) => {
   })
 }) as typeof launch
 
+const LSP_HEAP = 512
+
+function lspEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const current = process.env["NODE_OPTIONS"] ?? ""
+  const limit = `--max-old-space-size=${LSP_HEAP}`
+  const options = current.includes("--max-old-space-size") ? current : current ? `${current} ${limit}` : limit
+  return {
+    ...process.env,
+    NODE_OPTIONS: options,
+    ...extra,
+  }
+}
+
 export namespace LSPServer {
   const log = Log.create({ service: "lsp.server" })
   const pathExists = async (p: string) =>
@@ -395,7 +408,7 @@ export namespace LSPServer {
 
         log.info("installing gopls")
         const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
-          env: { ...process.env, GOBIN: Global.Path.bin },
+          env: lspEnv({ GOBIN: Global.Path.bin }),
           stdout: "pipe",
           stderr: "pipe",
           stdin: "pipe",
@@ -413,6 +426,7 @@ export namespace LSPServer {
       return {
         process: spawn(bin!, {
           cwd: root,
+          env: lspEnv(),
         }),
       }
     },
@@ -1245,6 +1259,7 @@ export namespace LSPServer {
         process: spawn(
           java,
           [
+            `-Xmx${LSP_HEAP}m`,
             "-jar",
             launcherJar,
             "-configuration",
@@ -1967,9 +1982,7 @@ export namespace LSPServer {
       return {
         process: spawn(nixd, [], {
           cwd: root,
-          env: {
-            ...process.env,
-          },
+          env: lspEnv(),
         }),
       }
     },
