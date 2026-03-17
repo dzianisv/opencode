@@ -3237,6 +3237,10 @@ export type SessionMessagesData = {
      */
     limit?: number
     before?: string
+    /**
+     * Return lightweight preview parts for sidebar prefetch
+     */
+    preview?: boolean
   }
   url: "/session/{sessionID}/message"
 }

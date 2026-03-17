@@ -770,7 +770,7 @@ export default function Layout(props: ParentProps) {
       directory,
       sessionID,
       task: (rev) =>
-        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk }))
+        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk, preview: true }))
           .then((messages) => {
             if (prefetchToken.value !== token) return
             if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
@@ -785,6 +785,7 @@ export default function Layout(props: ParentProps) {
               cursor,
               complete: !cursor,
               at: Date.now(),
+              preview: true,
             }
 
             if (stale.length > 0) {
@@ -2281,6 +2282,10 @@ export default function Layout(props: ParentProps) {
             setState("recent", true)
             layout.sidebar.open()
           }}
+          sidebarOpened={layout.sidebar.opened}
+          sidebarHovering={sidebarHovering}
+          mobile={mobile}
+          sessionProps={recentSessionProps}
         />
       )}
       renderPanel={() =>

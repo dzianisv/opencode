@@ -81,6 +81,90 @@ describe("session messages endpoint", () => {
     })
   })
 
+  test("returns lightweight preview payloads for paginated requests", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        const userID = MessageID.ascending()
+        const assistantID = MessageID.ascending()
+        const now = Date.now()
+        const app = Server.Default()
+
+        await Session.updateMessage({
+          id: userID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: now },
+          agent: "test",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: session.id,
+          messageID: userID,
+          type: "text",
+          text: "hello",
+        })
+
+        await Session.updateMessage({
+          id: assistantID,
+          sessionID: session.id,
+          role: "assistant",
+          parentID: userID,
+          mode: "build",
+          agent: "build",
+          cost: 0,
+          path: { cwd: root, root },
+          time: { created: now + 1, completed: now + 2 },
+          modelID: "test",
+          providerID: "test",
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        } as unknown as MessageV2.Info)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: session.id,
+          messageID: assistantID,
+          type: "tool",
+          tool: "bash",
+          callID: "call_preview",
+          state: {
+            status: "completed",
+            time: { start: now + 1, end: now + 2 },
+            input: { command: "printf x" },
+            title: "bash",
+            metadata: {
+              output: "x".repeat(1024),
+              description: "bash",
+            },
+            output: "x".repeat(1024),
+          },
+        })
+
+        const res = await app.request(`/session/${session.id}/message?limit=2&preview=true`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as MessageV2.WithParts[]
+        expect(body.map((item) => item.info.id)).toEqual([userID, assistantID])
+        expect(body[0]?.parts).toEqual([
+          expect.objectContaining({
+            type: "text",
+            text: "hello",
+          }),
+        ])
+        expect(body[1]?.parts).toEqual([])
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
   test("rejects invalid cursors and missing sessions", async () => {
     await Instance.provide({
       directory: root,

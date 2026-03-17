@@ -276,7 +276,7 @@ export namespace SessionProcessor {
                     }
                     snapshot = undefined
                   }
-                  SessionSummary.summarize({
+                  SessionSummary.schedule({
                     sessionID: input.sessionID,
                     messageID: input.assistantMessage.parentID,
                   })

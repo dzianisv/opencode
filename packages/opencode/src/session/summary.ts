@@ -9,8 +9,15 @@ import { Snapshot } from "@/snapshot"
 
 import { Storage } from "@/storage/storage"
 import { Bus } from "@/bus"
+import { Log } from "@/util/log"
 
 export namespace SessionSummary {
+  const log = Log.create({ service: "session.summary" })
+  const state = {
+    active: new Set<string>(),
+    queue: new Map<string, { sessionID: SessionID; messageID: MessageID }>(),
+  }
+
   function unquoteGitPath(input: string) {
     if (!input.startsWith('"')) return input
     if (!input.endsWith('"')) return input
@@ -80,6 +87,31 @@ export namespace SessionSummary {
       ])
     },
   )
+
+  export function schedule(input: { sessionID: SessionID; messageID: MessageID }) {
+    state.queue.set(input.sessionID, input)
+    if (state.active.has(input.sessionID)) return
+    state.active.add(input.sessionID)
+    void (async () => {
+      while (true) {
+        const next = state.queue.get(input.sessionID)
+        if (!next) break
+        state.queue.delete(input.sessionID)
+        try {
+          await summarize(next)
+        } catch (error) {
+          log.error("summarize", {
+            sessionID: next.sessionID,
+            messageID: next.messageID,
+            error,
+            stack: JSON.stringify((error as Error)?.stack),
+          })
+        }
+      }
+    })().finally(() => {
+      state.active.delete(input.sessionID)
+    })
+  }
 
   async function summarizeSession(input: { sessionID: SessionID; messages: MessageV2.WithParts[] }) {
     const diffs = await computeDiff({ messages: input.messages })

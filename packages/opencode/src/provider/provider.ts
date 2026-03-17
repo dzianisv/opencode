@@ -224,7 +224,7 @@ export namespace Provider {
             return sdk.responses(modelID)
           }
         },
-        options: {},
+        options: { useDeploymentBasedUrls: true, apiVersion: "2024-12-01-preview" },
         vars(_options) {
           return {
             ...(resource && { AZURE_RESOURCE_NAME: resource }),

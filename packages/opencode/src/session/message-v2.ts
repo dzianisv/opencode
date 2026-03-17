@@ -556,6 +556,16 @@ export namespace MessageV2 {
     }))
   }
 
+  export function preview(input: WithParts[]) {
+    return input.map((msg) => ({
+      info: msg.info,
+      parts:
+        msg.info.role === "user"
+          ? msg.parts.filter((part) => part.type === "text" && !part.synthetic && !part.ignored)
+          : [],
+    }))
+  }
+
   export function toModelMessages(
     input: WithParts[],
     model: Provider.Model,

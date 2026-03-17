@@ -189,6 +189,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       limit: {} as Record<string, number>,
       cursor: {} as Record<string, string | undefined>,
       complete: {} as Record<string, boolean>,
+      preview: {} as Record<string, boolean | undefined>,
       loading: {} as Record<string, boolean>,
     })
 
@@ -258,6 +259,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             delete draft.limit[key]
             delete draft.cursor[key]
             delete draft.complete[key]
+            delete draft.preview[key]
             delete draft.loading[key]
           }
         }),
@@ -341,6 +343,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             setMeta("limit", key, message.length)
             setMeta("cursor", key, next.cursor)
             setMeta("complete", key, next.complete)
+            setMeta("preview", key, false)
             setSessionPrefetch({
               directory: input.directory,
               sessionID: input.sessionID,
@@ -437,6 +440,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               setMeta("limit", key, seeded.limit)
               setMeta("cursor", key, seeded.cursor)
               setMeta("complete", key, seeded.complete)
+              setMeta("preview", key, seeded.preview === true)
               setMeta("loading", key, false)
             })
           }
@@ -451,13 +455,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                   setMeta("limit", key, seeded.limit)
                   setMeta("cursor", key, seeded.cursor)
                   setMeta("complete", key, seeded.complete)
+                  setMeta("preview", key, seeded.preview === true)
                   setMeta("loading", key, false)
                 })
               }
             }
 
             const hasSession = Binary.search(store.session, sessionID, (s) => s.id).found
-            const cached = store.message[sessionID] !== undefined && meta.limit[key] !== undefined
+            const cached =
+              store.message[sessionID] !== undefined && meta.limit[key] !== undefined && meta.preview[key] !== true
             if (cached && hasSession && !opts?.force) return
 
             const limit = meta.limit[key] ?? messagePageSize
