@@ -52,8 +52,24 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 
 export namespace Server {
   const log = Log.create({ service: "server" })
+  const csp =
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
 
   export const Default = lazy(() => createApp({}))
+
+  async function webdir() {
+    const { join, resolve } = await import("path")
+    const dirs = [
+      resolve(process.cwd(), "packages/app/dist"),
+      resolve(process.cwd(), "../app/dist"),
+      resolve(process.cwd(), "app/dist"),
+      resolve(import.meta.dir, "../../../app/dist"),
+      resolve(import.meta.dir, "../../../../app/dist"),
+    ]
+    for (const dir of [...new Set(dirs)]) {
+      if (await Bun.file(join(dir, "index.html")).exists()) return dir
+    }
+  }
 
   export const createApp = (opts: { cors?: string[] }): Hono => {
     const app = new Hono()
@@ -556,9 +572,37 @@ export namespace Server {
         },
       )
       .all("/*", async (c) => {
-        const path = c.req.path
+        const reqpath = c.req.path
+        const { extname, join } = await import("path")
 
-        const response = await proxy(`https://app.opencode.ai${path}`, {
+        const dir = await webdir()
+        if (dir) {
+          const target = reqpath === "/" ? "index.html" : reqpath.slice(1)
+          const file = Bun.file(join(dir, target))
+          if (await file.exists()) {
+            return new Response(file, {
+              headers: {
+                "Content-Type": file.type,
+                "Content-Security-Policy": csp,
+              },
+            })
+          }
+          // Only use SPA fallback for extensionless client-side routes.
+          if (!extname(reqpath)) {
+            const index = Bun.file(join(dir, "index.html"))
+            if (await index.exists()) {
+              return new Response(index, {
+                headers: {
+                  "Content-Type": "text/html",
+                  "Content-Security-Policy": csp,
+                },
+              })
+            }
+          }
+          return new Response("Not Found", { status: 404 })
+        }
+
+        const response = await proxy(`https://app.opencode.ai${reqpath}`, {
           ...c.req,
           headers: {
             ...c.req.raw.headers,
@@ -567,7 +611,7 @@ export namespace Server {
         })
         response.headers.set(
           "Content-Security-Policy",
-          "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:",
+          csp,
         )
         return response
       })
