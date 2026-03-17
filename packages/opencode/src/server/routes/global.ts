@@ -12,8 +12,11 @@ import { Config } from "../../config/config"
 import { errors } from "../error"
 import { Memory } from "@/diagnostic/memory"
 import { Session } from "../../session"
+import { Relay } from "../relay"
 
 const log = Log.create({ service: "server" })
+type Event = { type: string; properties: Record<string, unknown> }
+type Item = { directory?: string; payload: Event }
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
 
@@ -77,12 +80,19 @@ export const GlobalRoutes = lazy(() =>
                 type: "server.connected",
                 properties: {},
               },
-            }),
-          })
-          async function handler(event: any) {
-            await stream.writeSSE({
-              data: JSON.stringify(event),
             })
+          })
+          const relay = Relay.create({
+            event: (item: Item) => item.payload,
+            scope: (item: Item) => item.directory ?? "global",
+            write: async (item: Item) => {
+              await stream.writeSSE({
+                data: JSON.stringify(item),
+              })
+            },
+          })
+          function handler(event: Item) {
+            relay.push(event)
           }
           GlobalBus.on("event", handler)
 
@@ -101,6 +111,7 @@ export const GlobalRoutes = lazy(() =>
           await new Promise<void>((resolve) => {
             stream.onAbort(() => {
               clearInterval(heartbeat)
+              relay.stop()
               GlobalBus.off("event", handler)
               resolve()
               log.info("global event disconnected")
