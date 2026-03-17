@@ -229,7 +229,7 @@ export namespace Project {
 
         sandbox = top
 
-        const worktree = await git(["rev-parse", "--git-common-dir"], {
+        const common = await git(["rev-parse", "--git-common-dir"], {
           cwd: sandbox,
         })
           .then(async (result) => {
@@ -239,7 +239,7 @@ export namespace Project {
           })
           .catch(() => undefined)
 
-        if (!worktree) {
+        if (!common) {
           return {
             id,
             sandbox,
@@ -248,7 +248,7 @@ export namespace Project {
           }
         }
 
-        const worktreeDir = await fs.realpath(worktree).catch(() => worktree)
+        const worktreeDir = await fs.realpath(common).catch(() => common)
         return {
           id,
           sandbox,

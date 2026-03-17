@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import promptfoo from "promptfoo"
+import promptfoo, { type EvaluateTestSuite } from "promptfoo"
 
 const envfile = Bun.file(path.join(os.homedir(), ".env.d", "codex.env"))
 const envok = await envfile.exists()
@@ -89,7 +89,7 @@ const suite = {
     }
   ],
   writeLatestResults: false
-}
+} satisfies EvaluateTestSuite
 
 const result = await promptfoo.evaluate(suite)
 const failed = result.results.filter((item) => !item.success)

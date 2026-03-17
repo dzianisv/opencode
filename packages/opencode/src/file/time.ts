@@ -85,10 +85,6 @@ export namespace FileTime {
     }
   }
 
-  export function clear(sessionID: string) {
-    delete state().read[sessionID]
-  }
-
   export async function assert(sessionID: string, filepath: string) {
     if (Flag.OPENCODE_DISABLE_FILETIME_CHECK === true) {
       return

@@ -1455,7 +1455,7 @@ export namespace Provider {
     return model.capabilities.input.text && model.capabilities.output.text
   }
 
-  export async function getTitleModel(input: { providerID: string; modelID: string }) {
+  export async function getTitleModel(input: { providerID: ProviderID; modelID: ModelID }) {
     const cfg = await Config.get()
 
     if (cfg.small_model) {
@@ -1466,8 +1466,8 @@ export namespace Provider {
     const providers = await list()
     const items = Object.entries(providers).flatMap(([providerID, provider]) =>
       Object.entries(provider.models).map(([modelID, model]) => ({
-        providerID,
-        modelID,
+        providerID: ProviderID.make(providerID),
+        modelID: ModelID.make(modelID),
         model,
       })),
     )
