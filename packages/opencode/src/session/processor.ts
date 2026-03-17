@@ -457,7 +457,10 @@ export namespace SessionProcessor {
                 error,
               })
             } else {
-              const retry = SessionRetry.retryable(error, input.abort)
+              const retry = SessionRetry.retryable(error, {
+                abort: input.abort,
+                empty: (await MessageV2.parts(input.assistantMessage.id)).length === 0,
+              })
               if (retry !== undefined) {
                 attempt++
                 const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)

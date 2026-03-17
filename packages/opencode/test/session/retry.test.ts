@@ -130,7 +130,7 @@ describe("session.retry.retryable", () => {
     const ctl = new AbortController()
     const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
 
-    expect(SessionRetry.retryable(error, ctl.signal)).toBe("The operation was aborted.")
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: true })).toBe("The operation was aborted.")
   })
 
   test("does not retry aborted errors after session cancellation", () => {
@@ -138,7 +138,14 @@ describe("session.retry.retryable", () => {
     ctl.abort()
     const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
 
-    expect(SessionRetry.retryable(error, ctl.signal)).toBeUndefined()
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: true })).toBeUndefined()
+  })
+
+  test("does not retry aborted errors after assistant output has started", () => {
+    const ctl = new AbortController()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: false })).toBeUndefined()
   })
 })
 
