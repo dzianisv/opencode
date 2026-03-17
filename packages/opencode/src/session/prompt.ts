@@ -691,7 +691,7 @@ export namespace SessionPrompt {
 
       // normal processing
       const agent = await Agent.get(lastUser.agent)
-      const maxSteps = agent.steps ?? Infinity
+      const maxSteps = agent.steps ?? 200
       const isLastStep = step >= maxSteps
       msgs = await insertReminders({
         messages: msgs,
