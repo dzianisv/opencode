@@ -6,6 +6,9 @@ import path from "path"
 import { tmpdir } from "../fixture/fixture"
 import { Filesystem } from "../../src/util/filesystem"
 import { GlobalBus } from "../../src/bus/global"
+import { ProjectID } from "../../src/project/schema"
+import { Database, eq } from "../../src/storage/db"
+import { ProjectTable } from "../../src/project/project.sql"
 
 Log.init({ print: false })
 
@@ -22,7 +25,7 @@ mock.module("../../src/util/git", () => ({
       mode === "rev-list-fail" &&
       cmd.includes("git rev-list") &&
       cmd.includes("--max-parents=0") &&
-      cmd.includes("--all")
+      cmd.includes("HEAD")
     ) {
       return Promise.resolve({
         exitCode: 128,
@@ -74,7 +77,7 @@ describe("Project.fromDirectory", () => {
     const { project } = await p.fromDirectory(tmp.path)
 
     expect(project).toBeDefined()
-    expect(project.id).toBe("global")
+    expect(project.id).toBe(ProjectID.global)
     expect(project.vcs).toBe("git")
     expect(project.worktree).toBe(tmp.path)
 
@@ -90,7 +93,7 @@ describe("Project.fromDirectory", () => {
     const { project } = await p.fromDirectory(tmp.path)
 
     expect(project).toBeDefined()
-    expect(project.id).not.toBe("global")
+    expect(project.id).not.toBe(ProjectID.global)
     expect(project.vcs).toBe("git")
     expect(project.worktree).toBe(tmp.path)
 
@@ -107,7 +110,7 @@ describe("Project.fromDirectory", () => {
     await withMode("rev-list-fail", async () => {
       const { project } = await p.fromDirectory(tmp.path)
       expect(project.vcs).toBe("git")
-      expect(project.id).toBe("global")
+      expect(project.id).toBe(ProjectID.global)
       expect(project.worktree).toBe(tmp.path)
     })
   })
@@ -171,6 +174,52 @@ describe("Project.fromDirectory with worktrees", () => {
     }
   })
 
+  test("worktree should share project ID with main repo", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project: main } = await p.fromDirectory(tmp.path)
+
+    const worktreePath = path.join(tmp.path, "..", path.basename(tmp.path) + "-wt-shared")
+    try {
+      await $`git worktree add ${worktreePath} -b shared-${Date.now()}`.cwd(tmp.path).quiet()
+
+      const { project: wt } = await p.fromDirectory(worktreePath)
+
+      expect(wt.id).toBe(main.id)
+
+      // Cache should live in the common .git dir, not the worktree's .git file
+      const cache = path.join(tmp.path, ".git", "opencode")
+      const exists = await Filesystem.exists(cache)
+      expect(exists).toBe(true)
+    } finally {
+      await $`git worktree remove ${worktreePath}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("separate clones of the same repo should share project ID", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    // Create a bare remote, push, then clone into a second directory
+    const bare = tmp.path + "-bare"
+    const clone = tmp.path + "-clone"
+    try {
+      await $`git clone --bare ${tmp.path} ${bare}`.quiet()
+      await $`git clone ${bare} ${clone}`.quiet()
+
+      const { project: a } = await p.fromDirectory(tmp.path)
+      const { project: b } = await p.fromDirectory(clone)
+
+      expect(b.id).toBe(a.id)
+    } finally {
+      await $`rm -rf ${bare} ${clone}`.quiet().nothrow()
+    }
+  })
+
   test("should accumulate multiple worktrees in sandboxes", async () => {
     const p = await loadProject()
     await using tmp = await tmpdir({ git: true })
@@ -194,6 +243,56 @@ describe("Project.fromDirectory with worktrees", () => {
         .quiet()
         .catch(() => {})
       await $`git worktree remove ${worktree2}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("should repair empty sandboxes from git when booting the root", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project } = await p.fromDirectory(tmp.path)
+    const worktree = path.join(tmp.path, "..", path.basename(tmp.path) + "-repair")
+    try {
+      await $`git worktree add ${worktree} -b repair-${Date.now()}`.cwd(tmp.path).quiet()
+
+      Database.use((db) =>
+        db.update(ProjectTable).set({ sandboxes: [] }).where(eq(ProjectTable.id, project.id)).run(),
+      )
+
+      const { project: next } = await p.fromDirectory(tmp.path)
+      expect(next.sandboxes).toContain(worktree)
+      expect(next.sandboxes).not.toContain(tmp.path)
+    } finally {
+      await $`git worktree remove ${worktree}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("should repair empty sandboxes when listing projects", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project } = await p.fromDirectory(tmp.path)
+    const worktree = path.join(tmp.path, "..", path.basename(tmp.path) + "-listed")
+    try {
+      await $`git worktree add ${worktree} -b listed-${Date.now()}`.cwd(tmp.path).quiet()
+
+      Database.use((db) =>
+        db.update(ProjectTable).set({ sandboxes: [] }).where(eq(ProjectTable.id, project.id)).run(),
+      )
+
+      const list = await p.list()
+      const next = list.find((item) => item.id === project.id)
+      expect(next).toBeDefined()
+      expect(next!.sandboxes).toContain(worktree)
+      expect(next!.sandboxes).not.toContain(tmp.path)
+    } finally {
+      await $`git worktree remove ${worktree}`
         .cwd(tmp.path)
         .quiet()
         .catch(() => {})
@@ -301,7 +400,7 @@ describe("Project.update", () => {
 
     await expect(
       Project.update({
-        projectID: "nonexistent-project-id",
+        projectID: ProjectID.make("nonexistent-project-id"),
         name: "Should Fail",
       }),
     ).rejects.toThrow("Project not found: nonexistent-project-id")

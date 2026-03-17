@@ -6,6 +6,8 @@ import { Instance } from "../../src/project/instance"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 import { Session } from "../../src/session"
+import { MessageID, PartID } from "../../src/session/schema"
+import { MessageV2 } from "../../src/session/message-v2"
 import type { Provider } from "../../src/provider/provider"
 
 Log.init({ print: false })
@@ -240,6 +242,81 @@ describe("util.token.estimate", () => {
 
   test("returns 0 for empty string", () => {
     expect(Token.estimate("")).toBe(0)
+  })
+})
+
+describe("session.compaction.prune", () => {
+  test("prunes enough historical tool output without scanning the full session", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const out = "x".repeat(40_000)
+
+        for (let i = 0; i < 30; i++) {
+          const user = await Session.updateMessage({
+            id: MessageID.ascending(),
+            sessionID: session.id,
+            role: "user",
+            time: { created: Date.now() + i * 2 },
+            agent: "user",
+            model: { providerID: "test", modelID: "test" },
+            tools: {},
+            mode: "",
+          } as unknown as MessageV2.Info)
+
+          const assistant = await Session.updateMessage({
+            id: MessageID.ascending(),
+            sessionID: session.id,
+            role: "assistant",
+            parentID: user.id,
+            time: { created: Date.now() + i * 2 + 1 },
+            modelID: "test",
+            providerID: "test",
+            mode: "build",
+            agent: "build",
+            path: { cwd: tmp.path, root: tmp.path },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          } as unknown as MessageV2.Info)
+
+          await Session.updatePart({
+            id: PartID.ascending(),
+            messageID: assistant.id,
+            sessionID: session.id,
+            type: "tool",
+            tool: "bash",
+            callID: `call-${i}`,
+            state: {
+              status: "completed",
+              input: { cmd: "echo" },
+              output: out,
+              title: "",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now() },
+            },
+          } satisfies MessageV2.ToolPart)
+        }
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const count = msgs
+          .flatMap((msg) => msg.parts)
+          .filter((part): part is MessageV2.ToolPart => part.type === "tool")
+          .filter((part) => part.state.status === "completed" && !!part.state.time.compacted).length
+
+        expect(count).toBe(3)
+
+        await Session.remove(session.id)
+      },
+    })
   })
 })
 

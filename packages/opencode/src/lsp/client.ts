@@ -15,6 +15,12 @@ import { Filesystem } from "../util/filesystem"
 
 const DIAGNOSTICS_DEBOUNCE_MS = 150
 
+function limit(key: string, fallback: number) {
+  const value = Number(process.env[key])
+  if (Number.isFinite(value) && value > 0) return Math.floor(value)
+  return fallback
+}
+
 export namespace LSPClient {
   const log = Log.create({ service: "lsp.client" })
 
@@ -49,6 +55,31 @@ export namespace LSPClient {
     )
 
     const diagnostics = new Map<string, Diagnostic[]>()
+    const files = new Map<string, number>()
+    const diag_age = new Map<string, number>()
+    const file_age = new Map<string, number>()
+    let age = 0
+
+    function touch(index: Map<string, number>, key: string) {
+      age += 1
+      index.delete(key)
+      index.set(key, age)
+    }
+
+    function trim<T>(items: Map<string, T>, index: Map<string, number>, max: number) {
+      if (max <= 0) return [] as string[]
+      const stale: string[] = []
+      while (items.size > max) {
+        const key = index.keys().next().value as string | undefined
+        if (!key) break
+        index.delete(key)
+        if (!items.has(key)) continue
+        items.delete(key)
+        stale.push(key)
+      }
+      return stale
+    }
+
     connection.onNotification("textDocument/publishDiagnostics", (params) => {
       const filePath = Filesystem.normalizePath(fileURLToPath(params.uri))
       l.info("textDocument/publishDiagnostics", {
@@ -57,6 +88,10 @@ export namespace LSPClient {
       })
       const exists = diagnostics.has(filePath)
       diagnostics.set(filePath, params.diagnostics)
+      touch(diag_age, filePath)
+      for (const stale of trim(diagnostics, diag_age, limit("OPENCODE_LSP_DIAGNOSTIC_MAX", 4096))) {
+        l.info("evicted diagnostics", { path: stale })
+      }
       if (!exists && input.serverID === "typescript") return
       Bus.publish(Event.Diagnostics, { path: filePath, serverID: input.serverID })
     })
@@ -132,10 +167,6 @@ export namespace LSPClient {
       })
     }
 
-    const files: {
-      [path: string]: number
-    } = {}
-
     const result = {
       root: input.root,
       get serverID() {
@@ -146,12 +177,14 @@ export namespace LSPClient {
       },
       notify: {
         async open(input: { path: string }) {
-          input.path = path.isAbsolute(input.path) ? input.path : path.resolve(Instance.directory, input.path)
+          input.path = Filesystem.normalizePath(
+            path.isAbsolute(input.path) ? input.path : path.resolve(Instance.directory, input.path),
+          )
           const text = await Filesystem.readText(input.path)
           const extension = path.extname(input.path)
           const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"
 
-          const version = files[input.path]
+          const version = files.get(input.path)
           if (version !== undefined) {
             log.info("workspace/didChangeWatchedFiles", input)
             await connection.sendNotification("workspace/didChangeWatchedFiles", {
@@ -164,7 +197,8 @@ export namespace LSPClient {
             })
 
             const next = version + 1
-            files[input.path] = next
+            files.set(input.path, next)
+            touch(file_age, input.path)
             log.info("textDocument/didChange", {
               path: input.path,
               version: next,
@@ -191,6 +225,7 @@ export namespace LSPClient {
 
           log.info("textDocument/didOpen", input)
           diagnostics.delete(input.path)
+          diag_age.delete(input.path)
           await connection.sendNotification("textDocument/didOpen", {
             textDocument: {
               uri: pathToFileURL(input.path).href,
@@ -199,7 +234,18 @@ export namespace LSPClient {
               text,
             },
           })
-          files[input.path] = 0
+          files.set(input.path, 0)
+          touch(file_age, input.path)
+          for (const stale of trim(files, file_age, limit("OPENCODE_LSP_OPEN_FILE_MAX", 1024))) {
+            diagnostics.delete(stale)
+            diag_age.delete(stale)
+            log.info("textDocument/didClose", { path: stale })
+            await connection.sendNotification("textDocument/didClose", {
+              textDocument: {
+                uri: pathToFileURL(stale).href,
+              },
+            })
+          }
           return
         },
       },
@@ -237,6 +283,10 @@ export namespace LSPClient {
       },
       async shutdown() {
         l.info("shutting down")
+        files.clear()
+        diagnostics.clear()
+        file_age.clear()
+        diag_age.clear()
         connection.end()
         connection.dispose()
         input.server.process.kill()

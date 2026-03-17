@@ -162,7 +162,7 @@ export const WebFetchTool = Tool.define("webfetch", {
 })
 
 async function extractTextFromHTML(html: string) {
-  const chunks: string[] = []
+  const text: string[] = []
   let skipContent = false
 
   const rewriter = new HTMLRewriter()
@@ -183,14 +183,14 @@ async function extractTextFromHTML(html: string) {
       },
       text(input) {
         if (!skipContent) {
-          chunks.push(input.text)
+          text.push(input.text)
         }
       },
     })
     .transform(new Response(html))
 
   await rewriter.text()
-  return chunks.join("").trim()
+  return text.join("").trim()
 }
 
 function convertHTMLToMarkdown(html: string): string {

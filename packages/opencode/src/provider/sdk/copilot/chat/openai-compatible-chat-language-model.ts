@@ -538,15 +538,15 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV2 {
                     toolName: toolCallDelta.function.name,
                   })
 
-                  const initialArgs = toolCallDelta.function.arguments ?? ""
+                  const args = toolCallDelta.function.arguments ?? ""
                   toolCalls[index] = {
                     id: toolCallDelta.id,
                     type: "function",
                     function: {
                       name: toolCallDelta.function.name,
-                      arguments: initialArgs,
+                      arguments: args,
                     },
-                    argumentChunks: initialArgs ? [initialArgs] : [],
+                    argumentChunks: args ? [args] : [],
                     hasFinished: false,
                   }
 

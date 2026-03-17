@@ -10,6 +10,7 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "../config/config"
+import { Flag } from "../flag/flag"
 import { Log } from "../util/log"
 import { NamedError } from "@opencode-ai/util/error"
 import z from "zod/v4"
@@ -160,54 +161,228 @@ export namespace MCP {
     return typeof entry === "object" && entry !== null && "type" in entry
   }
 
-  const state = Instance.state(
-    async () => {
-      const cfg = await Config.get()
-      const config = cfg.mcp ?? {}
-      const clients: Record<string, MCPClient> = {}
-      const status: Record<string, Status> = {}
-
-      await Promise.all(
-        Object.entries(config).map(async ([key, mcp]) => {
-          if (!isMcpConfigured(mcp)) {
-            log.error("Ignoring MCP config entry without type", { key })
-            return
-          }
-
-          // If disabled by config, mark as disabled without trying to connect
-          if (mcp.enabled === false) {
-            status[key] = { status: "disabled" }
-            return
-          }
-
-          const result = await create(key, mcp).catch(() => undefined)
-          if (!result) return
-
-          status[key] = result.status
-
-          if (result.mcpClient) {
-            clients[key] = result.mcpClient
-          }
-        }),
+  async function descendants(pid: number): Promise<number[]> {
+    if (process.platform === "win32") return []
+    const pids: number[] = []
+    const queue = [pid]
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      const proc = Bun.spawn(["pgrep", "-P", String(current)], { stdout: "pipe", stderr: "pipe" })
+      const [code, out] = await Promise.all([proc.exited, new Response(proc.stdout).text()]).catch(
+        () => [-1, ""] as const,
       )
-      return {
-        status,
-        clients,
+      if (code !== 0) continue
+      for (const tok of out.trim().split(/\s+/)) {
+        const cpid = parseInt(tok, 10)
+        if (!isNaN(cpid) && pids.indexOf(cpid) === -1) {
+          pids.push(cpid)
+          queue.push(cpid)
+        }
       }
-    },
-    async (state) => {
-      await Promise.all(
-        Object.values(state.clients).map((client) =>
-          client.close().catch((error) => {
-            log.error("Failed to close MCP client", {
-              error,
+    }
+    return pids
+  }
+
+  const shared = new Map<
+    string,
+    {
+      refs: number
+      client: MCPClient
+      used: number
+    }
+  >()
+  const opening = new Map<string, Promise<{ mcpClient: MCPClient | undefined; status: Status }>>()
+
+  const mcpIdle = (() => {
+    const val = Flag.OPENCODE_MCP_IDLE_MS
+    if (val && val > 0) return val
+    return 10 * 60 * 1000
+  })()
+
+  const mcpSweep = {
+    timer: undefined as NodeJS.Timeout | undefined,
+  }
+
+  function startMcpSweep() {
+    if (mcpSweep.timer) return
+    const ms = Math.max(5_000, Math.floor(mcpIdle / 2))
+    mcpSweep.timer = setInterval(() => {
+      if (shared.size === 0) {
+        if (mcpSweep.timer) clearInterval(mcpSweep.timer)
+        mcpSweep.timer = undefined
+        return
+      }
+      void sweepMcp()
+    }, ms)
+    mcpSweep.timer.unref?.()
+  }
+
+  async function sweepMcp() {
+    const now = Date.now()
+    for (const [name, item] of shared) {
+      if (item.refs > 0) continue
+      if (now - item.used < mcpIdle) continue
+      log.info("disposing idle mcp client", { name, idle_ms: now - item.used })
+      shared.delete(name)
+      await close(name, item.client)
+    }
+  }
+
+  export function stopMcpSweep() {
+    if (!mcpSweep.timer) return
+    clearInterval(mcpSweep.timer)
+    mcpSweep.timer = undefined
+  }
+
+  export async function closeAll() {
+    stopMcpSweep()
+    for (const [name, item] of shared) {
+      shared.delete(name)
+      await close(name, item.client)
+    }
+  }
+
+  function alive(pid: number) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function close(name: string, client: MCPClient) {
+    const pid = (client.transport as any)?.pid
+    const pids = typeof pid === "number" ? [...(await descendants(pid)), pid] : []
+    await client.close().catch((error) => {
+      log.error("Failed to close MCP client", {
+        name,
+        error,
+      })
+    })
+    if (!pids.length) return
+    for (const id of pids) {
+      try {
+        process.kill(id, "SIGTERM")
+      } catch {}
+    }
+    await Bun.sleep(150)
+    for (const id of pids) {
+      if (!alive(id)) continue
+      try {
+        process.kill(id, "SIGKILL")
+      } catch {}
+    }
+  }
+
+  async function release(name: string, force?: boolean) {
+    const item = shared.get(name)
+    if (!item) return
+    item.refs = Math.max(0, item.refs - 1)
+    item.used = Date.now()
+    if (force || item.refs <= 0) {
+      shared.delete(name)
+      log.info("closing shared mcp client", { name, force: !!force })
+      await close(name, item.client)
+    }
+  }
+
+  async function acquire(name: string, mcp: Config.Mcp) {
+    const item = shared.get(name)
+    if (item) {
+      item.refs += 1
+      item.used = Date.now()
+      log.info("reusing shared mcp client", { name, refs: item.refs })
+      return {
+        mcpClient: item.client,
+        status: { status: "connected" as const },
+      }
+    }
+    let run = opening.get(name)
+    if (!run) {
+      const next = create(name, mcp)
+        .then((result) => {
+          if (!result?.mcpClient) return result
+          const hit = shared.get(name)
+          if (!hit) {
+            shared.set(name, {
+              refs: 0,
+              client: result.mcpClient,
+              used: Date.now(),
             })
-          }),
-        ),
-      )
+            log.info("created shared mcp client", { name, refs: 0 })
+            startMcpSweep()
+            return result
+          }
+          if (hit.client === result.mcpClient) return result
+          void close(name, result.mcpClient)
+          return {
+            mcpClient: hit.client,
+            status: { status: "connected" as const },
+          }
+        })
+        .finally(() => {
+          opening.delete(name)
+        })
+      opening.set(name, next)
+      run = next
+    }
+    const result = await run
+    const hit = shared.get(name)
+    if (!hit) return result
+    hit.refs += 1
+    hit.used = Date.now()
+    log.info("reusing shared mcp client", { name, refs: hit.refs })
+    return {
+      mcpClient: hit.client,
+      status: { status: "connected" as const },
+    }
+  }
+
+  type McpState = {
+    status: Record<string, Status>
+    clients: Record<string, MCPClient>
+  }
+
+  const state = Instance.state(
+    async (): Promise<McpState> => ({
+      status: {},
+      clients: {},
+    }),
+    async (state) => {
+      await Promise.all(Object.keys(state.clients).map((name) => release(name, true)))
       pendingOAuthTransports.clear()
     },
   )
+
+  async function prune(state: McpState, config: Record<string, McpEntry>) {
+    const keys = Object.keys(state.clients)
+    for (const name of keys) {
+      const mcp = config[name]
+      if (mcp && isMcpConfigured(mcp) && mcp.enabled !== false) continue
+      await release(name)
+      delete state.clients[name]
+      if (!mcp) delete state.status[name]
+      if (mcp && isMcpConfigured(mcp) && mcp.enabled === false) {
+        state.status[name] = { status: "disabled" }
+      }
+    }
+  }
+
+  async function ensure(state: McpState, name: string, mcp: Config.Mcp) {
+    const existing = state.clients[name]
+    if (existing) {
+      state.status[name] = { status: "connected" }
+      return {
+        mcpClient: existing,
+        status: state.status[name],
+      }
+    }
+    const result = await acquire(name, mcp)
+    state.status[name] = result.status
+    if (result.mcpClient) state.clients[name] = result.mcpClient
+    return result
+  }
 
   // Helper function to fetch prompts for a specific client
   async function fetchPromptsForClient(clientName: string, client: Client) {
@@ -256,7 +431,21 @@ export namespace MCP {
 
   export async function add(name: string, mcp: Config.Mcp) {
     const s = await state()
-    const result = await create(name, mcp)
+    if (s.clients[name]) {
+      await release(name)
+      delete s.clients[name]
+    }
+    const result = await ensure(s, name, mcp).catch((error) => {
+      const status = {
+        status: "failed" as const,
+        error: error instanceof Error ? error.message : String(error),
+      }
+      s.status[name] = status
+      return {
+        mcpClient: undefined,
+        status,
+      }
+    })
     if (!result) {
       const status = {
         status: "failed" as const,
@@ -272,13 +461,6 @@ export namespace MCP {
       return {
         status: s.status,
       }
-    }
-    // Close existing client if present to prevent memory leaks
-    const existingClient = s.clients[name]
-    if (existingClient) {
-      await existingClient.close().catch((error) => {
-        log.error("Failed to close existing MCP client", { name, error })
-      })
     }
     s.clients[name] = result.mcpClient
     s.status[name] = result.status
@@ -359,8 +541,14 @@ export namespace MCP {
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error))
 
-          // Handle OAuth-specific errors
-          if (error instanceof UnauthorizedError) {
+          // Handle OAuth-specific errors.
+          // The SDK throws UnauthorizedError when auth() returns 'REDIRECT',
+          // but may also throw plain Errors when auth() fails internally
+          // (e.g. during discovery, registration, or state generation).
+          // When an authProvider is attached, treat both cases as auth-related.
+          const isAuthError =
+            error instanceof UnauthorizedError || (authProvider && lastError.message.includes("OAuth"))
+          if (isAuthError) {
             log.info("mcp server requires authentication", { key, transport: name })
 
             // Check if this is a "needs registration" error
@@ -468,11 +656,7 @@ export namespace MCP {
       return undefined
     })
     if (!result) {
-      await mcpClient.close().catch((error) => {
-        log.error("Failed to close MCP client", {
-          error,
-        })
-      })
+      await close(key, mcpClient)
       status = {
         status: "failed",
         error: "Failed to get tools",
@@ -498,18 +682,36 @@ export namespace MCP {
     const cfg = await Config.get()
     const config = cfg.mcp ?? {}
     const result: Record<string, Status> = {}
+    await prune(s, config)
 
     // Include all configured MCPs from config, not just connected ones
     for (const [key, mcp] of Object.entries(config)) {
       if (!isMcpConfigured(mcp)) continue
-      result[key] = s.status[key] ?? { status: "disabled" }
+      const current = s.status[key]
+      if (current) {
+        result[key] = current
+        continue
+      }
+      if (mcp.enabled === false) {
+        result[key] = { status: "disabled" }
+        continue
+      }
+      if (s.clients[key] || shared.has(key)) {
+        result[key] = { status: "connected" }
+        continue
+      }
+      result[key] = { status: "disabled" }
     }
 
     return result
   }
 
   export async function clients() {
-    return state().then((state) => state.clients)
+    const s = await state()
+    const cfg = await Config.get()
+    const config = cfg.mcp ?? {}
+    await prune(s, config)
+    return s.clients
   }
 
   export async function connect(name: string) {
@@ -526,38 +728,24 @@ export namespace MCP {
       return
     }
 
-    const result = await create(name, { ...mcp, enabled: true })
-
-    if (!result) {
-      const s = await state()
+    const s = await state()
+    if (s.clients[name]) {
+      await release(name)
+      delete s.clients[name]
+    }
+    await ensure(s, name, { ...mcp, enabled: true }).catch((error) => {
       s.status[name] = {
         status: "failed",
-        error: "Unknown error during connection",
+        error: error instanceof Error ? error.message : String(error),
       }
-      return
-    }
-
-    const s = await state()
-    s.status[name] = result.status
-    if (result.mcpClient) {
-      // Close existing client if present to prevent memory leaks
-      const existingClient = s.clients[name]
-      if (existingClient) {
-        await existingClient.close().catch((error) => {
-          log.error("Failed to close existing MCP client", { name, error })
-        })
-      }
-      s.clients[name] = result.mcpClient
-    }
+    })
   }
 
   export async function disconnect(name: string) {
     const s = await state()
     const client = s.clients[name]
     if (client) {
-      await client.close().catch((error) => {
-        log.error("Failed to close MCP client", { name, error })
-      })
+      await release(name)
       delete s.clients[name]
     }
     s.status[name] = { status: "disabled" }
@@ -568,22 +756,49 @@ export namespace MCP {
     const s = await state()
     const cfg = await Config.get()
     const config = cfg.mcp ?? {}
-    const clientsSnapshot = await clients()
     const defaultTimeout = cfg.experimental?.mcp_timeout
+    await prune(s, config)
 
-    const connectedClients = Object.entries(clientsSnapshot).filter(
+    await Promise.all(
+      Object.entries(config).map(async ([clientName, mcpConfig]) => {
+        if (!isMcpConfigured(mcpConfig)) return
+        if (mcpConfig.enabled === false) {
+          s.status[clientName] = { status: "disabled" }
+          return
+        }
+        const on =
+          mcpConfig.enabled === true ||
+          s.status[clientName]?.status === "connected" ||
+          !!s.clients[clientName] ||
+          shared.has(clientName)
+        if (!on) {
+          s.status[clientName] = s.status[clientName] ?? { status: "disabled" }
+          return
+        }
+
+        await ensure(s, clientName, mcpConfig).catch((e) => {
+          s.status[clientName] = {
+            status: "failed",
+            error: e instanceof Error ? e.message : String(e),
+          }
+        })
+      }),
+    )
+
+    const connectedClients = Object.entries(s.clients).filter(
       ([clientName]) => s.status[clientName]?.status === "connected",
     )
 
     const toolsResults = await Promise.all(
       connectedClients.map(async ([clientName, client]) => {
-        const toolsResult = await client.listTools().catch((e) => {
+        const toolsResult = await client.listTools().catch(async (e) => {
           log.error("failed to get tools", { clientName, error: e.message })
           const failedStatus = {
             status: "failed" as const,
             error: e instanceof Error ? e.message : String(e),
           }
           s.status[clientName] = failedStatus
+          await release(clientName)
           delete s.clients[clientName]
           return undefined
         })

@@ -4,7 +4,7 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
-import solidPlugin from "../node_modules/@opentui/solid/scripts/solid-plugin"
+import solidPlugin from "@opentui/solid/bun-plugin"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -51,7 +51,7 @@ const migrations = await Promise.all(
           Number(match[6]),
         )
       : 0
-    return { sql, timestamp }
+    return { sql, timestamp, name }
   }),
 )
 console.log(`Loaded ${migrations.length} migrations`)
@@ -66,58 +66,62 @@ const allTargets: {
   abi?: "musl"
   avx2?: false
 }[] = [
-    {
-      os: "linux",
-      arch: "arm64",
-    },
-    {
-      os: "linux",
-      arch: "x64",
-    },
-    {
-      os: "linux",
-      arch: "x64",
-      avx2: false,
-    },
-    {
-      os: "linux",
-      arch: "arm64",
-      abi: "musl",
-    },
-    {
-      os: "linux",
-      arch: "x64",
-      abi: "musl",
-    },
-    {
-      os: "linux",
-      arch: "x64",
-      abi: "musl",
-      avx2: false,
-    },
-    {
-      os: "darwin",
-      arch: "arm64",
-    },
-    {
-      os: "darwin",
-      arch: "x64",
-    },
-    {
-      os: "darwin",
-      arch: "x64",
-      avx2: false,
-    },
-    {
-      os: "win32",
-      arch: "x64",
-    },
-    {
-      os: "win32",
-      arch: "x64",
-      avx2: false,
-    },
-  ]
+  {
+    os: "linux",
+    arch: "arm64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    avx2: false,
+  },
+  {
+    os: "linux",
+    arch: "arm64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+    avx2: false,
+  },
+  {
+    os: "darwin",
+    arch: "arm64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+    avx2: false,
+  },
+  {
+    os: "win32",
+    arch: "arm64",
+  },
+  {
+    os: "win32",
+    arch: "x64",
+  },
+  {
+    os: "win32",
+    arch: "x64",
+    avx2: false,
+  },
+]
 
 const targets = singleFlag
   ? allTargets.filter((item) => {
@@ -161,7 +165,9 @@ for (const item of targets) {
   console.log(`building ${name}`)
   await $`mkdir -p dist/${name}/bin`
 
-  const parserWorker = fs.realpathSync(path.resolve(dir, "./node_modules/@opentui/core/parser.worker.js"))
+  const localPath = path.resolve(dir, "node_modules/@opentui/core/parser.worker.js")
+  const rootPath = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
+  const parserWorker = fs.realpathSync(fs.existsSync(localPath) ? localPath : rootPath)
   const workerPath = "./src/cli/cmd/tui/worker.ts"
 
   // Use platform-specific bunfs root path based on target OS
@@ -172,7 +178,6 @@ for (const item of targets) {
     conditions: ["browser"],
     tsconfig: "./tsconfig.json",
     plugins: [solidPlugin],
-    sourcemap: "external",
     compile: {
       autoloadBunfig: false,
       autoloadDotenv: false,
@@ -193,6 +198,12 @@ for (const item of targets) {
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
     },
   })
+
+  const outfile = path.join(dir, "dist", name, "bin", "opencode")
+  if (item.os === "darwin") {
+    await $`codesign --remove-signature ${outfile}`.nothrow()
+    await $`codesign --force --sign - ${outfile}`
+  }
 
   await $`rm -rf ./dist/${name}/bin/tui`
   await Bun.file(`dist/${name}/package.json`).write(
@@ -219,18 +230,6 @@ if (Script.release) {
     }
   }
   await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
-}
-
-if (process.argv.includes("--install")) {
-  const os = process.platform === "win32" ? "windows" : process.platform
-  const arch = process.arch === "x64" ? "x64" : "arm64"
-  const name = [pkg.name, os, arch].join("-")
-  const binary = os === "windows" ? "opencode.exe" : "opencode"
-  const installDir = path.join(process.env.HOME || "", ".opencode", "bin")
-  await $`mkdir -p ${installDir}`
-  await $`cp dist/${name}/bin/${binary} ${installDir}/${binary}`
-  if (os !== "windows") await $`chmod +x ${installDir}/${binary}`
-  console.log(`✅ Installed to ${installDir}/${binary}`)
 }
 
 export { binaries }

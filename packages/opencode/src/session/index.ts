@@ -7,10 +7,9 @@ import z from "zod"
 import { type ProviderMetadata } from "ai"
 import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
-import { Identifier } from "../id/id"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import type { SQL } from "../storage/db"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
@@ -23,8 +22,14 @@ import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
+import { WorkspaceContext } from "../control-plane/workspace-context"
+import { ProjectID } from "../project/schema"
+import { WorkspaceID } from "../control-plane/schema"
+import { SessionID, MessageID, PartID } from "./schema"
+import { FileTime } from "@/file/time"
 
 import type { Provider } from "@/provider/provider"
+import { ModelID, ProviderID } from "@/provider/schema"
 import { PermissionNext } from "@/permission/next"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
@@ -64,6 +69,7 @@ export namespace Session {
       id: row.id,
       slug: row.slug,
       projectID: row.project_id,
+      workspaceID: row.workspace_id ?? undefined,
       directory: row.directory,
       parentID: row.parent_id ?? undefined,
       title: row.title,
@@ -85,6 +91,7 @@ export namespace Session {
     return {
       id: info.id,
       project_id: info.projectID,
+      workspace_id: info.workspaceID,
       parent_id: info.parentID,
       slug: info.slug,
       directory: info.directory,
@@ -116,11 +123,12 @@ export namespace Session {
 
   export const Info = z
     .object({
-      id: Identifier.schema("session"),
+      id: SessionID.zod,
       slug: z.string(),
-      projectID: z.string(),
+      projectID: ProjectID.zod,
+      workspaceID: WorkspaceID.zod.optional(),
       directory: z.string(),
-      parentID: Identifier.schema("session").optional(),
+      parentID: SessionID.zod.optional(),
       summary: z
         .object({
           additions: z.number(),
@@ -145,8 +153,8 @@ export namespace Session {
       permission: PermissionNext.Ruleset.optional(),
       revert: z
         .object({
-          messageID: z.string(),
-          partID: z.string().optional(),
+          messageID: MessageID.zod,
+          partID: PartID.zod.optional(),
           snapshot: z.string().optional(),
           diff: z.string().optional(),
         })
@@ -159,7 +167,7 @@ export namespace Session {
 
   export const ProjectInfo = z
     .object({
-      id: z.string(),
+      id: ProjectID.zod,
       name: z.string().optional(),
       worktree: z.string(),
     })
@@ -197,14 +205,14 @@ export namespace Session {
     Diff: BusEvent.define(
       "session.diff",
       z.object({
-        sessionID: z.string(),
+        sessionID: SessionID.zod,
         diff: Snapshot.FileDiff.array(),
       }),
     ),
     Error: BusEvent.define(
       "session.error",
       z.object({
-        sessionID: z.string().optional(),
+        sessionID: SessionID.zod.optional(),
         error: MessageV2.Assistant.shape.error,
       }),
     ),
@@ -213,9 +221,10 @@ export namespace Session {
   export const create = fn(
     z
       .object({
-        parentID: Identifier.schema("session").optional(),
+        parentID: SessionID.zod.optional(),
         title: z.string().optional(),
         permission: Info.shape.permission,
+        workspaceID: WorkspaceID.zod.optional(),
       })
       .optional(),
     async (input) => {
@@ -224,14 +233,15 @@ export namespace Session {
         directory: Instance.directory,
         title: input?.title,
         permission: input?.permission,
+        workspaceID: input?.workspaceID,
       })
     },
   )
 
   export const fork = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
-      messageID: Identifier.schema("message").optional(),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod.optional(),
     }),
     async (input) => {
       const original = await get(input.sessionID)
@@ -239,14 +249,15 @@ export namespace Session {
       const title = getForkedTitle(original.title)
       const session = await createNext({
         directory: Instance.directory,
+        workspaceID: original.workspaceID,
         title,
       })
       const msgs = await messages({ sessionID: input.sessionID })
-      const idMap = new Map<string, string>()
+      const idMap = new Map<string, MessageID>()
 
       for (const msg of msgs) {
         if (input.messageID && msg.info.id >= input.messageID) break
-        const newID = Identifier.ascending("message")
+        const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
         const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
@@ -260,7 +271,7 @@ export namespace Session {
         for (const part of msg.parts) {
           await updatePart({
             ...part,
-            id: Identifier.ascending("part"),
+            id: PartID.ascending(),
             messageID: cloned.id,
             sessionID: session.id,
           })
@@ -270,7 +281,7 @@ export namespace Session {
     },
   )
 
-  export const touch = fn(Identifier.schema("session"), async (sessionID) => {
+  export const touch = fn(SessionID.zod, async (sessionID) => {
     const now = Date.now()
     Database.use((db) => {
       const row = db
@@ -286,18 +297,20 @@ export namespace Session {
   })
 
   export async function createNext(input: {
-    id?: string
+    id?: SessionID
     title?: string
-    parentID?: string
+    parentID?: SessionID
+    workspaceID?: WorkspaceID
     directory: string
     permission?: PermissionNext.Ruleset
   }) {
     const result: Info = {
-      id: Identifier.descending("session", input.id),
+      id: SessionID.descending(input.id),
       slug: Slug.create(),
       version: Installation.VERSION,
       projectID: Instance.project.id,
       directory: input.directory,
+      workspaceID: input.workspaceID,
       parentID: input.parentID,
       title: input.title ?? createDefaultTitle(!!input.parentID),
       permission: input.permission,
@@ -333,13 +346,13 @@ export namespace Session {
     return path.join(base, [input.time.created, input.slug].join("-") + ".md")
   }
 
-  export const get = fn(Identifier.schema("session"), async (id) => {
+  export const get = fn(SessionID.zod, async (id) => {
     const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
     if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
     return fromRow(row)
   })
 
-  export const share = fn(Identifier.schema("session"), async (id) => {
+  export const share = fn(SessionID.zod, async (id) => {
     const cfg = await Config.get()
     if (cfg.share === "disabled") {
       throw new Error("Sharing is disabled in configuration")
@@ -355,7 +368,7 @@ export namespace Session {
     return share
   })
 
-  export const unshare = fn(Identifier.schema("session"), async (id) => {
+  export const unshare = fn(SessionID.zod, async (id) => {
     // Use ShareNext to remove the share (same as share function uses ShareNext to create)
     const { ShareNext } = await import("@/share/share-next")
     await ShareNext.remove(id)
@@ -369,7 +382,7 @@ export namespace Session {
 
   export const setTitle = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       title: z.string(),
     }),
     async (input) => {
@@ -390,7 +403,7 @@ export namespace Session {
 
   export const setArchived = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       time: z.number().optional(),
     }),
     async (input) => {
@@ -411,7 +424,7 @@ export namespace Session {
 
   export const setPermission = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       permission: PermissionNext.Ruleset,
     }),
     async (input) => {
@@ -432,7 +445,7 @@ export namespace Session {
 
   export const setRevert = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       revert: Info.shape.revert,
       summary: Info.shape.summary,
     }),
@@ -458,7 +471,7 @@ export namespace Session {
     },
   )
 
-  export const clearRevert = fn(Identifier.schema("session"), async (sessionID) => {
+  export const clearRevert = fn(SessionID.zod, async (sessionID) => {
     return Database.use((db) => {
       const row = db
         .update(SessionTable)
@@ -478,7 +491,7 @@ export namespace Session {
 
   export const setSummary = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       summary: Info.shape.summary,
     }),
     async (input) => {
@@ -502,7 +515,7 @@ export namespace Session {
     },
   )
 
-  export const diff = fn(Identifier.schema("session"), async (sessionID) => {
+  export const diff = fn(SessionID.zod, async (sessionID) => {
     try {
       return await Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])
     } catch {
@@ -512,7 +525,7 @@ export namespace Session {
 
   export const messages = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       limit: z.number().optional(),
     }),
     async (input) => {
@@ -528,6 +541,7 @@ export namespace Session {
 
   export function* list(input?: {
     directory?: string
+    workspaceID?: WorkspaceID
     roots?: boolean
     start?: number
     search?: string
@@ -536,6 +550,9 @@ export namespace Session {
     const project = Instance.project
     const conditions = [eq(SessionTable.project_id, project.id)]
 
+    if (WorkspaceContext.workspaceID) {
+      conditions.push(eq(SessionTable.workspace_id, WorkspaceContext.workspaceID))
+    }
     if (input?.directory) {
       conditions.push(eq(SessionTable.directory, input.directory))
     }
@@ -634,7 +651,7 @@ export namespace Session {
     }
   }
 
-  export const children = fn(Identifier.schema("session"), async (parentID) => {
+  export const children = fn(SessionID.zod, async (parentID) => {
     const project = Instance.project
     const rows = Database.use((db) =>
       db
@@ -646,7 +663,7 @@ export namespace Session {
     return rows.map(fromRow)
   })
 
-  export const remove = fn(Identifier.schema("session"), async (sessionID) => {
+  export const remove = fn(SessionID.zod, async (sessionID) => {
     const project = Instance.project
     try {
       const session = await get(sessionID)
@@ -663,6 +680,7 @@ export namespace Session {
           }),
         )
       })
+      FileTime.clear(sessionID)
     } catch (e) {
       log.error(e)
     }
@@ -692,13 +710,15 @@ export namespace Session {
 
   export const removeMessage = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
-      messageID: Identifier.schema("message"),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
     }),
     async (input) => {
       // CASCADE delete handles parts automatically
       Database.use((db) => {
-        db.delete(MessageTable).where(eq(MessageTable.id, input.messageID)).run()
+        db.delete(MessageTable)
+          .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
+          .run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.Removed, {
             sessionID: input.sessionID,
@@ -712,13 +732,15 @@ export namespace Session {
 
   export const removePart = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
-      messageID: Identifier.schema("message"),
-      partID: Identifier.schema("part"),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
+      partID: PartID.zod,
     }),
     async (input) => {
       Database.use((db) => {
-        db.delete(PartTable).where(eq(PartTable.id, input.partID)).run()
+        db.delete(PartTable)
+          .where(and(eq(PartTable.id, input.partID), eq(PartTable.session_id, input.sessionID)))
+          .run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.PartRemoved, {
             sessionID: input.sessionID,
@@ -758,9 +780,9 @@ export namespace Session {
 
   export const updatePartDelta = fn(
     z.object({
-      sessionID: z.string(),
-      messageID: z.string(),
-      partID: z.string(),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
+      partID: PartID.zod,
       field: z.string(),
       delta: z.string(),
     }),
@@ -856,10 +878,10 @@ export namespace Session {
 
   export const initialize = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
-      modelID: z.string(),
-      providerID: z.string(),
-      messageID: Identifier.schema("message"),
+      sessionID: SessionID.zod,
+      modelID: ModelID.zod,
+      providerID: ProviderID.zod,
+      messageID: MessageID.zod,
     }),
     async (input) => {
       await SessionPrompt.command({
@@ -871,4 +893,125 @@ export namespace Session {
       })
     },
   )
+
+  const sweep = {
+    timer: undefined as NodeJS.Timeout | undefined,
+  }
+
+  export function recover() {
+    const now = Date.now()
+    const rows = Database.use((db) =>
+      db
+        .select({ id: PartTable.id, data: PartTable.data })
+        .from(PartTable)
+        .where(
+          or(
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'running'`,
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'pending'`,
+          ),
+        )
+        .all(),
+    )
+    if (rows.length > 0) {
+      log.info("recovering orphaned tool parts", { count: rows.length })
+      for (const row of rows) {
+        const data = row.data as any
+        if (data?.type !== "tool" || !data?.state) continue
+        const patched = {
+          ...data,
+          state: {
+            ...data.state,
+            status: "error",
+            error: "Tool execution aborted: server restarted",
+            time: { ...data.state.time, end: now },
+          },
+        }
+        Database.use((db) =>
+          db.update(PartTable).set({ data: patched }).where(eq(PartTable.id, row.id)).run(),
+        )
+      }
+      log.info("recovered orphaned tool parts", { count: rows.length })
+    }
+
+    // Complete orphaned assistant messages that never got time.completed
+    const msgs = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id, data: MessageTable.data, updated: MessageTable.time_updated })
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') IS NULL`,
+          ),
+        )
+        .all(),
+    )
+    if (msgs.length > 0) {
+      log.info("recovering orphaned assistant messages", { count: msgs.length })
+      for (const msg of msgs) {
+        const data = msg.data as MessageV2.Assistant
+        if (data?.role !== "assistant" || !data?.time) continue
+        const patched: MessageV2.Assistant = {
+          ...data,
+          role: "assistant",
+          time: {
+            ...data.time,
+            completed: msg.updated,
+          },
+          error:
+            data.error ??
+            new MessageV2.AbortedError({
+              message: "Server restarted while the response was in progress",
+              source: "server_restart",
+            }).toObject(),
+        }
+        Database.use((db) =>
+          db
+            .update(MessageTable)
+            .set({ data: patched })
+            .where(eq(MessageTable.id, msg.id))
+            .run(),
+        )
+      }
+      log.info("recovered orphaned assistant messages", { count: msgs.length })
+    }
+  }
+
+  export function startSweep() {
+    if (sweep.timer) return
+    const idle = Flag.OPENCODE_SESSION_IDLE_MS ?? 3 * 24 * 60 * 60 * 1000
+    if (idle <= 0) return
+    const ms = Math.max(30_000, Math.floor(idle / 2))
+    log.info("session sweep started", { idle_ms: idle, interval_ms: ms })
+    sweep.timer = setInterval(() => {
+      void sweepIdle(idle).catch((e) => {
+        log.error("session sweep failed", { error: e })
+      })
+    }, ms)
+    sweep.timer.unref?.()
+  }
+
+  export function stopSweep() {
+    if (!sweep.timer) return
+    clearInterval(sweep.timer)
+    sweep.timer = undefined
+  }
+
+  async function sweepIdle(idle: number) {
+    const cutoff = Date.now() - idle
+    const rows = Database.use((db) =>
+      db
+        .select({ id: SessionTable.id, title: SessionTable.title })
+        .from(SessionTable)
+        .where(and(isNull(SessionTable.time_archived), lt(SessionTable.time_updated, cutoff)))
+        .limit(50)
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("archiving idle sessions", { count: rows.length, cutoff: new Date(cutoff).toISOString() })
+    const now = Date.now()
+    for (const row of rows) {
+      await setArchived({ sessionID: row.id as SessionID, time: now })
+    }
+  }
 }

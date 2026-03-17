@@ -1,6 +1,6 @@
 import type { Argv } from "yargs"
 import path from "path"
-import { pathToFileURL } from "bun"
+import { pathToFileURL } from "url"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
 import { Flag } from "../../flag/flag"
@@ -10,7 +10,6 @@ import { Filesystem } from "../../util/filesystem"
 import { createOpencodeClient, type Message, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
-import { Auth } from "../../auth"
 import { Agent } from "../../agent/agent"
 import { PermissionNext } from "../../permission/next"
 import { Tool } from "../../tool/tool"
@@ -281,6 +280,11 @@ export const RunCommand = cmd({
         type: "string",
         describe: "attach to a running opencode server (e.g., http://localhost:4096)",
       })
+      .option("password", {
+        alias: ["p"],
+        type: "string",
+        describe: "basic auth password (defaults to OPENCODE_SERVER_PASSWORD)",
+      })
       .option("dir", {
         type: "string",
         describe: "directory to run in, path on remote server if attaching",
@@ -310,19 +314,6 @@ export const RunCommand = cmd({
       process.exit(1)
     }
     const variant = args.variant ?? reasoningEffort
-    const { isJwtExpired } = await import("../../util/jwt")
-    const auth = await Auth.get("kilocode")
-    const defaultModel = await Provider.defaultModel().catch(() => undefined)
-    const isUsingKilocode =
-      args.model?.includes("kilocode") ||
-      (!args.model && defaultModel?.providerID === "kilocode")
-
-    if (isUsingKilocode && auth && auth.type === "api") {
-      if (isJwtExpired(auth.key)) {
-        UI.error("Kilo Code token has expired. Please run 'opencode auth login kilocode' to refresh it.")
-        process.exit(1)
-      }
-    }
 
     let message = [...args.message, ...(args["--"] || [])]
       .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
@@ -346,8 +337,7 @@ export const RunCommand = cmd({
 
       for (const filePath of list) {
         const resolvedPath = path.resolve(process.cwd(), filePath)
-        const file = Bun.file(resolvedPath)
-        if (!(await file.exists())) {
+        if (!(await Filesystem.exists(resolvedPath))) {
           UI.error(`File not found: ${filePath}`)
           process.exit(1)
         }
@@ -581,6 +571,45 @@ export const RunCommand = cmd({
       // Validate agent if specified
       const agent = await (async () => {
         if (!args.agent) return undefined
+
+        // When attaching, validate against the running server instead of local Instance state.
+        if (args.attach) {
+          const modes = await sdk.app
+            .agents(undefined, { throwOnError: true })
+            .then((x) => x.data ?? [])
+            .catch(() => undefined)
+
+          if (!modes) {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `failed to list agents from ${args.attach}. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          const agent = modes.find((a) => a.name === args.agent)
+          if (!agent) {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `agent "${args.agent}" not found. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          if (agent.mode === "subagent") {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `agent "${args.agent}" is a subagent, not a primary agent. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          return args.agent
+        }
+
         const entry = await Agent.get(args.agent)
         if (!entry) {
           UI.println(
@@ -635,14 +664,21 @@ export const RunCommand = cmd({
     }
 
     if (args.attach) {
-      const sdk = createOpencodeClient({ baseUrl: args.attach, directory })
+      const headers = (() => {
+        const password = args.password ?? process.env.OPENCODE_SERVER_PASSWORD
+        if (!password) return undefined
+        const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode"
+        const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
+        return { Authorization: auth }
+      })()
+      const sdk = createOpencodeClient({ baseUrl: args.attach, directory, headers })
       return await execute(sdk)
     }
 
     await bootstrap(process.cwd(), async () => {
       const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init)
-        return Server.App().fetch(request)
+        return Server.Default().fetch(request)
       }) as typeof globalThis.fetch
       const sdk = createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn })
       await execute(sdk)

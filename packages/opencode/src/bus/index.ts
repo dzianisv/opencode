@@ -46,9 +46,15 @@ export namespace Bus {
       type: def.type,
       properties,
     }
-    log.info("publishing", {
-      type: def.type,
-    })
+    if (def.type === "message.part.delta") {
+      log.debug("publishing", {
+        type: def.type,
+      })
+    } else {
+      log.info("publishing", {
+        type: def.type,
+      })
+    }
     const pending = []
     for (const key of [def.type, "*"]) {
       const match = state().subscriptions.get(key)

@@ -36,6 +36,7 @@ export function FormatError(input: unknown) {
         (input.data.message ? `: ${input.data.message}` : ""),
       ...(input.data.issues?.map((issue) => "↳ " + issue.message + " " + issue.path.join(".")) ?? []),
     ].join("\n")
+  if (input instanceof Error && input.message.startsWith("Failed to start server on ")) return input.message
 
   if (UI.CancelledError.isInstance(input)) return ""
 }

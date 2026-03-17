@@ -1,6 +1,5 @@
 import { MessageV2, StreamIdleTimeoutError } from "./message-v2"
 import { Log } from "@/util/log"
-import { Identifier } from "@/id/id"
 import { Session } from "."
 import { Agent } from "@/agent/agent"
 import { Snapshot } from "@/snapshot"
@@ -15,6 +14,8 @@ import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
+import { PartID } from "./schema"
+import type { SessionID, MessageID } from "./schema"
 
 /**
  * Wraps an async iterable with an idle timeout. If no value is yielded within
@@ -74,8 +75,8 @@ async function* withIdleTimeout<T>(
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const STREAM_IDLE_TIMEOUT = 60_000
   const FLUSH_INTERVAL = 50
-  const STREAM_IDLE_TIMEOUT = 120_000
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -83,7 +84,7 @@ export namespace SessionProcessor {
 
   export function create(input: {
     assistantMessage: MessageV2.Assistant
-    sessionID: string
+    sessionID: SessionID
     model: Provider.Model
     abort: AbortSignal
   }) {
@@ -109,21 +110,61 @@ export namespace SessionProcessor {
         while (true) {
           let idleTriggered = false
           let timer: ReturnType<typeof setTimeout> | undefined
+          let currentText: MessageV2.TextPart | undefined
+          let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
+          const deltas = new Map<string, { all: string[]; pending: string[] }>()
           let flushTimer: ReturnType<typeof setTimeout> | undefined
-          let flushAllDeltas = () => {}
           let toolCount = 0
           const running = new Set<string>()
+
+          const part = (id: string) => currentText?.id === id ? currentText : Object.values(reasoningMap).find((x) => x.id === id)
+
+          const flush = async (id: string) => {
+            const entry = deltas.get(id)
+            const match = part(id)
+            if (!entry || !match || entry.pending.length === 0) return
+            const delta = entry.pending.join("")
+            entry.pending = []
+            await Session.updatePartDelta({
+              sessionID: match.sessionID,
+              messageID: match.messageID,
+              partID: match.id,
+              field: "text",
+              delta,
+            })
+          }
+
+          const flushAll = async () => {
+            flushTimer = undefined
+            await Promise.all([...deltas.keys()].map((id) => flush(id)))
+          }
+
+          const queue = (id: string, text: string) => {
+            const entry = deltas.get(id) ?? { all: [], pending: [] }
+            entry.all.push(text)
+            entry.pending.push(text)
+            deltas.set(id, entry)
+            if (flushTimer) return
+            flushTimer = setTimeout(() => {
+              void flushAll()
+            }, FLUSH_INTERVAL)
+          }
+
+          const finish = (id: string) => {
+            const entry = deltas.get(id)
+            deltas.delete(id)
+            if (!entry || entry.all.length === 0) return ""
+            return entry.all.join("")
+          }
           try {
-            const idleController = new AbortController()
-            let currentText: MessageV2.TextPart | undefined
-            let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
+            const ctl = new AbortController()
             const resetIdle = () => {
               if (!idle) return
               if (toolCount > 0) return
               if (timer) clearTimeout(timer)
               timer = setTimeout(() => {
                 idleTriggered = true
-                idleController.abort()
+                ctl.abort()
               }, idle)
             }
             const clearIdle = () => {
@@ -142,68 +183,11 @@ export namespace SessionProcessor {
               toolCount = Math.max(0, toolCount - 1)
               if (toolCount === 0) resetIdle()
             }
-
             const stream = await LLM.stream({
               ...streamInput,
-              abort: AbortSignal.any([streamInput.abort, idleController.signal]),
+              abort: AbortSignal.any([streamInput.abort, ctl.signal]),
             })
             resetIdle()
-            // Throttled flush state for text/reasoning deltas.
-            // ALL text is accumulated in arrays and joined only on flush
-            // (at most every FLUSH_INTERVAL ms) to avoid:
-            //   1. O(n²) string concatenation on part.text per token
-            //   2. Per-token Storage.write + Bus.publish serialization
-            const accumulated = new Map<string, { chunks: string[]; flushed: number }>()
-
-            const scheduleFlush = (partID: string, delta: string) => {
-              const entry = accumulated.get(partID)
-              if (entry) entry.chunks.push(delta)
-              else accumulated.set(partID, { chunks: [delta], flushed: 0 })
-              if (!flushTimer) {
-                flushTimer = setTimeout(flushAllDeltas, FLUSH_INTERVAL)
-              }
-            }
-
-            flushAllDeltas = () => {
-              flushTimer = undefined
-              for (const [partID, entry] of accumulated) {
-                if (entry.flushed >= entry.chunks.length) continue
-                const delta = entry.chunks.slice(entry.flushed).join("")
-                const text = entry.chunks.join("")
-                entry.flushed = entry.chunks.length
-
-                if (currentText?.id === partID) {
-                  currentText.text = text
-                  Session.updatePartDelta({
-                    sessionID: currentText.sessionID,
-                    messageID: currentText.messageID,
-                    partID: currentText.id,
-                    field: "text",
-                    delta,
-                  })
-                  continue
-                }
-                const reasoning = Object.values(reasoningMap).find((p) => p.id === partID)
-                if (reasoning) {
-                  reasoning.text = text
-                  Session.updatePartDelta({
-                    sessionID: reasoning.sessionID,
-                    messageID: reasoning.messageID,
-                    partID: reasoning.id,
-                    field: "text",
-                    delta,
-                  })
-                }
-              }
-            }
-
-            const finalizePart = (partID: string) => {
-              const entry = accumulated.get(partID)
-              if (!entry || entry.chunks.length === 0) return
-              const text = entry.chunks.join("")
-              accumulated.delete(partID)
-              return text
-            }
 
             // Wrap the stream with idle timeout to prevent hanging on stalled connections
             const wrappedStream = idle > 0
@@ -223,7 +207,7 @@ export namespace SessionProcessor {
                     continue
                   }
                   const reasoningPart = {
-                    id: Identifier.ascending("part"),
+                    id: PartID.ascending(),
                     messageID: input.assistantMessage.id,
                     sessionID: input.assistantMessage.sessionID,
                     type: "reasoning" as const,
@@ -241,15 +225,15 @@ export namespace SessionProcessor {
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
                     if (value.providerMetadata) part.metadata = value.providerMetadata
-                    scheduleFlush(part.id, value.text)
+                    queue(part.id, value.text)
                   }
                   break
 
                 case "reasoning-end":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
-                    const text = finalizePart(part.id)
-                    if (text) part.text = text
+                    await flush(part.id)
+                    part.text = finish(part.id).trimEnd()
                     part.text = part.text.trimEnd()
 
                     part.time = {
@@ -264,7 +248,7 @@ export namespace SessionProcessor {
 
                 case "tool-input-start":
                   const part = await Session.updatePart({
-                    id: toolcalls[value.id]?.id ?? Identifier.ascending("part"),
+                    id: toolcalls[value.id]?.id ?? PartID.ascending(),
                     messageID: input.assistantMessage.id,
                     sessionID: input.assistantMessage.sessionID,
                     type: "tool",
@@ -309,7 +293,7 @@ export namespace SessionProcessor {
                     if (
                       lastThree.length === DOOM_LOOP_THRESHOLD &&
                       lastThree.every(
-                        (p: MessageV2.Part) =>
+                        (p) =>
                           p.type === "tool" &&
                           p.tool === value.toolName &&
                           p.state.status !== "pending" &&
@@ -390,7 +374,7 @@ export namespace SessionProcessor {
                 case "start-step":
                   snapshot = await Snapshot.track()
                   await Session.updatePart({
-                    id: Identifier.ascending("part"),
+                    id: PartID.ascending(),
                     messageID: input.assistantMessage.id,
                     sessionID: input.sessionID,
                     snapshot,
@@ -408,7 +392,7 @@ export namespace SessionProcessor {
                   input.assistantMessage.cost += usage.cost
                   input.assistantMessage.tokens = usage.tokens
                   await Session.updatePart({
-                    id: Identifier.ascending("part"),
+                    id: PartID.ascending(),
                     reason: value.finishReason,
                     snapshot: await Snapshot.track(),
                     messageID: input.assistantMessage.id,
@@ -422,7 +406,7 @@ export namespace SessionProcessor {
                     const patch = await Snapshot.patch(snapshot)
                     if (patch.files.length) {
                       await Session.updatePart({
-                        id: Identifier.ascending("part"),
+                        id: PartID.ascending(),
                         messageID: input.assistantMessage.id,
                         sessionID: input.sessionID,
                         type: "patch",
@@ -432,18 +416,21 @@ export namespace SessionProcessor {
                     }
                     snapshot = undefined
                   }
-                  SessionSummary.summarize({
+                  SessionSummary.schedule({
                     sessionID: input.sessionID,
                     messageID: input.assistantMessage.parentID,
                   })
-                  if (await SessionCompaction.isOverflow({ tokens: usage.tokens, model: input.model })) {
+                  if (
+                    !input.assistantMessage.summary &&
+                    (await SessionCompaction.isOverflow({ tokens: usage.tokens, model: input.model }))
+                  ) {
                     needsCompaction = true
                   }
                   break
 
                 case "text-start":
                   currentText = {
-                    id: Identifier.ascending("part"),
+                    id: PartID.ascending(),
                     messageID: input.assistantMessage.id,
                     sessionID: input.assistantMessage.sessionID,
                     type: "text",
@@ -459,15 +446,14 @@ export namespace SessionProcessor {
                 case "text-delta":
                   if (currentText) {
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
-                    scheduleFlush(currentText.id, value.text)
+                    queue(currentText.id, value.text)
                   }
                   break
 
                 case "text-end":
                   if (currentText) {
-                    const text = finalizePart(currentText.id)
-                    if (text) currentText.text = text
-                    currentText.text = currentText.text.trimEnd()
+                    await flush(currentText.id)
+                    currentText.text = finish(currentText.id).trimEnd()
                     const textOutput = await Plugin.trigger(
                       "experimental.text.complete",
                       {
@@ -499,13 +485,16 @@ export namespace SessionProcessor {
               }
               if (needsCompaction) break
             }
-            // Flush any remaining throttled deltas before exiting
-            if (flushTimer) clearTimeout(flushTimer)
-            flushAllDeltas()
-            clearIdle()
+            if (flushTimer) {
+              clearTimeout(flushTimer)
+              await flushAll()
+            }
+            if (timer) clearTimeout(timer)
           } catch (e: any) {
-            if (flushTimer) clearTimeout(flushTimer)
-            flushAllDeltas()
+            if (flushTimer) {
+              clearTimeout(flushTimer)
+              await flushAll()
+            }
             if (timer) clearTimeout(timer)
             log.error("process", {
               error: e,
@@ -522,35 +511,43 @@ export namespace SessionProcessor {
                   },
                   { cause: e },
                 ).toObject()
-              : MessageV2.fromError(e, { providerID: input.model.providerID })
+              : MessageV2.fromError(e, { providerID: input.model.providerID, abort: input.abort })
             if (MessageV2.ContextOverflowError.isInstance(error)) {
-              // TODO: Handle context overflow error
-            }
-            const retry = SessionRetry.retryable(error)
-            if (retry !== undefined) {
-              attempt++
-              const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
-              SessionStatus.set(input.sessionID, {
-                type: "retry",
-                attempt,
-                message: retry,
-                next: Date.now() + delay,
+              needsCompaction = true
+              Bus.publish(Session.Event.Error, {
+                sessionID: input.sessionID,
+                error,
               })
-              await SessionRetry.sleep(delay, input.abort).catch(() => {})
-              continue
+            } else {
+              const retry = SessionRetry.retryable(error, {
+                abort: input.abort,
+                empty: (await MessageV2.parts(input.assistantMessage.id)).length === 0,
+              })
+              if (retry !== undefined) {
+                attempt++
+                const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
+                SessionStatus.set(input.sessionID, {
+                  type: "retry",
+                  attempt,
+                  message: retry,
+                  next: Date.now() + delay,
+                })
+                await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                continue
+              }
+              input.assistantMessage.error = error
+              Bus.publish(Session.Event.Error, {
+                sessionID: input.assistantMessage.sessionID,
+                error: input.assistantMessage.error,
+              })
+              SessionStatus.set(input.sessionID, { type: "idle" })
             }
-            input.assistantMessage.error = error
-            Bus.publish(Session.Event.Error, {
-              sessionID: input.assistantMessage.sessionID,
-              error: input.assistantMessage.error,
-            })
-            SessionStatus.set(input.sessionID, { type: "idle" })
           }
           if (snapshot) {
             const patch = await Snapshot.patch(snapshot)
             if (patch.files.length) {
               await Session.updatePart({
-                id: Identifier.ascending("part"),
+                id: PartID.ascending(),
                 messageID: input.assistantMessage.id,
                 sessionID: input.sessionID,
                 type: "patch",

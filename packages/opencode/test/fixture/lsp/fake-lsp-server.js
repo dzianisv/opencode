@@ -64,9 +64,39 @@ function handle(raw) {
   if (data.method === "workspace/didChangeConfiguration") {
     return
   }
+  if (data.method === "textDocument/didClose") {
+    if (data.params && data.params.textDocument && data.params.textDocument.uri) {
+      process.stderr.write(`didClose ${data.params.textDocument.uri}\n`)
+    }
+    return
+  }
   if (data.method === "test/trigger") {
     const method = data.params && data.params.method
     if (method) sendRequest(method, {})
+    return
+  }
+  if (data.method === "test/diagnostics") {
+    const uri = data.params && data.params.uri
+    if (uri) {
+      send({
+        jsonrpc: "2.0",
+        method: "textDocument/publishDiagnostics",
+        params: {
+          uri,
+          diagnostics: [
+            {
+              range: {
+                start: { line: 0, character: 0 },
+                end: { line: 0, character: 1 },
+              },
+              severity: 2,
+              source: "fake",
+              message: data.params.message || "fake diagnostic",
+            },
+          ],
+        },
+      })
+    }
     return
   }
   if (typeof data.id !== "undefined") {

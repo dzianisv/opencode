@@ -25,12 +25,17 @@ export namespace UI {
 
   export function println(...message: string[]) {
     print(...message)
-    Bun.stderr.write(EOL)
+    process.stderr.write(EOL)
   }
 
   export function print(...message: string[]) {
     blank = false
-    Bun.stderr.write(message.join(" "))
+    process.stderr.write(message.join(" "))
+  }
+
+  export function setTitle(title: string) {
+    if (!process.stdout.isTTY) return
+    process.stdout.write(`\x1b]0;${title}\x07`)
   }
 
   export function setTitle(title: string) {
@@ -49,7 +54,7 @@ export namespace UI {
     const result: string[] = []
     const reset = "\x1b[0m"
     const left = {
-      fg: Bun.color("gray", "ansi") ?? "",
+      fg: "\x1b[90m",
       shadow: "\x1b[38;5;235m",
       bg: "\x1b[48;5;235m",
     }

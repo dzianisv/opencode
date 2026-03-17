@@ -1,5 +1,6 @@
 import z from "zod"
 import { spawn } from "child_process"
+import { createWriteStream } from "fs"
 import { Tool } from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -7,8 +8,8 @@ import { Log } from "../util/log"
 import { Instance } from "../project/instance"
 import { lazy } from "@/util/lazy"
 import { Language } from "web-tree-sitter"
+import fs from "fs/promises"
 
-import { $ } from "bun"
 import { Filesystem } from "@/util/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
@@ -17,10 +18,12 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { ToolID } from "./schema"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
-const MAX_OUTPUT_BYTES = 10 * 1024 * 1024
+const MAX_OUTPUT_LINES = Truncate.MAX_LINES
+const MAX_OUTPUT_BYTES = Truncate.MAX_BYTES
 
 export const log = Log.create({ service: "bash-tool" })
 
@@ -117,19 +120,11 @@ export const BashTool = Tool.define("bash", async () => {
         if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
           for (const arg of command.slice(1)) {
             if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
-            const resolved = await $`realpath ${arg}`
-              .cwd(cwd)
-              .quiet()
-              .nothrow()
-              .text()
-              .then((x) => x.trim())
+            const resolved = await fs.realpath(path.resolve(cwd, arg)).catch(() => "")
             log.info("resolved path", { arg, resolved })
             if (resolved) {
-              // Git Bash on Windows returns Unix-style paths like /c/Users/...
               const normalized =
-                process.platform === "win32" && resolved.match(/^\/[a-z]\//)
-                  ? resolved.replace(/^\/([a-z])\//, (_, drive) => `${drive.toUpperCase()}:\\`).replace(/\//g, "\\")
-                  : resolved
+                process.platform === "win32" ? Filesystem.windowsPath(resolved).replace(/\//g, "\\") : resolved
               if (!Instance.containsPath(normalized)) {
                 const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
                 directories.add(dir)
@@ -146,7 +141,11 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       if (directories.size > 0) {
-        const globs = Array.from(directories).map((dir) => path.join(dir, "*"))
+        const globs = Array.from(directories).map((dir) => {
+          // Preserve POSIX-looking paths with /s, even on Windows
+          if (dir.startsWith("/")) return `${dir.replace(/[\\/]+$/, "")}/*`
+          return path.join(dir, "*")
+        })
         await ctx.ask({
           permission: "external_directory",
           patterns: globs,
@@ -178,11 +177,22 @@ export const BashTool = Tool.define("bash", async () => {
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
+        windowsHide: process.platform === "win32",
       })
 
-      const chunks: Buffer[] = []
-      let size = 0
-      let preview = ""
+      const outputPath = path.join(Truncate.DIR, ToolID.ascending())
+      await fs.mkdir(Truncate.DIR, { recursive: true })
+      const file = createWriteStream(outputPath)
+
+      let output = ""
+      let bytes = 0
+      let lines = 0
+      let cut = false
+      let over = false
+      let streamError: Error | undefined
+      let meta_at = 0
+      let meta_bytes = 0
+      let paused = false
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -192,27 +202,62 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const append = (chunk: Buffer) => {
-        chunks.push(chunk)
-        size += chunk.length
-        // Drop oldest chunks when exceeding cap so final output stays bounded
-        while (size > MAX_OUTPUT_BYTES && chunks.length > 1) {
-          size -= chunks.shift()!.length
-        }
-        // Build a capped preview string for the TUI metadata display.
-        // Once we exceed the cap we stop appending to avoid O(n²) growth.
-        if (preview.length < MAX_METADATA_LENGTH) {
-          preview += chunk.toString()
-          if (preview.length > MAX_METADATA_LENGTH) {
-            preview = preview.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
-          }
-        }
+      const publish = (force = false) => {
+        const now = Date.now()
+        if (!force && bytes - meta_bytes < 8 * 1024 && now - meta_at < 150) return
+        meta_at = now
+        meta_bytes = bytes
         ctx.metadata({
           metadata: {
-            output: preview,
+            // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
+            output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
             description: params.description,
+            truncated: over || cut,
           },
         })
+      }
+
+      file.once("error", (error) => {
+        streamError = error
+      })
+
+      const toBytes = (value: string, max: number) => Buffer.from(value, "utf-8").subarray(0, max).toString("utf-8")
+
+      const append = (chunk: Buffer) => {
+        bytes += chunk.byteLength
+        for (const value of chunk) {
+          if (value === 10) lines++
+        }
+
+        if (!streamError) {
+          const ok = file.write(chunk)
+          if (!ok && !paused) {
+            paused = true
+            proc.stdout?.pause()
+            proc.stderr?.pause()
+            file.once("drain", () => {
+              paused = false
+              proc.stdout?.resume()
+              proc.stderr?.resume()
+            })
+          }
+        }
+
+        if (!cut) {
+          output += chunk.toString()
+          if (Buffer.byteLength(output, "utf-8") > MAX_OUTPUT_BYTES) {
+            output = toBytes(output, MAX_OUTPUT_BYTES)
+            cut = true
+            over = true
+          }
+          const count = output.split("\n").length
+          if (count > MAX_OUTPUT_LINES) {
+            output = output.split("\n").slice(0, MAX_OUTPUT_LINES).join("\n")
+            cut = true
+            over = true
+          }
+        }
+        publish()
       }
 
       proc.stdout?.on("data", append)
@@ -241,25 +286,28 @@ export const BashTool = Tool.define("bash", async () => {
         void kill()
       }, timeout + 100)
 
-      await new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-          clearTimeout(timeoutTimer)
-          ctx.abort.removeEventListener("abort", abortHandler)
-        }
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            clearTimeout(timeoutTimer)
+            ctx.abort.removeEventListener("abort", abortHandler)
+          }
 
-        proc.once("exit", () => {
-          exited = true
-          cleanup()
-          resolve()
-        })
+          proc.once("close", () => {
+            exited = true
+            cleanup()
+            resolve()
+          })
 
-        proc.once("error", (error) => {
-          exited = true
-          cleanup()
-          reject(error)
+          proc.once("error", (error) => {
+            exited = true
+            cleanup()
+            reject(error)
+          })
         })
-      })
-      let output = Buffer.concat(chunks).toString()
+      } finally {
+        await new Promise<void>((resolve) => file.end(() => resolve()))
+      }
 
       const resultMetadata: string[] = []
 
@@ -271,18 +319,44 @@ export const BashTool = Tool.define("bash", async () => {
         resultMetadata.push("User aborted the command")
       }
 
+      if (streamError) {
+        resultMetadata.push(`failed to persist full output: ${streamError.message}`)
+      }
+
       if (resultMetadata.length > 0) {
         output += "\n\n<bash_metadata>\n" + resultMetadata.join("\n") + "\n</bash_metadata>"
       }
 
+      const totalLines = bytes === 0 ? 0 : lines + 1
+      const truncated = over || totalLines > MAX_OUTPUT_LINES || bytes > MAX_OUTPUT_BYTES
+
+      const result =
+        truncated && !streamError
+          ? (() => {
+              const short = output
+              const shortLines = short.length === 0 ? 0 : short.split("\n").length
+              const overflowByBytes = bytes > MAX_OUTPUT_BYTES
+              const removed = overflowByBytes ? Math.max(0, bytes - Buffer.byteLength(short, "utf-8")) : totalLines - shortLines
+              const unit = overflowByBytes ? "bytes" : "lines"
+              const hint =
+                `The tool call succeeded but the output was truncated. Full output saved to: ${outputPath}\n` +
+                "Use Grep to search the full content or Read with offset/limit to view specific sections."
+              return `${short}\n\n...${Math.max(0, removed)} ${unit} truncated...\n\n${hint}`
+            })()
+          : output
+
+      publish(true)
+
       return {
         title: params.description,
         metadata: {
-          output: preview,
+          output: result.length > MAX_METADATA_LENGTH ? result.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : result,
           exit: proc.exitCode,
           description: params.description,
+          truncated,
+          outputPath: truncated && !streamError ? outputPath : undefined,
         },
-        output,
+        output: result,
       }
     },
   }

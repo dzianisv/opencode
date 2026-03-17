@@ -1,4 +1,5 @@
 import { BusEvent } from "@/bus/bus-event"
+import { SessionID, MessageID } from "@/session/schema"
 import z from "zod"
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
@@ -14,9 +15,9 @@ export namespace Command {
       "command.executed",
       z.object({
         name: z.string(),
-        sessionID: Identifier.schema("session"),
+        sessionID: SessionID.zod,
         arguments: z.string(),
-        messageID: Identifier.schema("message"),
+        messageID: MessageID.zod,
       }),
     ),
   }
@@ -95,6 +96,27 @@ export namespace Command {
         hints: hints(command.template),
       }
     }
+
+    // Add skills as invokable commands
+    for (const skill of await Skill.all()) {
+      // Skip if a command with this name already exists
+      if (result[skill.name]) continue
+      result[skill.name] = {
+        name: skill.name,
+        description: skill.description,
+        source: "skill",
+        get template() {
+          return skill.content
+        },
+        hints: [],
+      }
+    }
+
+    return result
+  })
+
+  async function mcp() {
+    const result: Record<string, Info> = {}
     for (const [name, prompt] of Object.entries(await MCP.prompts())) {
       result[name] = {
         name,
@@ -121,30 +143,21 @@ export namespace Command {
         hints: prompt.arguments?.map((_, i) => `$${i + 1}`) ?? [],
       }
     }
-
-    // Add skills as invokable commands
-    for (const skill of await Skill.all()) {
-      // Skip if a command with this name already exists
-      if (result[skill.name]) continue
-      result[skill.name] = {
-        name: skill.name,
-        description: skill.description,
-        source: "skill",
-        get template() {
-          return skill.content
-        },
-        hints: [],
-      }
-    }
-
     return result
-  })
+  }
+
+  async function all() {
+    return {
+      ...(await state()),
+      ...(await mcp()),
+    }
+  }
 
   export async function get(name: string) {
-    return state().then((x) => x[name])
+    return all().then((x) => x[name])
   }
 
   export async function list() {
-    return state().then((x) => Object.values(x))
+    return all().then((x) => Object.values(x))
   }
 }
