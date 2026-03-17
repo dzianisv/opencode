@@ -46,6 +46,20 @@ export namespace Server {
     }
   }
 
+  async function webdir() {
+    const { join, resolve } = await import("path")
+    const dirs = [
+      resolve(process.cwd(), "packages/app/dist"),
+      resolve(process.cwd(), "../app/dist"),
+      resolve(process.cwd(), "app/dist"),
+      resolve(import.meta.dir, "../../../app/dist"),
+      resolve(import.meta.dir, "../../../../app/dist"),
+    ]
+    for (const dir of [...new Set(dirs)]) {
+      if (await Bun.file(join(dir, "index.html")).exists()) return dir
+    }
+  }
+
   export const createApp = (opts: { cors?: string[] }): Hono => {
     const app = new Hono()
     return app
@@ -308,7 +322,10 @@ export namespace Server {
             host: "app.opencode.ai",
           },
         })
-        response.headers.set("Content-Security-Policy", csp)
+        response.headers.set(
+          "Content-Security-Policy",
+          csp,
+        )
         return response
       })
   }
