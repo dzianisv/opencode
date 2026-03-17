@@ -25,18 +25,26 @@ initProjectors()
 
 export namespace Server {
   const log = Log.create({ service: "server" })
+  const csp =
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
 
   const zipped = compress()
 
-  const skipCompress = (path: string, method: string) => {
-    if (path === "/event" || path === "/global/event" || path === "/global/sync-event") return true
-    if (method === "POST" && /\/session\/[^/]+\/(message|prompt_async)$/.test(path)) return true
-    return false
+  async function webdir() {
+    const { join, resolve } = await import("path")
+    const dirs = [
+      resolve(process.cwd(), "packages/app/dist"),
+      resolve(process.cwd(), "../app/dist"),
+      resolve(process.cwd(), "app/dist"),
+      resolve(import.meta.dir, "../../../app/dist"),
+      resolve(import.meta.dir, "../../../../app/dist"),
+    ]
+    for (const dir of [...new Set(dirs)]) {
+      if (await Bun.file(join(dir, "index.html")).exists()) return dir
+    }
   }
 
-  export const Default = lazy(() => ControlPlaneRoutes())
-
-  export const ControlPlaneRoutes = (opts?: { cors?: string[] }): Hono => {
+  export const createApp = (opts: { cors?: string[] }): Hono => {
     const app = new Hono()
     return app
       .onError(errorHandler(log))
@@ -237,8 +245,71 @@ export namespace Server {
       .use(WorkspaceRouterMiddleware)
   }
 
-  export function createApp(opts: { cors?: string[] }) {
-    return ControlPlaneRoutes(opts)
+            // Send heartbeat every 10s to prevent stalled proxy streams.
+            const heartbeat = setInterval(() => {
+              stream.writeSSE({
+                data: JSON.stringify({
+                  type: "server.heartbeat",
+                  properties: {},
+                }),
+              })
+            }, 10_000)
+
+            await new Promise<void>((resolve) => {
+              stream.onAbort(() => {
+                clearInterval(heartbeat)
+                unsub()
+                resolve()
+                log.info("event disconnected")
+              })
+            })
+          })
+        },
+      )
+      .all("/*", async (c) => {
+        const reqpath = c.req.path
+        const { extname, join } = await import("path")
+
+        const dir = await webdir()
+        if (dir) {
+          const target = reqpath === "/" ? "index.html" : reqpath.slice(1)
+          const file = Bun.file(join(dir, target))
+          if (await file.exists()) {
+            return new Response(file, {
+              headers: {
+                "Content-Type": file.type,
+                "Content-Security-Policy": csp,
+              },
+            })
+          }
+          // Only use SPA fallback for extensionless client-side routes.
+          if (!extname(reqpath)) {
+            const index = Bun.file(join(dir, "index.html"))
+            if (await index.exists()) {
+              return new Response(index, {
+                headers: {
+                  "Content-Type": "text/html",
+                  "Content-Security-Policy": csp,
+                },
+              })
+            }
+          }
+          return new Response("Not Found", { status: 404 })
+        }
+
+        const response = await proxy(`https://app.opencode.ai${reqpath}`, {
+          ...c.req,
+          headers: {
+            ...c.req.raw.headers,
+            host: "app.opencode.ai",
+          },
+        })
+        response.headers.set(
+          "Content-Security-Policy",
+          csp,
+        )
+        return response
+      })
   }
 
   export async function openapi() {
