@@ -2,9 +2,12 @@ import { Log } from "../util/log"
 import { describeRoute, generateSpecs, validator, resolver, openAPIRouteHandler } from "hono-openapi"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
+import { streamSSE } from "hono/streaming"
 import { proxy } from "hono/proxy"
 import { basicAuth } from "hono/basic-auth"
 import z from "zod"
+import { Bus } from "@/bus"
+import { BusEvent } from "@/bus/bus-event"
 import { Provider } from "../provider/provider"
 import { NamedError } from "@opencode-ai/util/error"
 import { LSP } from "../lsp"
@@ -45,9 +48,11 @@ import { TtsRoutes } from "./routes/tts"
 import { GitHubWebhookRoutes } from "./routes/github"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
+import { Relay } from "./relay"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
+type Event = { type: string; properties: Record<string, unknown> }
 
 export namespace Server {
   const log = Log.create({ service: "server" })
@@ -514,6 +519,71 @@ export namespace Server {
         }),
         async (c) => {
           return c.json(await Format.status())
+        },
+      )
+      .get(
+        "/event",
+        describeRoute({
+          summary: "Subscribe to events",
+          description: "Get events",
+          operationId: "event.subscribe",
+          responses: {
+            200: {
+              description: "Event stream",
+              content: {
+                "text/event-stream": {
+                  schema: resolver(BusEvent.payloads()),
+                },
+              },
+            },
+          },
+        }),
+        async (c) => {
+          log.info("event connected")
+          c.header("X-Accel-Buffering", "no")
+          c.header("X-Content-Type-Options", "nosniff")
+          return streamSSE(c, async (stream) => {
+            stream.writeSSE({
+              data: JSON.stringify({
+                type: "server.connected",
+                properties: {},
+              }),
+            })
+            const relay = Relay.create({
+              event: (item: Event) => item,
+              write: async (item: Event) => {
+                await stream.writeSSE({
+                  data: JSON.stringify(item),
+                })
+                if (item.type === Bus.InstanceDisposed.type) {
+                  stream.close()
+                }
+              },
+            })
+            const unsub = Bus.subscribeAll((event) => {
+              relay.push(event)
+            })
+
+            // Send heartbeat every 10s to prevent stalled proxy streams.
+            const heartbeat = setInterval(() => {
+              stream.writeSSE({
+                data: JSON.stringify({
+                  type: "server.heartbeat",
+                  properties: {},
+                }),
+              })
+            }, 10_000)
+
+            await new Promise<void>((resolve) => {
+              stream.onAbort(() => {
+                clearInterval(heartbeat)
+                relay.stop()
+                unsub()
+                resolve()
+                log.info("event disconnected")
+              })
+            })
+          })
         },
       )
       .all("/*", async (c) => {

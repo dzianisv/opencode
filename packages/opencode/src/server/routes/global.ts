@@ -12,9 +12,11 @@ import { Config } from "../../config/config"
 import { errors } from "../error"
 import { Memory } from "@/diagnostic/memory"
 import { Session } from "../../session"
-import { AsyncQueue } from "../../util/queue"
+import { Relay } from "../relay"
 
 const log = Log.create({ service: "server" })
+type Event = { type: string; properties: Record<string, unknown> }
+type Item = { directory?: string; payload: Event }
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
 
@@ -69,26 +71,34 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         log.info("global event connected")
-        const res = streamSSE(c, async (stream) => {
-          const q = new AsyncQueue<string>()
-          let done = false
-          const push = (payload: unknown) => {
-            q.push(JSON.stringify(payload))
-          }
-          push({
-            payload: {
-              type: "server.connected",
-              properties: {},
+        c.header("X-Accel-Buffering", "no")
+        c.header("X-Content-Type-Options", "nosniff")
+        return streamSSE(c, async (stream) => {
+          stream.writeSSE({
+            data: JSON.stringify({
+              payload: {
+                type: "server.connected",
+                properties: {},
+              },
+            })
+          })
+          const relay = Relay.create({
+            event: (item: Item) => item.payload,
+            scope: (item: Item) => item.directory ?? "global",
+            write: async (item: Item) => {
+              await stream.writeSSE({
+                data: JSON.stringify(item),
+              })
             },
           })
-          const handler = (event: { directory?: string; payload: unknown }) => {
-            push(event)
+          function handler(event: Item) {
+            relay.push(event)
           }
           GlobalBus.on("event", handler)
 
           // Send heartbeat every 10s to prevent stalled proxy streams.
           const heartbeat = setInterval(() => {
-            push({
+            relay.push({
               payload: {
                 type: "server.heartbeat",
                 properties: {},
@@ -96,31 +106,15 @@ export const GlobalRoutes = lazy(() =>
             })
           }, 10_000)
 
-          const stop = () => {
-            if (done) return
-            done = true
-            GlobalBus.off("event", handler)
-            clearInterval(heartbeat)
-            q.close()
-            log.info("global event disconnected")
-          }
-          stream.onAbort(stop)
-
-          try {
-            for await (const data of q) {
-              await stream.writeSSE({ data })
-            }
-          } finally {
-            stop()
-          }
-        })
-        const headers = new Headers(res.headers)
-        headers.set("Cache-Control", "no-cache, no-transform")
-        headers.set("X-Accel-Buffering", "no")
-        headers.set("X-Content-Type-Options", "nosniff")
-        return new Response(res.body, {
-          status: res.status,
-          headers,
+          await new Promise<void>((resolve) => {
+            stream.onAbort(() => {
+              clearInterval(heartbeat)
+              relay.stop()
+              GlobalBus.off("event", handler)
+              resolve()
+              log.info("global event disconnected")
+            })
+          })
         })
       },
     )
