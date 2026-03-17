@@ -230,7 +230,7 @@ describe("session.llm.stream", () => {
       throw new Error("Server not initialized")
     }
 
-    const providerID = "alibaba"
+    const providerID = ProviderID.make("alibaba")
     const modelID = "qwen-plus"
     const fixture = await loadFixture(providerID, modelID)
     const provider = fixture.provider
@@ -332,7 +332,7 @@ describe("session.llm.stream", () => {
       throw new Error("Server not initialized")
     }
 
-    const providerID = "alibaba"
+    const providerID = ProviderID.make("alibaba")
     const modelID = "qwen-plus"
     const fixture = await loadFixture(providerID, modelID)
     const model = fixture.model
@@ -368,8 +368,8 @@ describe("session.llm.stream", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const resolved = await Provider.getModel(providerID, model.id)
-        const sessionID = "session-test-tools"
+        const resolved = await Provider.getModel(providerID, ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-tools")
         const agent = {
           name: "test",
           mode: "primary",
@@ -378,7 +378,7 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-tools",
+          id: MessageID.make("user-tools"),
           sessionID,
           role: "user",
           time: { created: Date.now() },

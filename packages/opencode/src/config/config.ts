@@ -1208,6 +1208,12 @@ export namespace Config {
         .object({
           disable_paste_summary: z.boolean().optional(),
           batch_tool: z.boolean().optional().describe("Enable the batch tool"),
+          stream_idle_timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in milliseconds before stalled model streams are aborted"),
           openTelemetry: z
             .boolean()
             .optional()

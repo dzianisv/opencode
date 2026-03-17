@@ -306,11 +306,11 @@ export namespace SessionPrompt {
   }
 
   async function loadMessages(
-    sessionID: string,
+    sessionID: SessionID,
     cached:
       | {
-          order: string[]
-          map: Map<string, MessageV2.WithParts>
+          order: MessageID[]
+          map: Map<MessageID, MessageV2.WithParts>
         }
       | undefined,
   ) {
@@ -349,7 +349,7 @@ export namespace SessionPrompt {
       }
     }
 
-    const map = new Map<string, MessageV2.WithParts>()
+    const map = new Map<MessageID, MessageV2.WithParts>()
     for (const id of order) {
       const existing = cached.map.get(id)
       if (existing) {
@@ -803,7 +803,7 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        tools: isLastStep ? {} : tools,
         model,
         toolChoice: format.type === "json_schema" ? "required" : undefined,
       })
@@ -1781,15 +1781,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     })
 
-    let output = ""
+    const chunks: string[] = []
     let bytes = 0
     let clipped = false
     let update_at = 0
     let update_bytes = 0
     const cap = shellCap()
-
-    const preview = () =>
-      output.length > SHELL_METADATA_MAX ? output.slice(0, SHELL_METADATA_MAX) + "\n\n..." : output
+    let preview = ""
 
     const update = (force = false) => {
       const now = Date.now()
@@ -1798,7 +1796,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       update_bytes = bytes
       if (part.state.status !== "running") return
       part.state.metadata = {
-        output: preview(),
+        output: preview,
         description: "",
         clipped,
       }
@@ -1806,19 +1804,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }
 
     const append = (chunk: Buffer) => {
+      const text = chunk.toString()
+      if (preview.length < SHELL_METADATA_MAX) {
+        preview += text
+        if (preview.length > SHELL_METADATA_MAX) {
+          preview = preview.slice(0, SHELL_METADATA_MAX) + "\n\n..."
+        }
+      }
       if (!clipped) {
         const room = cap - bytes
         if (room <= 0) {
           clipped = true
-          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+          chunks.push(`\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`)
         } else if (chunk.byteLength <= room) {
-          output += chunk.toString()
+          chunks.push(text)
           bytes += chunk.byteLength
         } else {
-          output += chunk.subarray(0, room).toString()
+          chunks.push(chunk.subarray(0, room).toString())
           bytes = cap
           clipped = true
-          output += `\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`
+          chunks.push(`\n\n<metadata>\noutput clipped in-memory after ${cap} bytes\n</metadata>`)
         }
       }
       update()
@@ -1852,6 +1857,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     })
 
+    let output = chunks.join("")
     if (aborted) {
       output += "\n\n" + ["<metadata>", "User aborted the command", "</metadata>"].join("\n")
     }

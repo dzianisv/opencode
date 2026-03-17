@@ -238,4 +238,56 @@ describe("session.processor", () => {
       }
     })
   })
+
+  test("batches text deltas before publishing them", async () => {
+    await run(async ({ agent, msg, session, usr }) => {
+      const ctl = new AbortController()
+      const stream = spyOn(LLMModule.LLM, "stream")
+      const delta = spyOn(Session, "updatePartDelta")
+
+      try {
+        stream.mockImplementation(async (): Promise<Stream> =>
+          output([
+            { type: "start" },
+            { type: "text-start" },
+            { type: "text-delta", text: "hello" },
+            { type: "text-delta", text: " " },
+            { type: "text-delta", text: "world" },
+            { type: "text-end" },
+            {
+              type: "finish-step",
+              finishReason: "stop",
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+            { type: "finish" },
+          ]),
+        )
+
+        const result = await SessionProcessor.create({
+          assistantMessage: msg,
+          sessionID: session.id,
+          model: model(),
+          abort: ctl.signal,
+        }).process({
+          user: usr,
+          agent,
+          abort: ctl.signal,
+          sessionID: session.id,
+          system: [],
+          messages: [],
+          tools: {},
+          model: model(),
+        })
+
+        const stored = await MessageV2.get({ sessionID: session.id, messageID: msg.id })
+        const text = stored.parts.find((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        expect(text?.text).toBe("hello world")
+        expect(delta).toHaveBeenCalledTimes(1)
+      } finally {
+        stream.mockRestore()
+        delta.mockRestore()
+      }
+    })
+  })
 })

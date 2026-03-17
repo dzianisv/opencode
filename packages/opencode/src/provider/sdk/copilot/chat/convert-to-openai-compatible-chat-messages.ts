@@ -71,7 +71,7 @@ export function convertToOpenAICompatibleChatMessages(prompt: LanguageModelV2Pro
       }
 
       case "assistant": {
-        let text = ""
+        const text: string[] = []
         let reasoningText: string | undefined
         let reasoningOpaque: string | undefined
         const toolCalls: Array<{
@@ -91,7 +91,7 @@ export function convertToOpenAICompatibleChatMessages(prompt: LanguageModelV2Pro
 
           switch (part.type) {
             case "text": {
-              text += part.text
+              text.push(part.text)
               break
             }
             case "reasoning": {
@@ -115,7 +115,7 @@ export function convertToOpenAICompatibleChatMessages(prompt: LanguageModelV2Pro
 
         messages.push({
           role: "assistant",
-          content: text || null,
+          content: text.length ? text.join("") : null,
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
           reasoning_text: reasoningOpaque ? reasoningText : undefined,
           reasoning_opaque: reasoningOpaque,

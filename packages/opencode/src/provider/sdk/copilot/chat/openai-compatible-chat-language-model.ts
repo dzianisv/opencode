@@ -329,6 +329,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV2 {
         name: string
         arguments: string
       }
+      argumentChunks: string[]
       hasFinished: boolean
     }> = []
 
@@ -537,13 +538,15 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV2 {
                     toolName: toolCallDelta.function.name,
                   })
 
+                  const args = toolCallDelta.function.arguments ?? ""
                   toolCalls[index] = {
                     id: toolCallDelta.id,
                     type: "function",
                     function: {
                       name: toolCallDelta.function.name,
-                      arguments: toolCallDelta.function.arguments ?? "",
+                      arguments: args,
                     },
+                    argumentChunks: args ? [args] : [],
                     hasFinished: false,
                   }
 
@@ -589,7 +592,8 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV2 {
                 }
 
                 if (toolCallDelta.function?.arguments != null) {
-                  toolCall.function!.arguments += toolCallDelta.function?.arguments ?? ""
+                  toolCall.argumentChunks.push(toolCallDelta.function.arguments)
+                  toolCall.function!.arguments = toolCall.argumentChunks.join("")
                 }
 
                 // send delta

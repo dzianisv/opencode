@@ -76,6 +76,7 @@ async function* withIdleTimeout<T>(
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const STREAM_IDLE_TIMEOUT = 60_000
+  const FLUSH_INTERVAL = 50
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -109,6 +110,50 @@ export namespace SessionProcessor {
         while (true) {
           let idleTriggered = false
           let timer: ReturnType<typeof setTimeout> | undefined
+          let currentText: MessageV2.TextPart | undefined
+          let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
+          const deltas = new Map<string, { all: string[]; pending: string[] }>()
+          let flushTimer: ReturnType<typeof setTimeout> | undefined
+
+          const part = (id: string) => currentText?.id === id ? currentText : Object.values(reasoningMap).find((x) => x.id === id)
+
+          const flush = async (id: string) => {
+            const entry = deltas.get(id)
+            const match = part(id)
+            if (!entry || !match || entry.pending.length === 0) return
+            const delta = entry.pending.join("")
+            entry.pending = []
+            await Session.updatePartDelta({
+              sessionID: match.sessionID,
+              messageID: match.messageID,
+              partID: match.id,
+              field: "text",
+              delta,
+            })
+          }
+
+          const flushAll = async () => {
+            flushTimer = undefined
+            await Promise.all([...deltas.keys()].map((id) => flush(id)))
+          }
+
+          const queue = (id: string, text: string) => {
+            const entry = deltas.get(id) ?? { all: [], pending: [] }
+            entry.all.push(text)
+            entry.pending.push(text)
+            deltas.set(id, entry)
+            if (flushTimer) return
+            flushTimer = setTimeout(() => {
+              void flushAll()
+            }, FLUSH_INTERVAL)
+          }
+
+          const finish = (id: string) => {
+            const entry = deltas.get(id)
+            deltas.delete(id)
+            if (!entry || entry.all.length === 0) return ""
+            return entry.all.join("")
+          }
           try {
             const ctl = new AbortController()
             const resetIdle = () => {
@@ -119,8 +164,6 @@ export namespace SessionProcessor {
                 ctl.abort()
               }, idle)
             }
-            let currentText: MessageV2.TextPart | undefined
-            let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
             const stream = await LLM.stream({
               ...streamInput,
               abort: AbortSignal.any([streamInput.abort, ctl.signal]),
@@ -162,21 +205,16 @@ export namespace SessionProcessor {
                 case "reasoning-delta":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
-                    part.text += value.text
                     if (value.providerMetadata) part.metadata = value.providerMetadata
-                    await Session.updatePartDelta({
-                      sessionID: part.sessionID,
-                      messageID: part.messageID,
-                      partID: part.id,
-                      field: "text",
-                      delta: value.text,
-                    })
+                    queue(part.id, value.text)
                   }
                   break
 
                 case "reasoning-end":
                   if (value.id in reasoningMap) {
                     const part = reasoningMap[value.id]
+                    await flush(part.id)
+                    part.text = finish(part.id).trimEnd()
                     part.text = part.text.trimEnd()
 
                     part.time = {
@@ -385,21 +423,15 @@ export namespace SessionProcessor {
 
                 case "text-delta":
                   if (currentText) {
-                    currentText.text += value.text
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
-                    await Session.updatePartDelta({
-                      sessionID: currentText.sessionID,
-                      messageID: currentText.messageID,
-                      partID: currentText.id,
-                      field: "text",
-                      delta: value.text,
-                    })
+                    queue(currentText.id, value.text)
                   }
                   break
 
                 case "text-end":
                   if (currentText) {
-                    currentText.text = currentText.text.trimEnd()
+                    await flush(currentText.id)
+                    currentText.text = finish(currentText.id).trimEnd()
                     const textOutput = await Plugin.trigger(
                       "experimental.text.complete",
                       {
@@ -431,8 +463,16 @@ export namespace SessionProcessor {
               }
               if (needsCompaction) break
             }
+            if (flushTimer) {
+              clearTimeout(flushTimer)
+              await flushAll()
+            }
             if (timer) clearTimeout(timer)
           } catch (e: any) {
+            if (flushTimer) {
+              clearTimeout(flushTimer)
+              await flushAll()
+            }
             if (timer) clearTimeout(timer)
             log.error("process", {
               error: e,

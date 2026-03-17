@@ -1,15 +1,26 @@
 import path from "path"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { fileURLToPath } from "url"
 import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
+import * as LLMModule from "../../src/session/llm"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
 Log.init({ print: false })
+
+type Stream = Awaited<ReturnType<typeof LLMModule.LLM.stream>>
+
+function output(values: unknown[]) {
+  return {
+    fullStream: (async function* () {
+      for (const value of values) yield value
+    })(),
+  } as unknown as Stream
+}
 
 describe("session.prompt missing file", () => {
   test("does not fail the prompt when a file part is missing", async () => {
@@ -202,6 +213,72 @@ describe("session.prompt agent variant", () => {
           expect(override.info.variant).toBe("high")
 
           await Session.remove(session.id)
+        },
+      })
+    } finally {
+      if (prev === undefined) delete process.env.OPENAI_API_KEY
+      else process.env.OPENAI_API_KEY = prev
+    }
+  })
+})
+
+describe("session.prompt max steps", () => {
+  test("disables tools when the agent is at its last step", async () => {
+    const prev = process.env.OPENAI_API_KEY
+    process.env.OPENAI_API_KEY = "test-openai-key"
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          agent: {
+            build: {
+              model: "openai/gpt-5.2",
+              steps: 1,
+            },
+          },
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await Session.create({})
+          const stream = spyOn(LLMModule.LLM, "stream")
+
+          try {
+            await SessionPrompt.prompt({
+              sessionID: session.id,
+              agent: "build",
+              noReply: true,
+              parts: [{ type: "text", text: "hello" }],
+            })
+
+            stream.mockImplementation(async (input): Promise<Stream> => {
+              if (input.small) {
+                return {
+                  text: Promise.resolve("title"),
+                  fullStream: (async function* () {})(),
+                } as unknown as Stream
+              }
+              expect(Object.keys(input.tools ?? {})).toHaveLength(0)
+              return output([
+                { type: "start" },
+                {
+                  type: "finish-step",
+                  finishReason: "stop",
+                  usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+                },
+                { type: "finish" },
+              ])
+            })
+
+            const result = await SessionPrompt.loop({ sessionID: session.id })
+            expect(result.info.role).toBe("assistant")
+          } finally {
+            stream.mockRestore()
+            await Session.remove(session.id)
+          }
         },
       })
     } finally {

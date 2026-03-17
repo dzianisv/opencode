@@ -14,7 +14,7 @@ bun run dev
 
 ## Local Installation
 
-To compile and install the `opencode` CLI to your local directory (`~/.local/bin`), run:
+To compile and install the `opencode` CLI to your local directory (`~/.local/bin`) with the `local` channel, run:
 
 ```bash
 bun run install:local
