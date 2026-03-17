@@ -28,17 +28,6 @@ export class StreamIdleTimeoutError extends Error {
   }
 }
 
-/**
- * Error thrown when no data is received from the LLM stream within the timeout period.
- * This typically indicates a stalled connection (network issues, LLM provider unresponsive).
- */
-export class StreamIdleTimeoutError extends Error {
-  constructor(public readonly timeoutMs: number) {
-    super(`Stream idle timeout: no data received for ${timeoutMs}ms`)
-    this.name = "StreamIdleTimeoutError"
-  }
-}
-
 export namespace MessageV2 {
   export function isMedia(mime: string) {
     return mime.startsWith("image/") || mime === "application/pdf"

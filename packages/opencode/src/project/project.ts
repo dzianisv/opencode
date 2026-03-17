@@ -248,7 +248,7 @@ export namespace Project {
           }
         }
 
-        const worktreeDir = await fs.realpath(common).catch(() => common)
+        const worktreeDir = await fs.realpath(worktree).catch(() => worktree)
         return {
           id,
           sandbox,

@@ -105,7 +105,23 @@ export class QuestionService extends ServiceMap.Service<QuestionService, Questio
     QuestionService,
     Effect.gen(function* () {
       const instanceState = yield* InstanceState.make<Map<QuestionID, PendingEntry>>(() =>
-        Effect.succeed(new Map<QuestionID, PendingEntry>()),
+        Effect.acquireRelease(
+          Effect.succeed(new Map<QuestionID, PendingEntry>()),
+          (state) =>
+            Effect.flatMap(
+              Effect.sync(() => {
+                const list = [...state.values()]
+                state.clear()
+                return list
+              }),
+              (list) =>
+                Effect.forEach(
+                  list,
+                  (item) => Deferred.fail(item.deferred, new RejectedError()),
+                  { discard: true },
+                ),
+            ),
+        ),
       )
 
       const getPending = InstanceState.get(instanceState)

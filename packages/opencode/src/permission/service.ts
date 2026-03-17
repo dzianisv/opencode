@@ -134,15 +134,31 @@ export class PermissionService extends ServiceMap.Service<PermissionService, Per
     PermissionService,
     Effect.gen(function* () {
       const instanceState = yield* InstanceState.make<State>(() =>
-        Effect.sync(() => {
-          const row = Database.use((db) =>
-            db.select().from(PermissionTable).where(eq(PermissionTable.project_id, Instance.project.id)).get(),
-          )
-          return {
-            pending: new Map<PermissionID, PendingEntry>(),
-            approved: row?.data ?? [],
-          }
-        }),
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const row = Database.use((db) =>
+              db.select().from(PermissionTable).where(eq(PermissionTable.project_id, Instance.project.id)).get(),
+            )
+            return {
+              pending: new Map<PermissionID, PendingEntry>(),
+              approved: row?.data ?? [],
+            }
+          }),
+          (state) =>
+            Effect.flatMap(
+              Effect.sync(() => {
+                const list = [...state.pending.values()]
+                state.pending.clear()
+                return list
+              }),
+              (list) =>
+                Effect.forEach(
+                  list,
+                  (item) => Deferred.fail(item.deferred, new RejectedError()),
+                  { discard: true },
+                ),
+            ),
+        ),
       )
 
       const ask = Effect.fn("PermissionService.ask")(function* (input: z.infer<typeof AskInput>) {

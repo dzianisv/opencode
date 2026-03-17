@@ -38,11 +38,6 @@ export namespace UI {
     process.stdout.write(`\x1b]0;${title}\x07`)
   }
 
-  export function setTitle(title: string) {
-    if (!process.stdout.isTTY) return
-    process.stdout.write(`\x1b]0;${title}\x07`)
-  }
-
   let blank = false
   export function empty() {
     if (blank) return
