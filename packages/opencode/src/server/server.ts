@@ -46,9 +46,11 @@ import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
+import { Relay } from "./relay"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
+type Event = { type: string; properties: Record<string, unknown> }
 
 export namespace Server {
   const log = Log.create({ service: "server" })
@@ -525,13 +527,19 @@ export namespace Server {
                 properties: {},
               }),
             })
-            const unsub = Bus.subscribeAll(async (event) => {
-              await stream.writeSSE({
-                data: JSON.stringify(event),
-              })
-              if (event.type === Bus.InstanceDisposed.type) {
-                stream.close()
-              }
+            const relay = Relay.create({
+              event: (item: Event) => item,
+              write: async (item: Event) => {
+                await stream.writeSSE({
+                  data: JSON.stringify(item),
+                })
+                if (item.type === Bus.InstanceDisposed.type) {
+                  stream.close()
+                }
+              },
+            })
+            const unsub = Bus.subscribeAll((event) => {
+              relay.push(event)
             })
 
             // Send heartbeat every 10s to prevent stalled proxy streams.
@@ -547,6 +555,7 @@ export namespace Server {
             await new Promise<void>((resolve) => {
               stream.onAbort(() => {
                 clearInterval(heartbeat)
+                relay.stop()
                 unsub()
                 resolve()
                 log.info("event disconnected")
