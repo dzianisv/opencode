@@ -77,6 +77,10 @@ const shellCap = () => {
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+  const unknown = new MessageV2.AbortedError({
+    message: "The operation was aborted.",
+    source: "unknown",
+  }).toObject()
 
   const state = Instance.state(
     () => {
@@ -94,10 +98,21 @@ export namespace SessionPrompt {
     },
     async (current) => {
       for (const item of Object.values(current)) {
-        item.abort.abort()
+        item.abort.abort(
+          new MessageV2.AbortedError({
+            message: "Server restarted while the response was in progress",
+            source: "server_restart",
+          }).toObject(),
+        )
       }
     },
   )
+
+  function reason(signal: AbortSignal) {
+    const result = MessageV2.AbortedError.Schema.safeParse(signal.reason)
+    if (result.success) return result.data
+    return unknown
+  }
 
   export function assertNotBusy(sessionID: SessionID) {
     const match = state()[sessionID]
@@ -277,7 +292,12 @@ export namespace SessionPrompt {
       SessionStatus.set(sessionID, { type: "idle" })
       return
     }
-    match.abort.abort()
+    match.abort.abort(
+      new MessageV2.AbortedError({
+        message: "The response was cancelled.",
+        source: "user_cancel",
+      }).toObject(),
+    )
     delete s[sessionID]
     SessionStatus.set(sessionID, { type: "idle" })
     return
@@ -460,8 +480,8 @@ export namespace SessionPrompt {
                 ruleset: PermissionNext.merge(taskAgent.permission, session.permission ?? []),
               }),
               new Promise<never>((_, reject) => {
-                if (abort.aborted) return reject(new Error("aborted"))
-                abort.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+                if (abort.aborted) return reject(reason(abort))
+                abort.addEventListener("abort", () => reject(reason(abort)), { once: true })
               }),
             ])
           },
@@ -817,8 +837,8 @@ export namespace SessionPrompt {
           new Promise<never>((_, reject) => {
             const signal = options.abortSignal
             if (!signal) return
-            if (signal.aborted) return reject(new Error("aborted"))
-            signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+            if (signal.aborted) return reject(reason(signal))
+            signal.addEventListener("abort", () => reject(reason(signal)), { once: true })
           }),
         ])
       },

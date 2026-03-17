@@ -140,3 +140,82 @@ describe("step-finish token propagation via Bus event", () => {
     { timeout: 30000 },
   )
 })
+
+describe("session recovery", () => {
+  test("marks orphaned assistant messages as aborted on restart recovery", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const session = await Session.create({})
+        const user = await Session.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: session.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+
+        const assistant = await Session.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: session.id,
+          role: "assistant",
+          time: { created: Date.now() },
+          parentID: user.id,
+          modelID: "test",
+          providerID: "test",
+          mode: "build",
+          agent: "build",
+          path: { cwd: projectRoot, root: projectRoot },
+          cost: 0,
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        } as unknown as MessageV2.Info)
+
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: assistant.id,
+          sessionID: session.id,
+          type: "tool",
+          tool: "bash",
+          callID: "call-recover",
+          state: {
+            status: "running",
+            input: { command: "echo stuck" },
+            time: { start: Date.now() },
+          },
+        } satisfies MessageV2.ToolPart)
+
+        Session.recover()
+
+        const recovered = await MessageV2.get({
+          sessionID: session.id,
+          messageID: assistant.id,
+        })
+        const tool = recovered.parts.find((part): part is MessageV2.ToolPart => part.type === "tool")
+
+        expect(recovered.info.role).toBe("assistant")
+        if (recovered.info.role !== "assistant") throw new Error("expected recovered assistant message")
+        expect(recovered.info.time.completed).toBeDefined()
+        expect(recovered.info.error).toStrictEqual({
+          name: "MessageAbortedError",
+          data: {
+            message: "Server restarted while the response was in progress",
+            source: "server_restart",
+          },
+        })
+        expect(tool?.state.status).toBe("error")
+        if (!tool || tool.state.status !== "error") throw new Error("expected recovered tool error")
+        expect(tool.state.error).toBe("Tool execution aborted: server restarted")
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+})

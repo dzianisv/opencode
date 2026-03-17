@@ -8,8 +8,8 @@ import { getDirectory, getFilename } from "@opencode-ai/util/path"
 import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
-import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
-import { Card } from "./card"
+import { AssistantParts, Message, MessageDivider, type UserActions } from "./message-part"
+import { Card, CardDescription, CardTitle } from "./card"
 import { Accordion } from "./accordion"
 import { StickyAccordionHeader } from "./sticky-accordion-header"
 import { Collapsible } from "./collapsible"
@@ -20,6 +20,7 @@ import { SessionRetry } from "./session-retry"
 import { TextReveal } from "./text-reveal"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
+import { abortCard, partState, visible } from "./session-turn-state"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -83,23 +84,6 @@ function same<T>(a: readonly T[], b: readonly T[]) {
 function list<T>(value: T[] | undefined | null, fallback: T[]) {
   if (Array.isArray(value)) return value
   return fallback
-}
-
-const hidden = new Set(["todowrite", "todoread"])
-
-function partState(part: PartType, showReasoningSummaries: boolean) {
-  if (part.type === "tool") {
-    if (hidden.has(part.tool)) return
-    if (part.tool === "question" && (part.state.status === "pending" || part.state.status === "running")) return
-    return "visible" as const
-  }
-  if (part.type === "text") return part.text?.trim() ? ("visible" as const) : undefined
-  if (part.type === "reasoning") {
-    if (showReasoningSummaries && part.text?.trim()) return "visible" as const
-    return
-  }
-  if (PART_MAPPING[part.type]) return "visible" as const
-  return
 }
 
 function clean(value: string) {
@@ -281,14 +265,23 @@ export function SessionTurn(
   )
 
   const interrupted = createMemo(() => assistantMessages().some((m) => m.error?.name === "MessageAbortedError"))
+  const showReasoningSummaries = createMemo(() => props.showReasoningSummaries ?? true)
+  const abort = createMemo(() => abortCard(assistantMessages(), data.store.part, showReasoningSummaries()))
   const divider = createMemo(() => {
     if (compaction()) return i18n.t("ui.messagePart.compaction")
+    if (abort()) return ""
     if (interrupted()) return i18n.t("ui.message.interrupted")
     return ""
   })
   const error = createMemo(
     () => assistantMessages().find((m) => m.error && m.error.name !== "MessageAbortedError")?.error,
   )
+  const detail = (input: { data?: { message?: unknown } } | undefined) => {
+    const msg = input?.data?.message
+    if (typeof msg === "string") return unwrap(msg)
+    if (msg === undefined || msg === null) return ""
+    return unwrap(String(msg))
+  }
   const showAssistantCopyPartID = createMemo(() => {
     const messages = assistantMessages()
 
@@ -307,11 +300,9 @@ export function SessionTurn(
     return undefined
   })
   const errorText = createMemo(() => {
-    const msg = error()?.data?.message
-    if (typeof msg === "string") return unwrap(msg)
-    if (msg === undefined || msg === null) return ""
-    return unwrap(String(msg))
+    return detail(error())
   })
+  const abortText = createMemo(() => detail(abort()))
 
   const status = createMemo(() => {
     if (props.status !== undefined) return props.status
@@ -319,7 +310,6 @@ export function SessionTurn(
     return data.store.session_status[props.sessionID] ?? idle
   })
   const working = createMemo(() => status().type !== "idle" && active())
-  const showReasoningSummaries = createMemo(() => props.showReasoningSummaries ?? true)
 
   const assistantCopyPartID = createMemo(() => {
     if (working()) return null
@@ -340,12 +330,7 @@ export function SessionTurn(
     if (end < start) return undefined
     return end - start
   })
-  const assistantVisible = createMemo(() =>
-    assistantMessages().reduce((count, message) => {
-      const parts = list(data.store.part?.[message.id], emptyParts)
-      return count + parts.filter((part) => partState(part, showReasoningSummaries()) === "visible").length
-    }, 0),
-  )
+  const assistantVisible = createMemo(() => visible(assistantMessages(), data.store.part, showReasoningSummaries()))
   const assistantTailVisible = createMemo(() =>
     assistantMessages()
       .flatMap((message) => list(data.store.part?.[message.id], emptyParts))
@@ -412,6 +397,16 @@ export function SessionTurn(
                     shellToolDefaultOpen={props.shellToolDefaultOpen}
                     editToolDefaultOpen={props.editToolDefaultOpen}
                   />
+                </div>
+              </Show>
+              <Show when={abort()}>
+                <div data-slot="session-turn-abort">
+                  <Card variant="error" class="error-card">
+                    <CardTitle variant="error">{i18n.t("ui.message.interrupted")}</CardTitle>
+                    <Show when={abortText()}>
+                      <CardDescription>{abortText()}</CardDescription>
+                    </Show>
+                  </Card>
                 </div>
               </Show>
               <Show when={showThinking()}>
