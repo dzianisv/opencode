@@ -790,6 +790,47 @@ describe("session.message-v2.toModelMessage", () => {
 })
 
 describe("session.message-v2.fromError", () => {
+  test("preserves structured abort reasons from aborted signals", () => {
+    const abort = new AbortController()
+    abort.abort(
+      new MessageV2.AbortedError({
+        message: "Server restarted while the response was in progress",
+        source: "server_restart",
+      }).toObject(),
+    )
+
+    expect(
+      MessageV2.fromError(new DOMException("The operation was aborted.", "AbortError"), {
+        providerID,
+        abort: abort.signal,
+      }),
+    ).toStrictEqual({
+      name: "MessageAbortedError",
+      data: {
+        message: "Server restarted while the response was in progress",
+        source: "server_restart",
+      },
+    })
+  })
+
+  test("marks plain abort errors as unknown when no structured reason is available", () => {
+    const abort = new AbortController()
+    abort.abort()
+
+    expect(
+      MessageV2.fromError(new DOMException("The operation was aborted.", "AbortError"), {
+        providerID,
+        abort: abort.signal,
+      }),
+    ).toStrictEqual({
+      name: "MessageAbortedError",
+      data: {
+        message: "The operation was aborted.",
+        source: "unknown",
+      },
+    })
+  })
+
   test("serializes context_length_exceeded as ContextOverflowError", () => {
     const input = {
       type: "error",

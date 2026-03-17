@@ -262,10 +262,13 @@ export type MessageOutputLengthError = {
   }
 }
 
+export type MessageAbortSource = "server_restart" | "user_cancel" | "client_disconnect" | "timeout" | "unknown"
+
 export type MessageAbortedError = {
   name: "MessageAbortedError"
   data: {
     message: string
+    source?: MessageAbortSource
   }
 }
 
@@ -1343,6 +1346,9 @@ export type Config = {
     ignore?: Array<string>
   }
   plugin?: Array<string>
+  /**
+   * Enable workspace Git snapshots for step diff/review and revert features (default true).
+   */
   snapshot?: boolean
   /**
    * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
@@ -1511,6 +1517,46 @@ export type BadRequestError = {
   success: false
 }
 
+export type ProjectSummary = {
+  id: string
+  name?: string
+  worktree: string
+}
+
+export type GlobalSession = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<FileDiff>
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  version: string
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+  project: ProjectSummary | null
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -1665,46 +1711,6 @@ export type WorktreeRemoveInput = {
 
 export type WorktreeResetInput = {
   directory: string
-}
-
-export type ProjectSummary = {
-  id: string
-  name?: string
-  worktree: string
-}
-
-export type GlobalSession = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  version: string
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-  project: ProjectSummary | null
 }
 
 export type McpResource = {
@@ -1998,6 +2004,81 @@ export type GlobalDisposeResponses = {
 }
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
+
+export type GlobalMemoryData = {
+  body?: never
+  path?: never
+  query?: {
+    children?: boolean
+  }
+  url: "/global/memory"
+}
+
+export type GlobalMemoryResponses = {
+  /**
+   * Memory diagnostics
+   */
+  200: {
+    time: string
+    pid: number
+    uptime_sec: number
+    rss_bytes: number
+    heap_total_bytes: number
+    heap_used_bytes: number
+    external_bytes: number
+    array_buffer_bytes: number
+    session: {
+      total: number
+      active: number
+    }
+    pty: {
+      active: number
+    }
+    instance: {
+      size: number
+      max: number
+      idle_ms: number
+      entries: Array<{
+        directory: string
+        refs: number
+        idle_ms: number
+      }>
+    }
+    tree?: {
+      pid: number
+      process_count: number
+      rss_bytes: number
+      top: Array<{
+        pid: number
+        rss_bytes: number
+        name: string
+      }>
+    }
+  }
+}
+
+export type GlobalMemoryResponse = GlobalMemoryResponses[keyof GlobalMemoryResponses]
+
+export type GlobalSessionListData = {
+  body?: never
+  path?: never
+  query?: {
+    start?: number
+    search?: string
+    limit?: number
+    roots?: boolean
+  }
+  url: "/global/session"
+}
+
+export type GlobalSessionListResponses = {
+  /**
+   * List of sessions
+   */
+  200: Array<GlobalSession>
+}
+
+export type GlobalSessionListResponse = GlobalSessionListResponses[keyof GlobalSessionListResponses]
 
 export type AuthRemoveData = {
   body?: never

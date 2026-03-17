@@ -961,6 +961,7 @@ export namespace Session {
             data.error ??
             new MessageV2.AbortedError({
               message: "Server restarted while the response was in progress",
+              source: "server_restart",
             }).toObject(),
         }
         Database.use((db) =>

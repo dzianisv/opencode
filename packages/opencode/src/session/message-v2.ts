@@ -34,7 +34,17 @@ export namespace MessageV2 {
   }
 
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
-  export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
+  export const AbortSource = z.enum(["server_restart", "user_cancel", "client_disconnect", "timeout", "unknown"]).meta({
+    ref: "MessageAbortSource",
+  })
+  export type AbortSource = z.infer<typeof AbortSource>
+  export const AbortedError = NamedError.create(
+    "MessageAbortedError",
+    z.object({
+      message: z.string(),
+      source: AbortSource.optional(),
+    }),
+  )
   export const StructuredOutputError = NamedError.create(
     "StructuredOutputError",
     z.object({
@@ -918,11 +928,26 @@ export namespace MessageV2 {
     return result
   }
 
-  export function fromError(e: unknown, ctx: { providerID: ProviderID }): NonNullable<Assistant["error"]> {
+  function readAbort(input: unknown) {
+    const result = AbortedError.Schema.safeParse(input)
+    if (result.success) return result.data
+  }
+
+  export function fromError(
+    e: unknown,
+    ctx: { providerID: ProviderID; abort?: AbortSignal },
+  ): NonNullable<Assistant["error"]> {
+    const reason = readAbort(ctx.abort?.aborted ? ctx.abort.reason : undefined) ?? readAbort(e)
+    if (reason) {
+      return new MessageV2.AbortedError(reason.data, { cause: e }).toObject()
+    }
     switch (true) {
       case e instanceof DOMException && e.name === "AbortError":
         return new MessageV2.AbortedError(
-          { message: e.message },
+          {
+            message: e.message,
+            source: ctx.abort?.aborted ? "unknown" : undefined,
+          },
           {
             cause: e,
           },

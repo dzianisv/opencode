@@ -203,8 +203,13 @@ describe("session recovery", () => {
         expect(recovered.info.role).toBe("assistant")
         if (recovered.info.role !== "assistant") throw new Error("expected recovered assistant message")
         expect(recovered.info.time.completed).toBeDefined()
-        expect(recovered.info.error?.name).toBe("MessageAbortedError")
-        expect(recovered.info.error?.data.message).toContain("Server restarted")
+        expect(recovered.info.error).toStrictEqual({
+          name: "MessageAbortedError",
+          data: {
+            message: "Server restarted while the response was in progress",
+            source: "server_restart",
+          },
+        })
         expect(tool?.state.status).toBe("error")
         if (!tool || tool.state.status !== "error") throw new Error("expected recovered tool error")
         expect(tool.state.error).toBe("Tool execution aborted: server restarted")

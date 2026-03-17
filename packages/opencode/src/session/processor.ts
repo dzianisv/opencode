@@ -449,7 +449,7 @@ export namespace SessionProcessor {
                   },
                   { cause: e },
                 ).toObject()
-              : MessageV2.fromError(e, { providerID: input.model.providerID })
+              : MessageV2.fromError(e, { providerID: input.model.providerID, abort: input.abort })
             if (MessageV2.ContextOverflowError.isInstance(error)) {
               needsCompaction = true
               Bus.publish(Session.Event.Error, {
