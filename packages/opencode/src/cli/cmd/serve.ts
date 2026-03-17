@@ -2,7 +2,13 @@ import { Server } from "../../server/server"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
+import { Memory } from "../../diagnostic/memory"
+import { Session } from "../../session"
+import { MCP } from "../../mcp"
 import { Instance } from "../../project/instance"
+import { Log } from "../../util/log"
+
+const log = Log.create({ service: "serve" })
 
 export const ServeCommand = cmd({
   command: "serve",
@@ -13,19 +19,33 @@ export const ServeCommand = cmd({
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
+    Session.recover()
+    Memory.start("serve")
+    Session.startSweep()
     const server = Server.listen(opts)
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
 
-    // Wait for a termination signal instead of blocking forever.
-    // The original `await new Promise(() => {})` made all cleanup
-    // code below it unreachable dead code.
-    await new Promise<void>((resolve) => {
-      for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-        process.on(signal, () => resolve())
-      }
-    })
+    const shutdown = async (signal: string) => {
+      log.warn("received signal, shutting down", { signal })
+      Session.stopSweep()
+      await Memory.snapshot({ reason: `shutdown:${signal}` }).catch((e) => {
+        log.error("shutdown snapshot failed", { error: e })
+      })
+      Memory.stop()
+      await Instance.disposeAll().catch((e: unknown) => {
+        log.error("instance disposal failed", { error: e })
+      })
+      await MCP.closeAll().catch((e: unknown) => {
+        log.error("mcp close failed", { error: e })
+      })
+      await server.stop()
+      process.exit(0)
+    }
 
-    await Instance.disposeAll().catch(() => {})
+    process.on("SIGTERM", () => void shutdown("SIGTERM"))
+    process.on("SIGINT", () => void shutdown("SIGINT"))
+
+    await new Promise(() => {})
     await server.stop()
   },
 })

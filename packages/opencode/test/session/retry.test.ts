@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { NamedError } from "@opencode-ai/util/error"
 import { APICallError } from "ai"
+import { setTimeout as sleep } from "node:timers/promises"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
+import { ProviderID } from "../../src/provider/schema"
+
+const providerID = ProviderID.make("test")
 
 function apiError(headers?: Record<string, string>): MessageV2.APIError {
   return new MessageV2.APIError({
@@ -121,6 +125,28 @@ describe("session.retry.retryable", () => {
 
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
+
+  test("retries aborted errors when the session is still active", () => {
+    const ctl = new AbortController()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: true })).toBe("The operation was aborted.")
+  })
+
+  test("does not retry aborted errors after session cancellation", () => {
+    const ctl = new AbortController()
+    ctl.abort()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: true })).toBeUndefined()
+  })
+
+  test("does not retry aborted errors after assistant output has started", () => {
+    const ctl = new AbortController()
+    const error = new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+
+    expect(SessionRetry.retryable(error, { abort: ctl.signal, empty: false })).toBeUndefined()
+  })
 })
 
 describe("session.message-v2.fromError", () => {
@@ -135,7 +161,7 @@ describe("session.message-v2.fromError", () => {
             new ReadableStream({
               async pull(controller) {
                 controller.enqueue("Hello,")
-                await Bun.sleep(10000)
+                await sleep(10000)
                 controller.enqueue(" World!")
                 controller.close()
               },
@@ -149,7 +175,7 @@ describe("session.message-v2.fromError", () => {
         .then((res) => res.text())
         .catch((e) => e)
 
-      const result = MessageV2.fromError(error, { providerID: "test" })
+      const result = MessageV2.fromError(error, { providerID })
 
       expect(MessageV2.APIError.isInstance(result)).toBe(true)
       expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
@@ -182,7 +208,7 @@ describe("session.message-v2.fromError", () => {
       responseBody: '{"error":"boom"}',
       isRetryable: false,
     })
-    const result = MessageV2.fromError(error, { providerID: "openai" }) as MessageV2.APIError
+    const result = MessageV2.fromError(error, { providerID: ProviderID.make("openai") }) as MessageV2.APIError
     expect(result.data.isRetryable).toBe(true)
   })
 })

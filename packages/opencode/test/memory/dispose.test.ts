@@ -1,6 +1,8 @@
 import { describe, test, expect } from "bun:test"
 import { PermissionNext } from "../../src/permission/next"
+import { PermissionID } from "../../src/permission/schema"
 import { Question } from "../../src/question"
+import { SessionID } from "../../src/session/schema"
 import { FileTime } from "../../src/file/time"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -13,8 +15,8 @@ describe("memory: dispose callbacks", () => {
       fn: async () => {
         // Create a pending permission request (action = "ask" returns a pending promise)
         const promise = PermissionNext.ask({
-          id: "perm_dispose_test",
-          sessionID: "session_dispose",
+          id: PermissionID.make("per_dispose_test"),
+          sessionID: SessionID.make("ses_dispose"),
           permission: "bash",
           patterns: ["ls"],
           metadata: {},
@@ -44,8 +46,8 @@ describe("memory: dispose callbacks", () => {
         const promises = []
         for (let i = 0; i < 5; i++) {
           const p = PermissionNext.ask({
-            id: `perm_multi_${i}`,
-            sessionID: `session_multi_${i}`,
+            id: PermissionID.make(`per_multi_${i}`),
+            sessionID: SessionID.make(`ses_multi_${i}`),
             permission: "bash",
             patterns: ["test"],
             metadata: {},
@@ -71,7 +73,7 @@ describe("memory: dispose callbacks", () => {
       directory: tmp.path,
       fn: async () => {
         const promise = Question.ask({
-          sessionID: "session_q_dispose",
+          sessionID: SessionID.make("ses_q_dispose"),
           questions: [
             {
               question: "test?",
@@ -126,7 +128,7 @@ describe("memory: dispose callbacks", () => {
       fn: async () => {
         // This should resolve immediately (action = "allow")
         const resolved = await PermissionNext.ask({
-          sessionID: "session_resolved",
+          sessionID: SessionID.make("ses_resolved"),
           permission: "bash",
           patterns: ["ls"],
           metadata: {},

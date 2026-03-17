@@ -47,9 +47,10 @@ for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
 }
 
 // Subscribe to global events and forward them via RPC
-GlobalBus.on("event", (event) => {
+const onglobal = (event: any) => {
   Rpc.emit("global.event", event)
-})
+}
+GlobalBus.on("event", onglobal)
 
 let server: Bun.Server<BunWebSocketData> | undefined
 
@@ -57,7 +58,7 @@ const eventStream = {
   abort: undefined as AbortController | undefined,
 }
 
-const startEventStream = (directory: string) => {
+const startEventStream = (input: { directory: string; workspaceID?: string }) => {
   if (eventStream.abort) eventStream.abort.abort()
   const abort = new AbortController()
   eventStream.abort = abort
@@ -67,39 +68,29 @@ const startEventStream = (directory: string) => {
     const request = new Request(input, init)
     const auth = getAuthorizationHeader()
     if (auth) request.headers.set("Authorization", auth)
-    return Server.App().fetch(request)
+    return Server.Default().fetch(request)
   }) as typeof globalThis.fetch
 
   const sdk = createOpencodeClient({
     baseUrl: "http://opencode.internal",
-    directory,
+    directory: input.directory,
+    experimental_workspaceID: input.workspaceID,
     fetch: fetchFn,
     signal,
   })
 
   ;(async () => {
-    while (!signal.aborted) {
-      const events = await Promise.resolve(
-        sdk.event.subscribe(
-          {},
-          {
-            signal,
-          },
-        ),
-      ).catch(() => undefined)
-
-      if (!events) {
-        await Bun.sleep(250)
-        continue
-      }
-
-      for await (const event of events.stream) {
-        Rpc.emit("event", event as Event)
-      }
-
-      if (!signal.aborted) {
-        await Bun.sleep(250)
-      }
+    const events = await Promise.resolve(
+      sdk.event.subscribe(
+        {},
+        {
+          signal,
+        },
+      ),
+    ).catch(() => undefined)
+    if (!events) return
+    for await (const event of events.stream) {
+      Rpc.emit("event", event as Event)
     }
   })().catch((error) => {
     Log.Default.error("event stream error", {
@@ -108,7 +99,7 @@ const startEventStream = (directory: string) => {
   })
 }
 
-startEventStream(process.cwd())
+startEventStream({ directory: process.cwd() })
 
 export const rpc = {
   async fetch(input: { url: string; method: string; headers: Record<string, string>; body?: string }) {
@@ -122,7 +113,7 @@ export const rpc = {
       headers,
       body: input.body,
     })
-    const response = await Server.App().fetch(request)
+    const response = await Server.Default().fetch(request)
     const body = await response.text()
     return {
       status: response.status,
@@ -132,8 +123,9 @@ export const rpc = {
   },
   async server(input: { port: number; hostname: string; mdns?: boolean; cors?: string[] }) {
     if (server) await server.stop(true)
-    server = Server.listen(input)
-    return { url: server.url.toString() }
+    const next = Server.listen(input)
+    server = next
+    return { url: next.url.toString() }
   },
   async checkUpgrade(input: { directory: string }) {
     await Instance.provide({
@@ -148,15 +140,14 @@ export const rpc = {
     Config.global.reset()
     await Instance.disposeAll()
   },
+  async setWorkspace(input: { workspaceID?: string }) {
+    startEventStream({ directory: process.cwd(), workspaceID: input.workspaceID })
+  },
   async shutdown() {
     Log.Default.info("worker shutting down")
+    GlobalBus.off("event", onglobal)
     if (eventStream.abort) eventStream.abort.abort()
-    await Promise.race([
-      Instance.disposeAll(),
-      new Promise((resolve) => {
-        setTimeout(resolve, 5000)
-      }),
-    ])
+    await Instance.disposeAll()
     if (server) server.stop(true)
   },
 }

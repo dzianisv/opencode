@@ -70,6 +70,79 @@ describe("file/time", () => {
         },
       })
     })
+
+    test("clears timestamps for a session", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "content", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          FileTime.read("session-clear-1", filepath)
+          FileTime.read("session-clear-2", filepath)
+
+          FileTime.clear("session-clear-1")
+
+          expect(FileTime.get("session-clear-1", filepath)).toBeUndefined()
+          expect(FileTime.get("session-clear-2", filepath)).toBeInstanceOf(Date)
+        },
+      })
+    })
+
+    test("evicts oldest files per session when file cap is reached", async () => {
+      await using tmp = await tmpdir()
+      const first = path.join(tmp.path, "a.txt")
+      const second = path.join(tmp.path, "b.txt")
+      const third = path.join(tmp.path, "c.txt")
+      await fs.writeFile(first, "a", "utf-8")
+      await fs.writeFile(second, "b", "utf-8")
+      await fs.writeFile(third, "c", "utf-8")
+
+      const prev = process.env.OPENCODE_FILETIME_FILE_MAX
+      process.env.OPENCODE_FILETIME_FILE_MAX = "2"
+      try {
+        await Instance.provide({
+          directory: tmp.path,
+          fn: async () => {
+            FileTime.read(sessionID, first)
+            FileTime.read(sessionID, second)
+            FileTime.read(sessionID, third)
+            expect(FileTime.get(sessionID, first)).toBeUndefined()
+            expect(FileTime.get(sessionID, second)).toBeInstanceOf(Date)
+            expect(FileTime.get(sessionID, third)).toBeInstanceOf(Date)
+          },
+        })
+      } finally {
+        if (prev === undefined) delete process.env.OPENCODE_FILETIME_FILE_MAX
+        else process.env.OPENCODE_FILETIME_FILE_MAX = prev
+      }
+    })
+
+    test("evicts oldest sessions when session cap is reached", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "content", "utf-8")
+
+      const prev = process.env.OPENCODE_FILETIME_SESSION_MAX
+      process.env.OPENCODE_FILETIME_SESSION_MAX = "2"
+      try {
+        await Instance.provide({
+          directory: tmp.path,
+          fn: async () => {
+            FileTime.read("evict-1", filepath)
+            FileTime.read("evict-2", filepath)
+            FileTime.read("evict-3", filepath)
+            expect(FileTime.get("evict-1", filepath)).toBeUndefined()
+            expect(FileTime.get("evict-2", filepath)).toBeInstanceOf(Date)
+            expect(FileTime.get("evict-3", filepath)).toBeInstanceOf(Date)
+          },
+        })
+      } finally {
+        if (prev === undefined) delete process.env.OPENCODE_FILETIME_SESSION_MAX
+        else process.env.OPENCODE_FILETIME_SESSION_MAX = prev
+      }
+    })
   })
 
   describe("assert()", () => {

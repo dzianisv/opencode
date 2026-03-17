@@ -4,12 +4,23 @@ import { Session } from "."
 
 import { MessageV2 } from "./message-v2"
 import { Identifier } from "@/id/id"
+import { SessionID, MessageID } from "./schema"
 import { Snapshot } from "@/snapshot"
 
 import { Storage } from "@/storage/storage"
 import { Bus } from "@/bus"
+import { Log } from "@/util/log"
+import { Agent } from "@/agent/agent"
+import { LLM } from "./llm"
+import { Provider } from "@/provider/provider"
 
 export namespace SessionSummary {
+  const log = Log.create({ service: "session.summary" })
+  const state = {
+    active: new Set<string>(),
+    queue: new Map<string, { sessionID: SessionID; messageID: MessageID }>(),
+  }
+
   function unquoteGitPath(input: string) {
     if (!input.startsWith('"')) return input
     if (!input.endsWith('"')) return input
@@ -68,8 +79,8 @@ export namespace SessionSummary {
 
   export const summarize = fn(
     z.object({
-      sessionID: z.string(),
-      messageID: z.string(),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
     }),
     async (input) => {
       const all = await Session.messages({ sessionID: input.sessionID })
@@ -80,7 +91,32 @@ export namespace SessionSummary {
     },
   )
 
-  async function summarizeSession(input: { sessionID: string; messages: MessageV2.WithParts[] }) {
+  export function schedule(input: { sessionID: SessionID; messageID: MessageID }) {
+    state.queue.set(input.sessionID, input)
+    if (state.active.has(input.sessionID)) return
+    state.active.add(input.sessionID)
+    void (async () => {
+      while (true) {
+        const next = state.queue.get(input.sessionID)
+        if (!next) break
+        state.queue.delete(input.sessionID)
+        try {
+          await summarize(next)
+        } catch (error) {
+          log.error("summarize", {
+            sessionID: next.sessionID,
+            messageID: next.messageID,
+            error,
+            stack: JSON.stringify((error as Error)?.stack),
+          })
+        }
+      }
+    })().finally(() => {
+      state.active.delete(input.sessionID)
+    })
+  }
+
+  async function summarizeSession(input: { sessionID: SessionID; messages: MessageV2.WithParts[] }) {
     const diffs = await computeDiff({ messages: input.messages })
     await Session.setSummary({
       sessionID: input.sessionID,
@@ -109,12 +145,49 @@ export namespace SessionSummary {
       diffs,
     }
     await Session.updateMessage(userMsg)
+
+    const textPart = msgWithParts.parts.find((p) => p.type === "text" && !p.synthetic) as MessageV2.TextPart
+    if (textPart && !userMsg.summary?.title) {
+      const agent = await Agent.get("title")
+      if (!agent) return
+      const stream = await LLM.stream({
+        agent,
+        user: userMsg,
+        tools: {},
+        model: agent.model
+          ? await Provider.getModel(agent.model.providerID, agent.model.modelID)
+          : await Provider.getTitleModel({
+              providerID: userMsg.model.providerID,
+              modelID: userMsg.model.modelID,
+            }),
+        small: true,
+        messages: [
+          {
+            role: "user" as const,
+            content: `
+              The following is the text to summarize:
+              <text>
+              ${textPart?.text ?? ""}
+              </text>
+            `,
+          },
+        ],
+        abort: new AbortController().signal,
+        sessionID: userMsg.sessionID,
+        system: [],
+        retries: 3,
+      })
+      const result = await stream.text
+      log.info("title", { title: result })
+      userMsg.summary.title = result
+      await Session.updateMessage(userMsg)
+    }
   }
 
   export const diff = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
-      messageID: Identifier.schema("message").optional(),
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod.optional(),
     }),
     async (input) => {
       const diffs = await Storage.read<Snapshot.FileDiff[]>(["session_diff", input.sessionID]).catch(() => [])

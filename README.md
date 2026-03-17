@@ -74,7 +74,9 @@ Long-running sessions would leak memory and leave zombie processes.
   <a href="README.th.md">ไทย</a> |
   <a href="README.tr.md">Türkçe</a> |
   <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a>
+  <a href="README.bn.md">বাংলা</a> |
+  <a href="README.gr.md">Ελληνικά</a> |
+  <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
@@ -177,6 +179,57 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 ### Documentation
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+
+### Fork Enhancements (dzianisv/dev)
+
+The `dzianisv/opencode` fork carries memory lifecycle, reliability, and UX patches on top of `upstream/dev`.
+
+#### Memory Lifecycle
+
+Upstream opencode has no process lifecycle management for MCP servers or sessions in serve mode. Long-running instances accumulate leaked MCP child processes, orphaned sessions, and unbounded in-memory state — leading to OOM crashes (see [#16697](https://github.com/anomalyco/opencode/issues/16697)).
+
+| Feature | Env Variable | Default |
+|---|---|---|
+| MCP idle disconnect — shuts down MCP servers after inactivity | `OPENCODE_MCP_IDLE_MS` | 10 min |
+| Session idle archival — archives stale sessions to reduce memory | `OPENCODE_SESSION_IDLE_MS` | 3 days |
+| Graceful shutdown — disposes instances and closes MCP clients on SIGTERM/SIGINT | — | always on |
+| Startup recovery — marks orphaned running/pending tools as error on restart | — | always on |
+| External watchdog — launchd-compatible script that kills runaway processes | — | opt-in (`script/memory-watchdog.sh`) |
+
+Set any `*_MS` variable to `0` to disable that sweep.
+
+#### Tool Execution Reliability
+
+- **Permission/Question deadlock fix** — upstream `Question.ask()` and `PermissionNext.ask()` block indefinitely with no timeout. When the AI SDK issues multiple tool calls and one is a permission prompt, the entire stream deadlocks. Fix: race both against the abort signal.
+
+#### Web UI Enhancements
+
+- **Recently Active dashboard** — new `/recent` page showing sessions across all projects, accessible from sidebar and home page
+- **Local app serving** — server serves from `packages/app/dist` first instead of proxying to `app.opencode.ai`, enabling local UI development
+- **Session rename tool** — AI agents can rename sessions to reflect current task via a built-in tool; system prompt instructs agents to do so early
+
+#### npm Publishing Fix
+
+- **Scoped package resolution** — fork publishes as `@vibetechnologies/opencode`; upstream `bin/opencode` and `postinstall.mjs` hardcode unscoped package names. Fix: `publish-fork.ts` patches both files to use `@vibetechnologies/` scope.
+
+```bash
+bun add -g @vibetechnologies/opencode@dev
+```
+
+#### Memory Optimization Commits
+
+- [`a5578e1f3`](https://github.com/dzianisv/opencode/commit/a5578e1f3) - bound instance cache to prevent serve memory blowups
+- [`250abd030`](https://github.com/dzianisv/opencode/commit/250abd030) - cap runtime state growth and harden stream cleanup
+- [`7720454da`](https://github.com/dzianisv/opencode/commit/7720454da) - share and hard-close MCP clients across instances
+- [`1be122485`](https://github.com/dzianisv/opencode/commit/1be122485) - dedupe instance bootstraps and restore cache headroom
+- [`597dc7d40`](https://github.com/dzianisv/opencode/commit/597dc7d40) - lazy-load MCP clients for status and bootstrap paths
+- [`ee069fc52`](https://github.com/dzianisv/opencode/commit/ee069fc52) - cap file read timestamps per session
+- [`8e30a85ec`](https://github.com/dzianisv/opencode/commit/8e30a85ec) - cap/throttle shell output metadata streaming
+- [`9b16b0c33`](https://github.com/dzianisv/opencode/commit/9b16b0c33) - spool bash tool output to disk instead of in-memory capping
+- [`41c594673`](https://github.com/dzianisv/opencode/commit/41c594673) - add memory diagnostics endpoints and monitor hooks
+- [`1f1ddc86e`](https://github.com/dzianisv/opencode/commit/1f1ddc86e) - add serve memory workload profiler
+
+Related docs: [`docs/memory-forensics.md`](docs/memory-forensics.md)
 
 ### Contributing
 

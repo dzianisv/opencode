@@ -1,7 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Session } from "."
-import { Identifier } from "../id/id"
+import { SessionID, MessageID, PartID } from "./schema"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { MessageV2 } from "./message-v2"
@@ -14,15 +14,19 @@ import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { ProviderTransform } from "@/provider/transform"
+import { ModelID, ProviderID } from "@/provider/schema"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
+  const state = {
+    active: new Set<string>(),
+  }
 
   export const Event = {
     Compacted: BusEvent.define(
       "session.compacted",
       z.object({
-        sessionID: z.string(),
+        sessionID: SessionID.zod,
       }),
     ),
   }
@@ -57,36 +61,48 @@ export namespace SessionCompaction {
   // tool calls that are no longer relevant.
   // Returns the set of message IDs whose parts were pruned, or undefined if
   // nothing was pruned.
-  export async function prune(input: { sessionID: string }): Promise<Set<string> | undefined> {
+  export async function prune(input: { sessionID: SessionID }): Promise<Set<string> | undefined> {
     const config = await Config.get()
     if (config.compaction?.prune === false) return
     log.info("pruning")
-    const msgs = await Session.messages({ sessionID: input.sessionID })
     let total = 0
     let pruned = 0
     const toPrune: { part: MessageV2.ToolPart; messageID: string }[] = []
     let turns = 0
+    let before: string | undefined
+    const size = 50
 
-    loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
-      const msg = msgs[msgIndex]
-      if (msg.info.role === "user") turns++
-      if (turns < 2) continue
-      if (msg.info.role === "assistant" && msg.info.summary) break loop
-      for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
-        const part = msg.parts[partIndex]
-        if (part.type === "tool")
-          if (part.state.status === "completed") {
-            if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+    loop: while (true) {
+      const page = await MessageV2.page({
+        sessionID: input.sessionID,
+        limit: size,
+        before,
+      })
+      if (page.items.length === 0) break
 
-            if (part.state.time.compacted) break loop
-            const estimate = Token.estimate(part.state.output)
-            total += estimate
-            if (total > PRUNE_PROTECT) {
-              pruned += estimate
-              toPrune.push({ part, messageID: msg.info.id })
-            }
-          }
+      for (let msgIndex = page.items.length - 1; msgIndex >= 0; msgIndex--) {
+        const msg = page.items[msgIndex]
+        if (msg.info.role === "user") turns++
+        if (turns < 2) continue
+        if (msg.info.role === "assistant" && msg.info.summary) break loop
+        for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+          const part = msg.parts[partIndex]
+          if (part.type !== "tool") continue
+          if (part.state.status !== "completed") continue
+          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+          if (part.state.time.compacted) break loop
+
+          const estimate = Token.estimate(part.state.output)
+          total += estimate
+          if (total <= PRUNE_PROTECT) continue
+
+          pruned += estimate
+          toPrune.push({ part, messageID: msg.info.id })
+          if (pruned > PRUNE_MINIMUM) break loop
+        }
       }
+      if (!page.more || !page.cursor) break
+      before = page.cursor
     }
     log.info("found", { pruned, total })
     if (pruned > PRUNE_MINIMUM) {
@@ -103,20 +119,58 @@ export namespace SessionCompaction {
     }
   }
 
+  export function schedule(input: { sessionID: SessionID }) {
+    if (state.active.has(input.sessionID)) return
+    state.active.add(input.sessionID)
+    void prune(input)
+      .catch((error) =>
+        log.error("prune", {
+          sessionID: input.sessionID,
+          error,
+          stack: JSON.stringify((error as Error)?.stack),
+        }),
+      )
+      .finally(() => {
+        state.active.delete(input.sessionID)
+      })
+  }
+
   export async function process(input: {
-    parentID: string
+    parentID: MessageID
     messages: MessageV2.WithParts[]
-    sessionID: string
+    sessionID: SessionID
     abort: AbortSignal
     auto: boolean
+    overflow?: boolean
   }) {
     const userMessage = input.messages.findLast((m) => m.info.id === input.parentID)!.info as MessageV2.User
+
+    let messages = input.messages
+    let replay: MessageV2.WithParts | undefined
+    if (input.overflow) {
+      const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
+      for (let i = idx - 1; i >= 0; i--) {
+        const msg = input.messages[i]
+        if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction")) {
+          replay = msg
+          messages = input.messages.slice(0, i)
+          break
+        }
+      }
+      const hasContent =
+        replay && messages.some((m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction"))
+      if (!hasContent) {
+        replay = undefined
+        messages = input.messages
+      }
+    }
+
     const agent = await Agent.get("compaction")
     const model = agent.model
       ? await Provider.getModel(agent.model.providerID, agent.model.modelID)
       : await Provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
     const msg = (await Session.updateMessage({
-      id: Identifier.ascending("message"),
+      id: MessageID.ascending(),
       role: "assistant",
       parentID: input.parentID,
       sessionID: input.sessionID,
@@ -190,7 +244,7 @@ When constructing the summary, try to stick to this template:
       tools: {},
       system: [],
       messages: [
-        ...MessageV2.toModelMessages(input.messages, model),
+        ...MessageV2.toModelMessages(messages, model, { stripMedia: true }),
         {
           role: "user",
           content: [
@@ -204,29 +258,72 @@ When constructing the summary, try to stick to this template:
       model,
     })
 
+    if (result === "compact") {
+      processor.message.error = new MessageV2.ContextOverflowError({
+        message: replay
+          ? "Conversation history too large to compact - exceeds model context limit"
+          : "Session too large to compact - context exceeds model limit even after stripping media",
+      }).toObject()
+      processor.message.finish = "error"
+      await Session.updateMessage(processor.message)
+      return "stop"
+    }
+
     if (result === "continue" && input.auto) {
-      const continueMsg = await Session.updateMessage({
-        id: Identifier.ascending("message"),
-        role: "user",
-        sessionID: input.sessionID,
-        time: {
-          created: Date.now(),
-        },
-        agent: userMessage.agent,
-        model: userMessage.model,
-      })
-      await Session.updatePart({
-        id: Identifier.ascending("part"),
-        messageID: continueMsg.id,
-        sessionID: input.sessionID,
-        type: "text",
-        synthetic: true,
-        text: "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
-        time: {
-          start: Date.now(),
-          end: Date.now(),
-        },
-      })
+      if (replay) {
+        const original = replay.info as MessageV2.User
+        const replayMsg = await Session.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: input.sessionID,
+          time: { created: Date.now() },
+          agent: original.agent,
+          model: original.model,
+          format: original.format,
+          tools: original.tools,
+          system: original.system,
+          variant: original.variant,
+        })
+        for (const part of replay.parts) {
+          if (part.type === "compaction") continue
+          const replayPart =
+            part.type === "file" && MessageV2.isMedia(part.mime)
+              ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
+              : part
+          await Session.updatePart({
+            ...replayPart,
+            id: PartID.ascending(),
+            messageID: replayMsg.id,
+            sessionID: input.sessionID,
+          })
+        }
+      } else {
+        const continueMsg = await Session.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: input.sessionID,
+          time: { created: Date.now() },
+          agent: userMessage.agent,
+          model: userMessage.model,
+        })
+        const text =
+          (input.overflow
+            ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
+            : "") +
+          "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: continueMsg.id,
+          sessionID: input.sessionID,
+          type: "text",
+          synthetic: true,
+          text,
+          time: {
+            start: Date.now(),
+            end: Date.now(),
+          },
+        })
+      }
     }
     if (processor.message.error) return "stop"
     Bus.publish(Event.Compacted, { sessionID: input.sessionID })
@@ -235,17 +332,18 @@ When constructing the summary, try to stick to this template:
 
   export const create = fn(
     z.object({
-      sessionID: Identifier.schema("session"),
+      sessionID: SessionID.zod,
       agent: z.string(),
       model: z.object({
-        providerID: z.string(),
-        modelID: z.string(),
+        providerID: ProviderID.zod,
+        modelID: ModelID.zod,
       }),
       auto: z.boolean(),
+      overflow: z.boolean().optional(),
     }),
     async (input) => {
       const msg = await Session.updateMessage({
-        id: Identifier.ascending("message"),
+        id: MessageID.ascending(),
         role: "user",
         model: input.model,
         sessionID: input.sessionID,
@@ -255,11 +353,12 @@ When constructing the summary, try to stick to this template:
         },
       })
       await Session.updatePart({
-        id: Identifier.ascending("part"),
+        id: PartID.ascending(),
         messageID: msg.id,
         sessionID: msg.sessionID,
         type: "compaction",
         auto: input.auto,
+        overflow: input.overflow,
       })
     },
   )
