@@ -74,6 +74,15 @@ function output(values: unknown[]) {
   } as unknown as Stream
 }
 
+function fail(values: unknown[], error: unknown) {
+  return {
+    fullStream: (async function* () {
+      for (const value of values) yield value
+      throw error
+    })(),
+  } as unknown as Stream
+}
+
 async function run(
   fn: (input: {
     agent: Agent.Info
@@ -174,6 +183,54 @@ describe("session.processor", () => {
         expect(result).toBe("stop")
         expect(stream).toHaveBeenCalledTimes(1)
         expect(sleep).not.toHaveBeenCalled()
+        expect(stored.info.error?.name).toBe("MessageAbortedError")
+      } finally {
+        stream.mockRestore()
+        sleep.mockRestore()
+      }
+    })
+  })
+
+  test("does not retry aborts after assistant output has started", async () => {
+    await run(async ({ agent, msg, session, usr }) => {
+      const ctl = new AbortController()
+      const stream = spyOn(LLMModule.LLM, "stream")
+      const sleep = spyOn(RetryModule.SessionRetry, "sleep").mockResolvedValue()
+
+      try {
+        stream.mockImplementation(async (): Promise<Stream> =>
+          fail(
+            [
+              { type: "start" },
+              { type: "text-start" },
+              { type: "text-delta", text: "partial" },
+            ],
+            new DOMException("The operation was aborted.", "AbortError"),
+          ),
+        )
+
+        const result = await SessionProcessor.create({
+          assistantMessage: msg,
+          sessionID: session.id,
+          model: model(),
+          abort: ctl.signal,
+        }).process({
+          user: usr,
+          agent,
+          abort: ctl.signal,
+          sessionID: session.id,
+          system: [],
+          messages: [],
+          tools: {},
+          model: model(),
+        })
+
+        const stored = await MessageV2.get({ sessionID: session.id, messageID: msg.id })
+        if (stored.info.role !== "assistant") throw new Error("expected assistant")
+        expect(result).toBe("stop")
+        expect(stream).toHaveBeenCalledTimes(1)
+        expect(sleep).not.toHaveBeenCalled()
+        expect(stored.parts.some((part) => part.type === "text")).toBe(true)
         expect(stored.info.error?.name).toBe("MessageAbortedError")
       } finally {
         stream.mockRestore()
