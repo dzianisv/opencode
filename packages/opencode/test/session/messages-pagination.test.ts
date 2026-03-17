@@ -112,4 +112,91 @@ describe("session message pagination", () => {
       },
     })
   })
+
+  test("builds lightweight preview payloads for prefetch", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+
+        const userID = MessageID.ascending()
+        await Session.updateMessage({
+          id: userID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "test",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: session.id,
+          messageID: userID,
+          type: "text",
+          text: "hello",
+        })
+
+        const assistantID = MessageID.ascending()
+        await Session.updateMessage({
+          id: assistantID,
+          sessionID: session.id,
+          role: "assistant",
+          parentID: userID,
+          mode: "build",
+          agent: "build",
+          cost: 0,
+          path: { cwd: root, root },
+          time: { created: Date.now(), completed: Date.now() },
+          modelID: "test",
+          providerID: "test",
+          tokens: {
+            input: 0,
+            output: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        } as unknown as MessageV2.Info)
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: session.id,
+          messageID: assistantID,
+          type: "tool",
+          tool: "bash",
+          callID: "call_preview",
+          state: {
+            status: "completed",
+            time: {
+              start: Date.now(),
+              end: Date.now(),
+            },
+            input: {
+              command: "printf x",
+            },
+            title: "bash",
+            metadata: {
+              output: "x".repeat(1024),
+              description: "bash",
+            },
+            output: "x".repeat(1024),
+          },
+        })
+
+        const items = await Session.messages({ sessionID: session.id })
+        const preview = MessageV2.preview(items)
+
+        expect(preview.map((item) => item.info.id)).toEqual([userID, assistantID])
+        expect(preview[0].parts).toEqual([
+          expect.objectContaining({
+            type: "text",
+            text: "hello",
+          }),
+        ])
+        expect(preview[1].parts).toEqual([])
+
+        await Session.remove(session.id)
+      },
+    })
+  })
 })

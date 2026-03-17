@@ -18,6 +18,9 @@ import { ModelID, ProviderID } from "@/provider/schema"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
+  const state = {
+    active: new Set<string>(),
+  }
 
   export const Event = {
     Compacted: BusEvent.define(
@@ -60,32 +63,44 @@ export namespace SessionCompaction {
     const config = await Config.get()
     if (config.compaction?.prune === false) return
     log.info("pruning")
-    const msgs = await Session.messages({ sessionID: input.sessionID })
     let total = 0
     let pruned = 0
     const toPrune = []
     let turns = 0
+    let before: string | undefined
+    const size = 50
 
-    loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
-      const msg = msgs[msgIndex]
-      if (msg.info.role === "user") turns++
-      if (turns < 2) continue
-      if (msg.info.role === "assistant" && msg.info.summary) break loop
-      for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
-        const part = msg.parts[partIndex]
-        if (part.type === "tool")
-          if (part.state.status === "completed") {
-            if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+    loop: while (true) {
+      const page = await MessageV2.page({
+        sessionID: input.sessionID,
+        limit: size,
+        before,
+      })
+      if (page.items.length === 0) break
 
-            if (part.state.time.compacted) break loop
-            const estimate = Token.estimate(part.state.output)
-            total += estimate
-            if (total > PRUNE_PROTECT) {
-              pruned += estimate
-              toPrune.push(part)
-            }
-          }
+      for (let msgIndex = page.items.length - 1; msgIndex >= 0; msgIndex--) {
+        const msg = page.items[msgIndex]
+        if (msg.info.role === "user") turns++
+        if (turns < 2) continue
+        if (msg.info.role === "assistant" && msg.info.summary) break loop
+        for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+          const part = msg.parts[partIndex]
+          if (part.type !== "tool") continue
+          if (part.state.status !== "completed") continue
+          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+          if (part.state.time.compacted) break loop
+
+          const estimate = Token.estimate(part.state.output)
+          total += estimate
+          if (total <= PRUNE_PROTECT) continue
+
+          pruned += estimate
+          toPrune.push(part)
+          if (pruned > PRUNE_MINIMUM) break loop
+        }
       }
+      if (!page.more || !page.cursor) break
+      before = page.cursor
     }
     log.info("found", { pruned, total })
     if (pruned > PRUNE_MINIMUM) {
@@ -97,6 +112,22 @@ export namespace SessionCompaction {
       }
       log.info("pruned", { count: toPrune.length })
     }
+  }
+
+  export function schedule(input: { sessionID: SessionID }) {
+    if (state.active.has(input.sessionID)) return
+    state.active.add(input.sessionID)
+    void prune(input)
+      .catch((error) =>
+        log.error("prune", {
+          sessionID: input.sessionID,
+          error,
+          stack: JSON.stringify((error as Error)?.stack),
+        }),
+      )
+      .finally(() => {
+        state.active.delete(input.sessionID)
+      })
   }
 
   export async function process(input: {

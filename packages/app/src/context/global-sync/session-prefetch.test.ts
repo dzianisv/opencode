@@ -93,4 +93,15 @@ describe("session prefetch", () => {
       }),
     ).toBe(true)
   })
+
+  test("refreshes stale preview history", () => {
+    expect(
+      shouldSkipSessionPrefetch({
+        message: true,
+        info: { limit: 24, complete: true, at: 1, preview: true },
+        chunk: 200,
+        now: 1 + 15_001,
+      }),
+    ).toBe(false)
+  })
 })

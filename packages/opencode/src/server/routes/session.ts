@@ -592,6 +592,10 @@ export const SessionRoutes = lazy(() =>
                 },
                 { message: "Invalid cursor" },
               ),
+            preview: z.coerce
+              .boolean()
+              .optional()
+              .meta({ description: "Return lightweight preview parts for sidebar prefetch" }),
           })
           .refine((value) => !value.before || value.limit !== undefined, {
             message: "before requires limit",
@@ -601,16 +605,17 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const query = c.req.valid("query")
         const sessionID = c.req.valid("param").sessionID
+        const reduce = (items: MessageV2.WithParts[]) => (query.preview ? MessageV2.preview(items) : items)
         if (query.limit === undefined) {
           await Session.get(sessionID)
           const messages = await Session.messages({ sessionID })
-          return c.json(messages)
+          return c.json(reduce(messages))
         }
 
         if (query.limit === 0) {
           await Session.get(sessionID)
           const messages = await Session.messages({ sessionID })
-          return c.json(messages)
+          return c.json(reduce(messages))
         }
 
         const page = await MessageV2.page({
@@ -626,7 +631,7 @@ export const SessionRoutes = lazy(() =>
           c.header("Link", `<${url.toString()}>; rel=\"next\"`)
           c.header("X-Next-Cursor", page.cursor)
         }
-        return c.json(page.items)
+        return c.json(reduce(page.items))
       },
     )
     .get(

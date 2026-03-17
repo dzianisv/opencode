@@ -7,11 +7,15 @@ type Meta = {
   cursor?: string
   complete: boolean
   at: number
+  preview?: boolean
 }
 
 export function shouldSkipSessionPrefetch(input: { message: boolean; info?: Meta; chunk: number; now?: number }) {
   if (input.message) {
     if (!input.info) return true
+    if (input.info.preview) {
+      return (input.now ?? Date.now()) - input.info.at < SESSION_PREFETCH_TTL
+    }
     if (input.info.complete) return true
     if (input.info.limit > input.chunk) return true
   } else {
@@ -69,12 +73,14 @@ export function setSessionPrefetch(input: {
   cursor?: string
   complete: boolean
   at?: number
+  preview?: boolean
 }) {
   cache.set(key(input.directory, input.sessionID), {
     limit: input.limit,
     cursor: input.cursor,
     complete: input.complete,
     at: input.at ?? Date.now(),
+    ...(input.preview ? { preview: true } : {}),
   })
 }
 
