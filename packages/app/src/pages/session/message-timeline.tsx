@@ -370,52 +370,6 @@ export function MessageTimeline(props: {
   let spokenSession = ""
   let spokenMessage = ""
 
-  const speak = (input: { messageID: string; text: string }) => {
-    spokenMessage = input.messageID
-    const conn = server.current?.http
-    const run = async () => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      }
-      if (conn?.password) {
-        headers.Authorization = `Basic ${btoa(`${conn.username ?? "opencode"}:${conn.password}`)}`
-      }
-
-      const res = await (platform.fetch ?? fetch)(new URL("/tts/edge", conn?.url ?? globalSDK.url).toString(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ text: input.text }),
-      })
-
-      if (!res.ok) throw new Error(`Edge TTS request failed (${res.status})`)
-      const blob = await res.blob()
-      clearAudio()
-      audioUrl = URL.createObjectURL(blob)
-      audio = new Audio(audioUrl)
-      await audio.play()
-    }
-
-    void run().catch(() => {
-      const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
-      const Ctor =
-        typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
-      if (!synth || !Ctor) {
-        showToast({
-          title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
-          description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
-        })
-        return
-      }
-
-      const utterance = new Ctor(input.text)
-      utterance.lang =
-        typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
-      utterance.rate = 1
-      synth.cancel()
-      synth.speak(utterance)
-    })
-  }
-
   createEffect(() => {
     if (settings.voice.autoSpeak()) return
     const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
@@ -433,7 +387,21 @@ export function MessageTimeline(props: {
     if (!settings.voice.autoSpeak()) return
     if (!latest?.id || latest.id === spokenMessage) return
 
-    speak({ messageID: latest.id, text: latest.text })
+    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+    const Ctor =
+      typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
+    if (!synth || !Ctor) {
+      spokenMessage = latest.id
+      return
+    }
+
+    spokenMessage = latest.id
+    const utterance = new Ctor(latest.text)
+    utterance.lang =
+      typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
+    utterance.rate = 1
+    synth.cancel()
+    synth.speak(utterance)
   })
 
   const shareSession = () => {

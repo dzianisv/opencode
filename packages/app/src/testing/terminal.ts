@@ -17,7 +17,6 @@ type TerminalProbeControl = {
 type VoiceProbeState = {
   starts?: number
   cancels?: number
-  requests?: number
   spoken?: string[]
 }
 

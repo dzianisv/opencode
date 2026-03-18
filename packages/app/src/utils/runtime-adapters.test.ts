@@ -64,26 +64,6 @@ describe("runtime adapters", () => {
     expect(getSpeechRecognitionCtor(undefined)).toBeUndefined()
   })
 
-  test("returns media devices when getUserMedia exists", () => {
-    const media = {
-      getUserMedia: async () => ({
-        getTracks: () => [],
-      }),
-    }
-    expect(getMediaDevices<typeof media>({ navigator: { mediaDevices: media } })).toBe(media)
-    expect(getMediaDevices({ navigator: { mediaDevices: {} } })).toBeUndefined()
-    expect(getMediaDevices(undefined)).toBeUndefined()
-  })
-
-  test("returns permissions when query exists", () => {
-    const perms = {
-      query: async () => ({ state: "prompt" }),
-    }
-    expect(getPermissions<typeof perms>({ navigator: { permissions: perms } })).toBe(perms)
-    expect(getPermissions({ navigator: { permissions: {} } })).toBeUndefined()
-    expect(getPermissions(undefined)).toBeUndefined()
-  })
-
   test("returns speech synthesis when required methods exist", () => {
     const synth = {
       cancel() {},
