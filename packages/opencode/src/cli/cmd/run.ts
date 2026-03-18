@@ -218,6 +218,10 @@ function normalizePath(input?: string) {
   return input
 }
 
+export async function latestRootSessionID(sdk: OpencodeClient, directory: string) {
+  return (await sdk.session.list({ directory })).data?.find((session) => !session.parentID)?.id
+}
+
 export const RunCommand = cmd({
   command: "run [message..]",
   describe: "run opencode with a message",
@@ -390,7 +394,7 @@ export const RunCommand = cmd({
     }
 
     async function session(sdk: OpencodeClient) {
-      const baseID = args.continue ? (await sdk.session.list()).data?.find((s) => !s.parentID)?.id : args.session
+      const baseID = args.continue ? await latestRootSessionID(sdk, process.cwd()) : args.session
 
       if (baseID && args.fork) {
         const forked = await sdk.session.fork({ sessionID: baseID })
