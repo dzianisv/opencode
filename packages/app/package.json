@@ -13,6 +13,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "install:local": "bun run --cwd ../opencode install:local",
     "serve": "vite preview",
     "test": "bun run test:unit",
     "test:unit": "bun test --preload ./happydom.ts ./src",
