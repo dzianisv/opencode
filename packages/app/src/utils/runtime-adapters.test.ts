@@ -3,6 +3,8 @@ import {
   disposeIfDisposable,
   getHoveredLinkText,
   getSpeechRecognitionCtor,
+  getSpeechSynthesis,
+  getSpeechSynthesisUtteranceCtor,
   hasSetOption,
   isDisposable,
   setOptionIfSupported,
@@ -58,5 +60,24 @@ describe("runtime adapters", () => {
   test("returns undefined when no valid speech constructor exists", () => {
     expect(getSpeechRecognitionCtor({ SpeechRecognition: "nope" })).toBeUndefined()
     expect(getSpeechRecognitionCtor(undefined)).toBeUndefined()
+  })
+
+  test("returns speech synthesis when required methods exist", () => {
+    const synth = {
+      cancel() {},
+      speak() {},
+    }
+    expect(getSpeechSynthesis<typeof synth>({ speechSynthesis: synth })).toBe(synth)
+    expect(getSpeechSynthesis({ speechSynthesis: { speak() {} } })).toBeUndefined()
+    expect(getSpeechSynthesis(undefined)).toBeUndefined()
+  })
+
+  test("returns speech synthesis utterance constructor when present", () => {
+    class Ctor {
+      constructor(readonly text = "") {}
+    }
+    expect(getSpeechSynthesisUtteranceCtor({ SpeechSynthesisUtterance: Ctor })).toBe(Ctor)
+    expect(getSpeechSynthesisUtteranceCtor({ SpeechSynthesisUtterance: "nope" })).toBeUndefined()
+    expect(getSpeechSynthesisUtteranceCtor(undefined)).toBeUndefined()
   })
 })

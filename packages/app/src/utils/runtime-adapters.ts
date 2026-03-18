@@ -37,3 +37,20 @@ export const getSpeechRecognitionCtor = <T>(value: unknown): (new () => T) | und
   if (typeof ctor !== "function") return
   return ctor as new () => T
 }
+
+export const getSpeechSynthesis = <T>(value: unknown): T | undefined => {
+  if (!isRecord(value)) return
+  const synth = value.speechSynthesis
+  if (!isRecord(synth)) return
+  if (typeof synth.speak !== "function") return
+  if (typeof synth.cancel !== "function") return
+  return synth as T
+}
+
+export const getSpeechSynthesisUtteranceCtor = <T>(
+  value: unknown,
+): (new (text?: string) => T) | undefined => {
+  if (!isRecord(value)) return
+  if (typeof value.SpeechSynthesisUtterance !== "function") return
+  return value.SpeechSynthesisUtterance as new (text?: string) => T
+}
