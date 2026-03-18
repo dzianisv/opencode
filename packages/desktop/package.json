@@ -9,6 +9,7 @@
     "predev": "bun ./scripts/predev.ts",
     "dev": "vite",
     "build": "bun run typecheck && vite build",
+    "install:local": "bun run --cwd ../opencode install:local",
     "preview": "vite preview",
     "tauri": "tauri"
   },
