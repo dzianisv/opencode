@@ -13,6 +13,12 @@ type TerminalProbeControl = {
   disconnect?: VoidFunction
 }
 
+type VoiceProbeState = {
+  starts?: number
+  cancels?: number
+  spoken?: string[]
+}
+
 export type E2EWindow = Window & {
   __opencode_e2e?: {
     model?: {
@@ -24,6 +30,7 @@ export type E2EWindow = Window & {
       terminals?: Record<string, TerminalProbeState>
       controls?: Record<string, TerminalProbeControl>
     }
+    voice?: VoiceProbeState
   }
 }
 

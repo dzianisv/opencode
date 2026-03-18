@@ -29,6 +29,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
+import { getSpeechSynthesis, getSpeechSynthesisUtteranceCtor } from "@/utils/runtime-adapters"
 
 type MessageComment = {
   path: string
@@ -41,6 +42,16 @@ type MessageComment = {
 
 const emptyMessages: MessageType[] = []
 const idle = { type: "idle" as const }
+
+type SpeechSynthLike = {
+  cancel(): void
+  speak(utterance: unknown): void
+}
+
+type SpeechUtteranceLike = {
+  lang: string
+  rate: number
+}
 
 type UserActions = {
   fork?: (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -247,6 +258,26 @@ export function MessageTimeline(props: {
       (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
     )
   })
+  const spoken = createMemo(() => {
+    const list = sessionMessages()
+    for (let i = list.length - 1; i >= 0; i--) {
+      const message = list[i]
+      if (message.role !== "assistant") continue
+      if (typeof message.time.completed !== "number") continue
+      const text = (sync.data.part[message.id] ?? [])
+        .flatMap((part) => {
+          if (part.type !== "text") return []
+          if (part.synthetic || part.ignored) return []
+          const text = part.text.trim()
+          if (!text) return []
+          return [text]
+        })
+        .join("\n")
+        .trim()
+      if (!text) continue
+      return { id: message.id, text }
+    }
+  })
   const working = createMemo(() => !!pending() || sessionStatus().type !== "idle")
   const tint = createMemo(() => messageAgentColor(sessionMessages(), sync.data.agent))
 
@@ -337,6 +368,42 @@ export function MessageTimeline(props: {
   let more: HTMLButtonElement | undefined
 
   const [req, setReq] = createStore({ share: false, unshare: false })
+  let spokenSession = ""
+  let spokenMessage = ""
+
+  createEffect(() => {
+    if (settings.voice.autoSpeak()) return
+    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+    synth?.cancel()
+  })
+
+  createEffect(() => {
+    const session = sessionID() ?? ""
+    const latest = spoken()
+    if (session !== spokenSession) {
+      spokenSession = session
+      spokenMessage = latest?.id ?? ""
+      return
+    }
+    if (!settings.voice.autoSpeak()) return
+    if (!latest?.id || latest.id === spokenMessage) return
+
+    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+    const Ctor =
+      typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
+    if (!synth || !Ctor) {
+      spokenMessage = latest.id
+      return
+    }
+
+    spokenMessage = latest.id
+    const utterance = new Ctor(latest.text)
+    utterance.lang =
+      typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
+    utterance.rate = 1
+    synth.cancel()
+    synth.speak(utterance)
+  })
 
   const shareSession = () => {
     const id = sessionID()
