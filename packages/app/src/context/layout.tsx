@@ -377,6 +377,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     const [colors, setColors] = createStore<Record<string, AvatarColorKey>>({})
     const colorRequested = new Map<string, AvatarColorKey>()
+    const auto = (directory: string) => {
+      const item = globalSync.data.project.find((x) => x.worktree === directory)
+      return item?.vcs === "git" && (item.sandboxes?.length ?? 0) > 0
+    }
 
     function pickAvailableColor(used: Set<string>): AvatarColorKey {
       const available = AVATAR_COLOR_KEYS.filter((c) => !used.has(c))
@@ -600,13 +604,19 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           setStore("sidebar", "width", width)
         },
         workspaces(directory: string) {
-          return () => store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
+          return () => {
+            const value = store.sidebar.workspaces[directory]
+            if (value !== undefined) return value
+            if (auto(directory)) return true
+            return store.sidebar.workspacesDefault ?? false
+          }
         },
         setWorkspaces(directory: string, value: boolean) {
           setStore("sidebar", "workspaces", directory, value)
         },
         toggleWorkspaces(directory: string) {
-          const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
+          const current =
+            store.sidebar.workspaces[directory] ?? (auto(directory) ? true : (store.sidebar.workspacesDefault ?? false))
           setStore("sidebar", "workspaces", directory, !current)
         },
       },
