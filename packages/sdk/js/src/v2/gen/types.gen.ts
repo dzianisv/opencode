@@ -1627,6 +1627,46 @@ export type BadRequestError = {
   success: false
 }
 
+export type ProjectSummary = {
+  id: string
+  name?: string
+  worktree: string
+}
+
+export type GlobalSession = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<FileDiff>
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  version: string
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+  project: ProjectSummary | null
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -1781,46 +1821,6 @@ export type WorktreeRemoveInput = {
 
 export type WorktreeResetInput = {
   directory: string
-}
-
-export type ProjectSummary = {
-  id: string
-  name?: string
-  worktree: string
-}
-
-export type GlobalSession = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  version: string
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-  project: ProjectSummary | null
 }
 
 export type McpResource = {
@@ -2160,40 +2160,27 @@ export type GlobalDisposeResponses = {
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
 
-export type GlobalUpgradeData = {
-  body?: {
-    target?: string
-  }
+export type GlobalSessionListData = {
+  body?: never
   path?: never
-  query?: never
-  url: "/global/upgrade"
+  query?: {
+    start?: number
+    cursor?: number
+    search?: string
+    limit?: number
+    roots?: boolean
+  }
+  url: "/global/session"
 }
 
-export type GlobalUpgradeErrors = {
+export type GlobalSessionListResponses = {
   /**
-   * Bad request
+   * List of sessions
    */
-  400: BadRequestError
+  200: Array<GlobalSession>
 }
 
-export type GlobalUpgradeError = GlobalUpgradeErrors[keyof GlobalUpgradeErrors]
-
-export type GlobalUpgradeResponses = {
-  /**
-   * Upgrade result
-   */
-  200:
-    | {
-        success: true
-        version: string
-      }
-    | {
-        success: false
-        error: string
-      }
-}
-
-export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
+export type GlobalSessionListResponse = GlobalSessionListResponses[keyof GlobalSessionListResponses]
 
 export type AuthRemoveData = {
   body?: never
@@ -3479,6 +3466,10 @@ export type SessionMessagesData = {
      * Maximum number of messages to return
      */
     limit?: number
+    /**
+     * Hint that the response is for sidebar preview
+     */
+    preview?: boolean
     before?: string
   }
   url: "/session/{sessionID}/message"
