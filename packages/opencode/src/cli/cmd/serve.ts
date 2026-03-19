@@ -5,8 +5,6 @@ import { Flag } from "../../flag/flag"
 import { Workspace } from "../../control-plane/workspace"
 import { Project } from "../../project/project"
 import { Installation } from "../../installation"
-import { Memory } from "../../diagnostic/memory"
-import { Session } from "../../session"
 import { MCP } from "../../mcp"
 import { Instance } from "../../project/instance"
 import { Log } from "../../util/log"
@@ -27,11 +25,6 @@ export const ServeCommand = cmd({
 
     const shutdown = async (signal: string) => {
       log.warn("received signal, shutting down", { signal })
-      Session.stopSweep()
-      await Memory.snapshot({ reason: `shutdown:${signal}` }).catch((e) => {
-        log.error("shutdown snapshot failed", { error: e })
-      })
-      Memory.stop()
       await Instance.disposeAll().catch((e: unknown) => {
         log.error("instance disposal failed", { error: e })
       })
