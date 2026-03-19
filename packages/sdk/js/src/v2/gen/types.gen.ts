@@ -2340,60 +2340,6 @@ export type GlobalDisposeResponses = {
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
 
-export type GlobalMemoryData = {
-  body?: never
-  path?: never
-  query?: {
-    children?: boolean
-  }
-  url: "/global/memory"
-}
-
-export type GlobalMemoryResponses = {
-  /**
-   * Memory diagnostics
-   */
-  200: {
-    time: string
-    pid: number
-    uptime_sec: number
-    rss_bytes: number
-    heap_total_bytes: number
-    heap_used_bytes: number
-    external_bytes: number
-    array_buffer_bytes: number
-    session: {
-      total: number
-      active: number
-    }
-    pty: {
-      active: number
-    }
-    instance: {
-      size: number
-      max: number
-      idle_ms: number
-      entries: Array<{
-        directory: string
-        refs: number
-        idle_ms: number
-      }>
-    }
-    tree?: {
-      pid: number
-      process_count: number
-      rss_bytes: number
-      top: Array<{
-        pid: number
-        rss_bytes: number
-        name: string
-      }>
-    }
-  }
-}
-
-export type GlobalMemoryResponse = GlobalMemoryResponses[keyof GlobalMemoryResponses]
-
 export type GlobalSessionListData = {
   body?: never
   path?: never
@@ -2415,33 +2361,6 @@ export type GlobalSessionListResponses = {
 }
 
 export type GlobalSessionListResponse = GlobalSessionListResponses[keyof GlobalSessionListResponses]
-
-export type TtsEdgeData = {
-  body?: {
-    text: string
-  }
-  path?: never
-  query?: never
-  url: "/tts/edge"
-}
-
-export type TtsEdgeErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type TtsEdgeError = TtsEdgeErrors[keyof TtsEdgeErrors]
-
-export type TtsEdgeResponses = {
-  /**
-   * MP3 audio
-   */
-  200: Blob | File
-}
-
-export type TtsEdgeResponse = TtsEdgeResponses[keyof TtsEdgeResponses]
 
 export type AuthRemoveData = {
   body?: never
