@@ -15,6 +15,32 @@ declare global {
 
 export namespace Installation {
   const log = Log.create({ service: "installation" })
+  export const PACKAGE = "@vibetechnologies/opencode"
+  export const LEGACY = "opencode-ai"
+
+  function find(output: string) {
+    if (output.includes(PACKAGE)) return PACKAGE
+    if (output.includes(LEGACY)) return LEGACY
+  }
+
+  export async function pkg(method: Method) {
+    if (method === "npm") return find(await text(["npm", "list", "-g", "--depth=0"])) ?? PACKAGE
+    if (method === "yarn") return find(await text(["yarn", "global", "list"])) ?? PACKAGE
+    if (method === "pnpm") return find(await text(["pnpm", "list", "-g", "--depth=0"])) ?? PACKAGE
+    if (method === "bun") return find(await text(["bun", "pm", "ls", "-g"])) ?? PACKAGE
+    return "opencode"
+  }
+
+  async function version(registry: string, channel: string) {
+    for (const pkg of [PACKAGE, LEGACY]) {
+      const res = await fetch(`${registry}/${encodeURIComponent(pkg)}/${channel}`)
+      if (!res.ok) continue
+      const data = (await res.json()) as { version: string }
+      if (channel === "latest" && data.version.startsWith("0.0.0-")) continue
+      return data.version
+    }
+    throw new Error(`Could not determine npm version for ${channel}`)
+  }
 
   async function text(cmd: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
     return Process.text(cmd, {
@@ -136,9 +162,11 @@ export namespace Installation {
 
     for (const check of checks) {
       const output = await check.command()
-      const installedName =
-        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
-      if (output.includes(installedName)) {
+      if (check.name === "brew" || check.name === "choco" || check.name === "scoop") {
+        if (output.includes("opencode")) return check.name
+        continue
+      }
+      if (find(output)) {
         return check.name
       }
     }
@@ -168,13 +196,13 @@ export namespace Installation {
         result = await upgradeCurl(target)
         break
       case "npm":
-        result = await Process.run(["npm", "install", "-g", `opencode-ai@${target}`], { nothrow: true })
+        result = await Process.run(["npm", "install", "-g", `${PACKAGE}@${target}`], { nothrow: true })
         break
       case "pnpm":
-        result = await Process.run(["pnpm", "install", "-g", `opencode-ai@${target}`], { nothrow: true })
+        result = await Process.run(["pnpm", "install", "-g", `${PACKAGE}@${target}`], { nothrow: true })
         break
       case "bun":
-        result = await Process.run(["bun", "install", "-g", `opencode-ai@${target}`], { nothrow: true })
+        result = await Process.run(["bun", "install", "-g", `${PACKAGE}@${target}`], { nothrow: true })
         break
       case "brew": {
         const formula = await getBrewFormula()
@@ -261,13 +289,7 @@ export namespace Installation {
         const reg = r || "https://registry.npmjs.org"
         return reg.endsWith("/") ? reg.slice(0, -1) : reg
       })
-      const channel = CHANNEL
-      return fetch(`${registry}/opencode-ai/${channel}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.version)
+      return version(registry, CHANNEL)
     }
 
     if (detectedMethod === "choco") {
