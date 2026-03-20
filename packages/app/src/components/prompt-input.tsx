@@ -39,7 +39,13 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
 import { showToast } from "@opencode-ai/ui/toast"
-import { getSpeechRecognitionCtor, getSpeechSynthesis, getSpeechSynthesisUtteranceCtor } from "@/utils/runtime-adapters"
+import {
+  getMediaDevices,
+  getPermissions,
+  getSpeechRecognitionCtor,
+  getSpeechSynthesis,
+  getSpeechSynthesisUtteranceCtor,
+} from "@/utils/runtime-adapters"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
 import { ACCEPTED_FILE_TYPES } from "./prompt-input/files"
@@ -135,6 +141,28 @@ type SpeechRecognitionLike = {
   start(): void
   stop(): void
   abort(): void
+}
+
+type MediaTrackLike = {
+  stop?: () => void
+}
+
+type MediaStreamLike = {
+  getTracks(): ArrayLike<MediaTrackLike>
+}
+
+type MediaDevicesLike = {
+  getUserMedia(constraints: { audio: boolean }): Promise<MediaStreamLike>
+}
+
+type PermissionStateLike = "granted" | "denied" | "prompt"
+
+type PermissionStatusLike = {
+  state: PermissionStateLike
+}
+
+type PermissionsLike = {
+  query(desc: { name: "microphone" }): Promise<PermissionStatusLike>
 }
 
 const transcriptInsert = (input: { transcript: string; before: string; after: string }) => {
@@ -1079,15 +1107,70 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
-  const toggleVoice = () => {
+  const readMicError = (value: unknown) => {
+    const name =
+      value instanceof DOMException
+        ? value.name
+        : typeof value === "object" && value !== null && "name" in value && typeof value.name === "string"
+          ? value.name
+          : undefined
+
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      showToast({
+        title: language.t("prompt.toast.voiceInputMissingDevice.title"),
+        description: language.t("prompt.toast.voiceInputMissingDevice.description"),
+      })
+      return
+    }
+
+    if (name === "TypeError" && typeof window !== "undefined" && !window.isSecureContext) {
+      showToast({
+        title: language.t("prompt.toast.voiceInputInsecure.title"),
+        description: language.t("prompt.toast.voiceInputInsecure.description"),
+      })
+      return
+    }
+
+    if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+      showToast({
+        title: language.t("prompt.toast.voiceInputDenied.title"),
+        description: language.t("prompt.toast.voiceInputDenied.description"),
+      })
+      return
+    }
+
+    showToast({
+      title: language.t("prompt.toast.voiceInputFailed.title"),
+      description: value instanceof Error ? value.message : language.t("prompt.toast.voiceInputFailed.description"),
+    })
+  }
+
+  const requestMic = async () => {
+    const access = await platform.requestMicrophoneAccess?.()
+    if (access === false) throw { name: "NotAllowedError" }
+    const perms = typeof window === "undefined" ? undefined : getPermissions<PermissionsLike>(window)
+    const state = await perms
+      ?.query({ name: "microphone" })
+      .then((x) => x.state)
+      .catch(() => undefined)
+    if (state === "denied") throw { name: "NotAllowedError" }
+    const media = typeof window === "undefined" ? undefined : getMediaDevices<MediaDevicesLike>(window)
+    if (!media) return true
+    const stream = await media.getUserMedia({ audio: true })
+    for (const track of Array.from(stream.getTracks())) {
+      track.stop?.()
+    }
+    return true
+  }
+
+  const toggleVoice = async () => {
     if (store.mode !== "normal") return
     if (store.voice === "starting" || store.voice === "listening") {
       stopVoice()
       return
     }
 
-    const Ctor =
-      typeof window === "undefined" ? undefined : getSpeechRecognitionCtor<SpeechRecognitionLike>(window)
+    const Ctor = typeof window === "undefined" ? undefined : getSpeechRecognitionCtor<SpeechRecognitionLike>(window)
     if (!Ctor) {
       showToast({
         title: language.t("prompt.toast.voiceInputUnavailable.title"),
@@ -1097,6 +1180,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     voiceStop = false
+    setStore("voice", "starting")
+
+    const granted = await requestMic().catch((err) => {
+      readMicError(err)
+      return false
+    })
+
+    if (!granted || voiceStop) {
+      voiceStop = false
+      setStore("voice", "idle")
+      return
+    }
+
     const current = new Ctor()
     rec = current
     current.continuous = false
@@ -1125,7 +1221,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       requestAnimationFrame(() => editorRef?.focus())
     }
 
-    setStore("voice", "starting")
     try {
       current.start()
     } catch (err) {
@@ -1636,7 +1731,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <Icon
                       name="microphone"
                       size="small"
-                      classList={{ "text-icon-success-base": store.voice === "starting" || store.voice === "listening" }}
+                      classList={{
+                        "text-icon-success-base": store.voice === "starting" || store.voice === "listening",
+                      }}
                     />
                   </Button>
                 </Tooltip>
@@ -1659,7 +1756,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     aria-label={speakerLabel()}
                     aria-pressed={settings.voice.autoSpeak()}
                   >
-                    <Icon name="speaker" size="small" classList={{ "text-icon-success-base": settings.voice.autoSpeak() }} />
+                    <Icon
+                      name="speaker"
+                      size="small"
+                      classList={{ "text-icon-success-base": settings.voice.autoSpeak() }}
+                    />
                   </Button>
                 </Tooltip>
               </Show>
