@@ -119,10 +119,7 @@ const defaultSettings: Settings = {
   models: {
     autoReview: false,
     defaultModel: undefined,
-    reviewModel: {
-      providerID: "github-copilot",
-      modelID: "gpt-5.3-codex",
-    },
+    reviewModel: undefined,
   },
   notifications: {
     agent: true,
