@@ -1515,7 +1515,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"], [data-action="prompt-voice"], [data-action="prompt-speaker"]',
+                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"], [data-action="prompt-auto-review"], [data-action="prompt-voice"], [data-action="prompt-speaker"]',
               )
             ) {
               return

@@ -5,9 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Select } from "@opencode-ai/ui/select"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { showToast } from "@opencode-ai/ui/toast"
 import { type Component, For, Show, createMemo } from "solid-js"
-import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import { useSettings } from "@/context/settings"
@@ -39,7 +37,6 @@ export const SettingsModels: Component = () => {
   const language = useLanguage()
   const models = useModels()
   const settings = useSettings()
-  const sync = useGlobalSync()
 
   const options = createMemo(() =>
     models
@@ -63,34 +60,11 @@ export const SettingsModels: Component = () => {
   }
 
   const currentDefault = createMemo(() => find(settings.models.defaultModel()))
-  const configured = createMemo(() => {
-    const model = sync.data.config.auto_review?.model
-    if (!model) return
-    const cut = model.indexOf("/")
-    if (cut <= 0 || cut >= model.length - 1) return
-    return {
-      providerID: model.slice(0, cut),
-      modelID: model.slice(cut + 1),
-    }
-  })
-  const currentReview = createMemo(() => find(configured() ?? settings.models.reviewModel()))
+  const currentReview = createMemo(() => find(settings.models.reviewModel()))
 
   const pick = (model: { providerID: string; modelID: string } | undefined) => {
     if (!model) return
     return { providerID: model.providerID, modelID: model.modelID }
-  }
-
-  const review = (model: { providerID: string; modelID: string } | undefined) => {
-    settings.models.setReviewModel(model)
-    const before = sync.data.config.auto_review
-    const value = model ? `${model.providerID}/${model.modelID}` : undefined
-    const next = { ...(before ?? {}), model: value }
-    sync.set("config", "auto_review", next)
-    void sync.updateConfig({ auto_review: next }).catch((err: unknown) => {
-      sync.set("config", "auto_review", before)
-      const message = err instanceof Error ? err.message : String(err)
-      showToast({ title: language.t("common.requestFailed"), description: message })
-    })
   }
 
   const list = useFilteredList<ModelItem>({
@@ -179,7 +153,7 @@ export const SettingsModels: Component = () => {
                   current={currentReview()}
                   value={(item) => `${item.providerID}/${item.modelID}`}
                   label={(item) => `${item.provider} / ${item.name}`}
-                  onSelect={(item) => review(pick(item))}
+                  onSelect={(item) => settings.models.setReviewModel(pick(item))}
                   variant="secondary"
                   size="small"
                   triggerVariant="settings"

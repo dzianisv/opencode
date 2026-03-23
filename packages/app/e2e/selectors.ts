@@ -31,6 +31,9 @@ export const settingsSoundsErrorsSelector = '[data-action="settings-sounds-error
 export const settingsUpdatesStartupSelector = '[data-action="settings-updates-startup"]'
 export const settingsReleaseNotesSelector = '[data-action="settings-release-notes"]'
 export const settingsVoiceAutoSpeakSelector = '[data-action="settings-voice-autospeak"]'
+export const settingsModelDefaultSelector = '[data-action="settings-model-default"]'
+export const settingsModelReviewSelector = '[data-action="settings-model-review"]'
+export const settingsModelAutoReviewSelector = '[data-action="settings-model-auto-review"]'
 
 export const sidebarNavSelector = '[data-component="sidebar-nav-desktop"]'
 
