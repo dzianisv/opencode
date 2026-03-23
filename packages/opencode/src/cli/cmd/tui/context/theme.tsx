@@ -329,29 +329,33 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     })
 
     function init() {
-      Promise.allSettled([
-        resolveSystemTheme(store.mode),
-        getCustomThemes()
-          .then((custom) => {
-            customThemes = custom
-            syncThemes()
-          })
-          .catch(() => {
-            setStore("active", "opencode")
-          }),
-      ]).finally(() => {
-        setStore("ready", true)
-      })
+      resolveSystemTheme(store.mode)
+      getCustomThemes()
+        .then((custom) => {
+          setStore(
+            produce((draft) => {
+              Object.assign(draft.themes, custom)
+            }),
+          )
+        })
+        .catch(() => {
+          setStore("active", "opencode")
+        })
+        .finally(() => {
+          if (store.active !== "system") {
+            setStore("ready", true)
+          }
+        })
     }
 
     onMount(init)
 
     function resolveSystemTheme(mode: "dark" | "light" = store.mode) {
-      return renderer
+      renderer
         .getPalette({
           size: 16,
         })
-        .then((colors: TerminalColors) => {
+        .then((colors) => {
           if (!colors.palette[0]) {
             systemTheme = undefined
             syncThemes()
@@ -360,54 +364,31 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
             }
             return
           }
-          systemTheme = generateSystem(colors, mode)
-          syncThemes()
-        })
-        .catch(() => {
-          systemTheme = undefined
-          syncThemes()
-          if (store.active === "system") {
-            setStore("active", "opencode")
-          }
+          setStore(
+            produce((draft) => {
+              draft.themes.system = generateSystem(colors, mode)
+              if (store.active === "system") {
+                draft.ready = true
+              }
+            }),
+          )
         })
     }
 
-    function apply(mode: "dark" | "light") {
-      kv.set("theme_mode", mode)
+    function update(mode: "dark" | "light") {
       if (store.mode === mode) return
       setStore("mode", mode)
+      kv.set("theme_mode", mode)
       renderer.clearPaletteCache()
       resolveSystemTheme(mode)
     }
 
-    function pin(mode: "dark" | "light" = store.mode) {
-      setStore("lock", mode)
-      kv.set("theme_mode_lock", mode)
-      apply(mode)
-    }
-
-    function free() {
-      setStore("lock", undefined)
-      kv.set("theme_mode_lock", undefined)
-      const mode = renderer.themeMode
-      if (mode) apply(mode)
-    }
-
     const handle = (mode: "dark" | "light") => {
-      if (store.lock) return
-      apply(mode)
+      update(mode)
     }
     renderer.on(CliRenderEvents.THEME_MODE, handle)
-
-    const refresh = () => {
-      renderer.clearPaletteCache()
-      init()
-    }
-    process.on("SIGUSR2", refresh)
-
     onCleanup(() => {
       renderer.off(CliRenderEvents.THEME_MODE, handle)
-      process.off("SIGUSR2", refresh)
     })
 
     const values = createMemo(() => {
@@ -421,6 +402,10 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       }
 
       return resolveTheme(store.themes.opencode, store.mode)
+    })
+
+    createEffect(() => {
+      renderer.setBackgroundColor(values().background)
     })
 
     createEffect(() => {
@@ -461,7 +446,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         free()
       },
       setMode(mode: "dark" | "light") {
-        pin(mode)
+        update(mode)
       },
       set(theme: string) {
         if (!hasTheme(theme)) return false
