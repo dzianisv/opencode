@@ -9,6 +9,7 @@ import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
+import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { DialogSelectFile } from "@/components/dialog-select-file"
@@ -45,6 +46,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const permission = usePermission()
   const prompt = usePrompt()
   const sdk = useSDK()
+  const settings = useSettings()
   const sync = useSync()
   const terminal = useTerminal()
   const layout = useLayout()
@@ -405,6 +407,25 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
             description: active
               ? language.t("toast.permissions.autoaccept.on.description")
               : language.t("toast.permissions.autoaccept.off.description"),
+          })
+        },
+      }),
+      modelCommand({
+        id: "models.autoreview",
+        title: settings.models.autoReview()
+          ? language.t("command.models.autoreview.disable")
+          : language.t("command.models.autoreview.enable"),
+        disabled: false,
+        onSelect: () => {
+          const next = !settings.models.autoReview()
+          settings.models.setAutoReview(next)
+          showToast({
+            title: next
+              ? language.t("toast.models.autoreview.on.title")
+              : language.t("toast.models.autoreview.off.title"),
+            description: next
+              ? language.t("toast.models.autoreview.on.description")
+              : language.t("toast.models.autoreview.off.description"),
           })
         },
       }),

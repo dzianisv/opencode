@@ -1072,6 +1072,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     permission.toggleAutoAccept(params.id, sdk.directory)
   }
+  const reviewing = createMemo(() => settings.models.autoReview())
+  const reviewLabel = createMemo(() =>
+    language.t(reviewing() ? "command.models.autoreview.disable" : "command.models.autoreview.enable"),
+  )
+  const toggleReview = () => settings.models.setAutoReview(!settings.models.autoReview())
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,
@@ -1317,7 +1322,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"]',
+                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"], [data-action="prompt-auto-review"], [data-action="prompt-voice"], [data-action="prompt-speaker"]',
               )
             ) {
               return
@@ -1585,6 +1590,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <Icon name="shield" size="small" classList={{ "text-icon-success-base": accepting() }} />
                   </Button>
                 </TooltipKeybind>
+                <Tooltip placement="top" value={reviewLabel()}>
+                  <Button
+                    data-action="prompt-auto-review"
+                    variant="ghost"
+                    onClick={toggleReview}
+                    classList={{
+                      "h-7 w-7 p-0 shrink-0 flex items-center justify-center": true,
+                      "text-text-base": !reviewing(),
+                      "hover:bg-surface-success-base": reviewing(),
+                    }}
+                    style={control()}
+                    aria-label={reviewLabel()}
+                    aria-pressed={reviewing()}
+                  >
+                    <Icon name="review" size="small" classList={{ "text-icon-success-base": reviewing() }} />
+                  </Button>
+                </Tooltip>
               </div>
             </div>
           </div>

@@ -16,6 +16,7 @@ export const modelVariantCycleSelector = '[data-action="model-variant-cycle"]'
 export const promptAgentSelector = '[data-component="prompt-agent-control"]'
 export const promptModelSelector = '[data-component="prompt-model-control"]'
 export const promptVariantSelector = '[data-component="prompt-variant-control"]'
+export const promptAutoReviewSelector = '[data-action="prompt-auto-review"]'
 export const settingsLanguageSelectSelector = '[data-action="settings-language"]'
 export const settingsColorSchemeSelector = '[data-action="settings-color-scheme"]'
 export const settingsThemeSelector = '[data-action="settings-theme"]'
@@ -28,6 +29,10 @@ export const settingsSoundsPermissionsSelector = '[data-action="settings-sounds-
 export const settingsSoundsErrorsSelector = '[data-action="settings-sounds-errors"]'
 export const settingsUpdatesStartupSelector = '[data-action="settings-updates-startup"]'
 export const settingsReleaseNotesSelector = '[data-action="settings-release-notes"]'
+export const settingsVoiceAutoSpeakSelector = '[data-action="settings-voice-autospeak"]'
+export const settingsModelDefaultSelector = '[data-action="settings-model-default"]'
+export const settingsModelReviewSelector = '[data-action="settings-model-review"]'
+export const settingsModelAutoReviewSelector = '[data-action="settings-model-auto-review"]'
 
 export const sidebarNavSelector = '[data-component="sidebar-nav-desktop"]'
 

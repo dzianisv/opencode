@@ -3,6 +3,7 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
+- App e2e note: `bun test:e2e` expects a backend at `127.0.0.1:4096`; use `bun test:e2e:local -- -- <spec>` when running tests in isolation.
 
 ## Style Guide
 

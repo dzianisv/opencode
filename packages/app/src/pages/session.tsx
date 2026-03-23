@@ -1,4 +1,4 @@
-import type { Project, UserMessage } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Project, UserMessage } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
 import {
@@ -56,7 +56,8 @@ import { same } from "@/utils/same"
 import { formatServerError } from "@/utils/server-errors"
 
 const emptyUserMessages: UserMessage[] = []
-const emptyFollowups: (FollowupDraft & { id: string })[] = []
+type QueuedFollowup = FollowupDraft & { id: string; autoReviewSource?: string }
+const emptyFollowups: QueuedFollowup[] = []
 
 type SessionHistoryWindowInput = {
   sessionID: () => string | undefined
@@ -503,9 +504,11 @@ export default function Page() {
   })
 
   const [followup, setFollowup] = createStore({
-    items: {} as Record<string, (FollowupDraft & { id: string })[] | undefined>,
+    items: {} as Record<string, QueuedFollowup[] | undefined>,
+    sending: {} as Record<string, string | undefined>,
     failed: {} as Record<string, string | undefined>,
     paused: {} as Record<string, boolean | undefined>,
+    autoReview: {} as Record<string, string | undefined>,
     edit: {} as Record<
       string,
       { id: string; prompt: FollowupDraft["prompt"]; context: FollowupDraft["context"] } | undefined
@@ -1442,6 +1445,94 @@ export default function Page() {
     setFollowup("failed", draft.sessionID, undefined)
     setFollowup("paused", draft.sessionID, undefined)
   }
+
+  const autoReviewPrompt = "Codex, review and reflect"
+
+  const isAutoReviewPrompt = (id: string) => line(id).toLowerCase().startsWith(autoReviewPrompt.toLowerCase())
+
+  const doneAssistant = createMemo(() => {
+    const id = params.id
+    if (!id) return
+    const list = sync.data.message[id] ?? []
+    return list.findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed === "number",
+    )
+  })
+
+  const resolveReview = () => {
+    const picked = settings.models.reviewModel()
+    if (picked) {
+      const item = local.model
+        .list()
+        .find((item) => item.provider.id === picked.providerID && item.id === picked.modelID)
+      if (item) {
+        return {
+          model: picked,
+          variant: item.variants && Object.hasOwn(item.variants, "xhigh") ? "xhigh" : undefined,
+        }
+      }
+    }
+
+    const current = local.model.current()
+    if (current) {
+      return {
+        model: {
+          providerID: current.provider.id,
+          modelID: current.id,
+        },
+        variant: current.variants && Object.hasOwn(current.variants, "xhigh") ? "xhigh" : undefined,
+      }
+    }
+  }
+
+  createEffect(() => {
+    const sessionID = params.id
+    if (!sessionID) return
+    if (!settings.models.autoReview()) return
+    if (composer.blocked()) return
+
+    const assistant = doneAssistant()
+    if (!assistant) return
+    if (followup.autoReview[sessionID] === assistant.id) return
+
+    const user = visibleUserMessages().at(-1)
+    if (!user) return
+    if (isAutoReviewPrompt(user.id)) {
+      setFollowup("autoReview", sessionID, assistant.id)
+      return
+    }
+
+    const review = resolveReview()
+    const agent = assistant.agent ?? local.agent.current()?.name
+    if (!review || !agent) return
+
+    const previous = `${assistant.providerID}/${assistant.modelID}`
+    const text = `${autoReviewPrompt} ${previous} work.`
+
+    const queued = followup.items[sessionID] ?? []
+    if (queued.some((item) => item.autoReviewSource === assistant.id)) {
+      setFollowup("autoReview", sessionID, assistant.id)
+      return
+    }
+
+    setFollowup("items", sessionID, (items) => [
+      ...(items ?? []),
+      {
+        id: Identifier.ascending("message"),
+        autoReviewSource: assistant.id,
+        sessionID,
+        sessionDirectory: sdk.directory,
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+        context: [],
+        agent,
+        model: review.model,
+        variant: review.variant,
+      },
+    ])
+    setFollowup("autoReview", sessionID, assistant.id)
+    setFollowup("failed", sessionID, undefined)
+    setFollowup("paused", sessionID, undefined)
+  })
 
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
 
