@@ -231,6 +231,10 @@ const createPlatform = (): Platform => {
         type: "image/png",
       })
     },
+
+    requestMicrophoneAccess: async () => {
+      return window.api.requestMicrophoneAccess().catch(() => false)
+    },
   }
 }
 
