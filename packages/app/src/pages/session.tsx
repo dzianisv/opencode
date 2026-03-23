@@ -505,7 +505,6 @@ export default function Page() {
 
   const [followup, setFollowup] = createStore({
     items: {} as Record<string, QueuedFollowup[] | undefined>,
-    sending: {} as Record<string, string | undefined>,
     failed: {} as Record<string, string | undefined>,
     paused: {} as Record<string, boolean | undefined>,
     autoReview: {} as Record<string, string | undefined>,
