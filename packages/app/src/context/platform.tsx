@@ -87,6 +87,9 @@ export type Platform = {
 
   /** Read image from clipboard (desktop only) */
   readClipboardImage?(): Promise<File | null>
+
+  /** Request microphone access (desktop only) */
+  requestMicrophoneAccess?(): Promise<boolean>
 }
 
 export type DisplayBackend = "auto" | "wayland"
