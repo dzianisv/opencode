@@ -965,16 +965,17 @@ export default function Layout(props: ParentProps) {
   }
 
   async function archiveSession(session: Session) {
-    const [store, setStore] = globalSync.child(session.directory)
+    const [store, setStore] = globalSync.child(session.directory, { bootstrap: false })
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = sessions[index + 1] ?? sessions[index - 1]
 
-    await globalSDK.client.session.update({
+    const result = await globalSDK.client.session.update({
       directory: session.directory,
       sessionID: session.id,
       time: { archived: Date.now() },
     })
+    if (result.error) return
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
