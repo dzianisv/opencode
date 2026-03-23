@@ -9,6 +9,7 @@ import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
+import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { showToast } from "@opencode-ai/ui/toast"
@@ -41,6 +42,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const permission = usePermission()
   const prompt = usePrompt()
   const sdk = useSDK()
+  const settings = useSettings()
   const sync = useSync()
   const terminal = useTerminal()
   const layout = useLayout()
@@ -373,6 +375,170 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
         disabled: !params.id || !info()?.share?.url,
         onSelect: unshare,
       }),
+      modelCommand({
+        id: "model.choose",
+        title: language.t("command.model.choose"),
+        description: language.t("command.model.choose.description"),
+        keybind: "mod+'",
+        slash: "model",
+        onSelect: () => dialog.show(() => <DialogSelectModel model={local.model} />),
+      }),
+      mcpCommand({
+        id: "mcp.toggle",
+        title: language.t("command.mcp.toggle"),
+        description: language.t("command.mcp.toggle.description"),
+        keybind: "mod+;",
+        slash: "mcp",
+        onSelect: () => dialog.show(() => <DialogSelectMcp />),
+      }),
+      agentCommand({
+        id: "agent.cycle",
+        title: language.t("command.agent.cycle"),
+        description: language.t("command.agent.cycle.description"),
+        keybind: "mod+.",
+        slash: "agent",
+        onSelect: () => local.agent.move(1),
+      }),
+      agentCommand({
+        id: "agent.cycle.reverse",
+        title: language.t("command.agent.cycle.reverse"),
+        description: language.t("command.agent.cycle.reverse.description"),
+        keybind: "shift+mod+.",
+        onSelect: () => local.agent.move(-1),
+      }),
+      modelCommand({
+        id: "model.variant.cycle",
+        title: language.t("command.model.variant.cycle"),
+        description: language.t("command.model.variant.cycle.description"),
+        keybind: "shift+mod+d",
+        onSelect: () => local.model.variant.cycle(),
+      }),
+      permissionsCommand({
+        id: "permissions.autoaccept",
+        title: isAutoAcceptActive()
+          ? language.t("command.permissions.autoaccept.disable")
+          : language.t("command.permissions.autoaccept.enable"),
+        keybind: "mod+shift+a",
+        disabled: false,
+        onSelect: () => {
+          const sessionID = params.id
+          if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
+          else permission.toggleAutoAcceptDirectory(sdk.directory)
+
+          const active = sessionID
+            ? permission.isAutoAccepting(sessionID, sdk.directory)
+            : permission.isAutoAcceptingDirectory(sdk.directory)
+          showToast({
+            title: active
+              ? language.t("toast.permissions.autoaccept.on.title")
+              : language.t("toast.permissions.autoaccept.off.title"),
+            description: active
+              ? language.t("toast.permissions.autoaccept.on.description")
+              : language.t("toast.permissions.autoaccept.off.description"),
+          })
+        },
+      }),
+      modelCommand({
+        id: "models.autoreview",
+        title: settings.models.autoReview()
+          ? language.t("command.models.autoreview.disable")
+          : language.t("command.models.autoreview.enable"),
+        disabled: false,
+        onSelect: () => {
+          const next = !settings.models.autoReview()
+          settings.models.setAutoReview(next)
+          showToast({
+            title: next
+              ? language.t("toast.models.autoreview.on.title")
+              : language.t("toast.models.autoreview.off.title"),
+            description: next
+              ? language.t("toast.models.autoreview.on.description")
+              : language.t("toast.models.autoreview.off.description"),
+          })
+        },
+      }),
+      sessionCommand({
+        id: "session.undo",
+        title: language.t("command.session.undo"),
+        description: language.t("command.session.undo.description"),
+        slash: "undo",
+        disabled: !params.id || visibleUserMessages().length === 0,
+        onSelect: async () => {
+          const sessionID = params.id
+          if (!sessionID) return
+          if (status().type !== "idle") {
+            await sdk.client.session.abort({ sessionID }).catch(() => {})
+          }
+          const revert = info()?.revert?.messageID
+          const message = findLast(userMessages(), (x) => !revert || x.id < revert)
+          if (!message) return
+          await sdk.client.session.revert({ sessionID, messageID: message.id })
+          const parts = sync.data.part[message.id]
+          if (parts) {
+            const restored = extractPromptFromParts(parts, { directory: sdk.directory })
+            prompt.set(restored)
+          }
+          const priorMessage = findLast(userMessages(), (x) => x.id < message.id)
+          setActiveMessage(priorMessage)
+        },
+      }),
+      sessionCommand({
+        id: "session.redo",
+        title: language.t("command.session.redo"),
+        description: language.t("command.session.redo.description"),
+        slash: "redo",
+        disabled: !params.id || !info()?.revert?.messageID,
+        onSelect: async () => {
+          const sessionID = params.id
+          if (!sessionID) return
+          const revertMessageID = info()?.revert?.messageID
+          if (!revertMessageID) return
+          const nextMessage = userMessages().find((x) => x.id > revertMessageID)
+          if (!nextMessage) {
+            await sdk.client.session.unrevert({ sessionID })
+            prompt.reset()
+            const lastMsg = findLast(userMessages(), (x) => x.id >= revertMessageID)
+            setActiveMessage(lastMsg)
+            return
+          }
+          await sdk.client.session.revert({ sessionID, messageID: nextMessage.id })
+          const priorMsg = findLast(userMessages(), (x) => x.id < nextMessage.id)
+          setActiveMessage(priorMsg)
+        },
+      }),
+      sessionCommand({
+        id: "session.compact",
+        title: language.t("command.session.compact"),
+        description: language.t("command.session.compact.description"),
+        slash: "compact",
+        disabled: !params.id || visibleUserMessages().length === 0,
+        onSelect: async () => {
+          const sessionID = params.id
+          if (!sessionID) return
+          const model = local.model.current()
+          if (!model) {
+            showToast({
+              title: language.t("toast.model.none.title"),
+              description: language.t("toast.model.none.description"),
+            })
+            return
+          }
+          await sdk.client.session.summarize({
+            sessionID,
+            modelID: model.id,
+            providerID: model.provider.id,
+          })
+        },
+      }),
+      sessionCommand({
+        id: "session.fork",
+        title: language.t("command.session.fork"),
+        description: language.t("command.session.fork.description"),
+        slash: "fork",
+        disabled: !params.id || visibleUserMessages().length === 0,
+        onSelect: () => dialog.show(() => <DialogFork />),
+      }),
+      ...share,
     ]
   }
 
