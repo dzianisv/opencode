@@ -3,10 +3,12 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Switch } from "@opencode-ai/ui/switch"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Select } from "@opencode-ai/ui/select"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { type Component, For, Show } from "solid-js"
+import { type Component, For, Show, createMemo } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
+import { useSettings } from "@/context/settings"
 import { popularProviders } from "@/hooks/use-providers"
 import { SettingsList } from "./settings-list"
 
@@ -34,6 +36,36 @@ const ListEmptyState: Component<{ message: string; filter: string }> = (props) =
 export const SettingsModels: Component = () => {
   const language = useLanguage()
   const models = useModels()
+  const settings = useSettings()
+
+  const options = createMemo(() =>
+    models
+      .list()
+      .map((item) => ({
+        providerID: item.provider.id,
+        modelID: item.id,
+        name: item.name,
+        provider: item.provider.name,
+      }))
+      .sort((a, b) => {
+        const x = a.provider.localeCompare(b.provider)
+        if (x !== 0) return x
+        return a.name.localeCompare(b.name)
+      }),
+  )
+
+  const find = (model: { providerID: string; modelID: string } | undefined) => {
+    if (!model) return
+    return options().find((item) => item.providerID === model.providerID && item.modelID === model.modelID)
+  }
+
+  const currentDefault = createMemo(() => find(settings.models.defaultModel()))
+  const currentReview = createMemo(() => find(settings.models.reviewModel()))
+
+  const pick = (model: { providerID: string; modelID: string } | undefined) => {
+    if (!model) return
+    return { providerID: model.providerID, modelID: model.modelID }
+  }
 
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
@@ -84,6 +116,68 @@ export const SettingsModels: Component = () => {
       </div>
 
       <div class="flex flex-col gap-8 max-w-[720px]">
+        <div class="flex flex-col gap-1">
+          <h3 class="text-14-medium text-text-strong px-1 pb-2">{language.t("settings.models.section.session")}</h3>
+          <SettingsList>
+            <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base">
+              <div class="min-w-0">
+                <div class="text-14-medium text-text-strong">{language.t("settings.models.row.default.title")}</div>
+                <div class="text-13-regular text-text-weak mt-0.5">
+                  {language.t("settings.models.row.default.description")}
+                </div>
+              </div>
+              <div class="flex-shrink-0 min-w-[240px]" data-action="settings-model-default">
+                <Select
+                  options={options()}
+                  current={currentDefault()}
+                  value={(item) => `${item.providerID}/${item.modelID}`}
+                  label={(item) => `${item.provider} / ${item.name}`}
+                  onSelect={(item) => settings.models.setDefaultModel(pick(item))}
+                  variant="secondary"
+                  size="small"
+                  triggerVariant="settings"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base">
+              <div class="min-w-0">
+                <div class="text-14-medium text-text-strong">{language.t("settings.models.row.review.title")}</div>
+                <div class="text-13-regular text-text-weak mt-0.5">
+                  {language.t("settings.models.row.review.description")}
+                </div>
+              </div>
+              <div class="flex-shrink-0 min-w-[240px]" data-action="settings-model-review">
+                <Select
+                  options={options()}
+                  current={currentReview()}
+                  value={(item) => `${item.providerID}/${item.modelID}`}
+                  label={(item) => `${item.provider} / ${item.name}`}
+                  onSelect={(item) => settings.models.setReviewModel(pick(item))}
+                  variant="secondary"
+                  size="small"
+                  triggerVariant="settings"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-4 py-3">
+              <div class="min-w-0">
+                <div class="text-14-medium text-text-strong">{language.t("settings.models.row.autoReview.title")}</div>
+                <div class="text-13-regular text-text-weak mt-0.5">
+                  {language.t("settings.models.row.autoReview.description")}
+                </div>
+              </div>
+              <div class="flex-shrink-0" data-action="settings-model-auto-review">
+                <Switch
+                  checked={settings.models.autoReview()}
+                  onChange={(checked) => settings.models.setAutoReview(checked)}
+                />
+              </div>
+            </div>
+          </SettingsList>
+        </div>
+
         <Show
           when={!list.grouped.loading}
           fallback={

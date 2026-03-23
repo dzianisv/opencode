@@ -39,6 +39,17 @@ export interface Settings {
   permissions: {
     autoApprove: boolean
   }
+  models: {
+    autoReview: boolean
+    defaultModel?: {
+      providerID: string
+      modelID: string
+    }
+    reviewModel?: {
+      providerID: string
+      modelID: string
+    }
+  }
   notifications: NotificationSettings
   sounds: SoundSettings
 }
@@ -104,6 +115,14 @@ const defaultSettings: Settings = {
   keybinds: {},
   permissions: {
     autoApprove: false,
+  },
+  models: {
+    autoReview: false,
+    defaultModel: undefined,
+    reviewModel: {
+      providerID: "github-copilot",
+      modelID: "gpt-5.3-codex",
+    },
   },
   notifications: {
     agent: true,
@@ -217,6 +236,34 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         autoApprove: withFallback(() => store.permissions?.autoApprove, defaultSettings.permissions.autoApprove),
         setAutoApprove(value: boolean) {
           setStore("permissions", "autoApprove", value)
+        },
+      },
+      models: {
+        autoReview: withFallback(() => store.models?.autoReview, defaultSettings.models.autoReview),
+        setAutoReview(value: boolean) {
+          setStore("models", "autoReview", value)
+        },
+        defaultModel: createMemo(() => {
+          const model = store.models?.defaultModel
+          if (!model?.providerID || !model?.modelID) return undefined
+          return {
+            providerID: model.providerID,
+            modelID: model.modelID,
+          }
+        }),
+        setDefaultModel(value: { providerID: string; modelID: string } | undefined) {
+          setStore("models", "defaultModel", value)
+        },
+        reviewModel: createMemo(() => {
+          const model = store.models?.reviewModel
+          if (!model?.providerID || !model?.modelID) return undefined
+          return {
+            providerID: model.providerID,
+            modelID: model.modelID,
+          }
+        }),
+        setReviewModel(value: { providerID: string; modelID: string } | undefined) {
+          setStore("models", "reviewModel", value)
         },
       },
       notifications: {

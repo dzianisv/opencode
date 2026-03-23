@@ -1,5 +1,11 @@
-import { test, expect } from "../fixtures"
-import { promptSelector } from "../selectors"
+import { test, expect, settingsKey } from "../fixtures"
+import {
+  promptSelector,
+  promptAutoReviewSelector,
+  settingsModelAutoReviewSelector,
+  settingsModelDefaultSelector,
+  settingsModelReviewSelector,
+} from "../selectors"
 import { closeDialog, openSettings } from "../actions"
 
 test("hiding a model removes it from the model picker", async ({ page, gotoSession }) => {
@@ -119,4 +125,100 @@ test("showing a hidden model restores it to the model picker", async ({ page, go
 
   await page.keyboard.press("Escape")
   await expect(pickerAgain).toHaveCount(0)
+})
+
+test("model defaults and auto-review settings persist", async ({ page, gotoSession }) => {
+  await gotoSession()
+
+  const settings = await openSettings(page)
+  await settings.getByRole("tab", { name: "Models" }).click()
+
+  const defaultSelect = settings.locator(settingsModelDefaultSelector)
+  const reviewSelect = settings.locator(settingsModelReviewSelector)
+  const autoReview = settings.locator(settingsModelAutoReviewSelector)
+
+  await expect(defaultSelect).toBeVisible()
+  await expect(reviewSelect).toBeVisible()
+  await expect(autoReview).toBeVisible()
+
+  const defaultValue = defaultSelect.locator('[data-slot="select-select-trigger-value"]')
+  const reviewValue = reviewSelect.locator('[data-slot="select-select-trigger-value"]')
+
+  const currentDefault = (await defaultValue.textContent())?.trim() ?? ""
+  await defaultSelect.locator('[data-slot="select-select-trigger"]').click()
+  const defaultItems = page.locator('[data-slot="select-select-item"]')
+  await expect(defaultItems.first()).toBeVisible()
+  if (currentDefault) {
+    await defaultItems.filter({ hasNotText: currentDefault }).first().click()
+  }
+  if (!currentDefault) {
+    await defaultItems.nth(1).click()
+  }
+
+  const currentReview = (await reviewValue.textContent())?.trim() ?? ""
+  await reviewSelect.locator('[data-slot="select-select-trigger"]').click()
+  const reviewItems = page.locator('[data-slot="select-select-item"]')
+  await expect(reviewItems.first()).toBeVisible()
+  if (currentReview) {
+    await reviewItems.filter({ hasNotText: currentReview }).first().click()
+  }
+  if (!currentReview) {
+    await reviewItems.nth(1).click()
+  }
+
+  const autoReviewInput = autoReview.locator('[data-slot="switch-input"]')
+  const before = await autoReviewInput.getAttribute("aria-checked")
+  await autoReview.locator('[data-slot="switch-control"]').click()
+  const after = await autoReviewInput.getAttribute("aria-checked")
+  expect(before).not.toBe(after)
+
+  await expect
+    .poll(async () => {
+      return await page.evaluate((key) => {
+        const raw = localStorage.getItem(key)
+        return raw ? JSON.parse(raw) : null
+      }, settingsKey)
+    })
+    .toMatchObject({
+      models: {
+        autoReview: after === "true",
+        defaultModel: {
+          providerID: expect.any(String),
+          modelID: expect.any(String),
+        },
+        reviewModel: {
+          providerID: expect.any(String),
+          modelID: expect.any(String),
+        },
+      },
+    })
+
+  await closeDialog(page, settings)
+  await page.reload()
+
+  const rehydrated = await openSettings(page)
+  await rehydrated.getByRole("tab", { name: "Models" }).click()
+
+  const autoReviewRehydrated = rehydrated.locator(settingsModelAutoReviewSelector).locator('[data-slot="switch-input"]')
+  await expect(autoReviewRehydrated).toHaveAttribute("aria-checked", after ?? "false")
+
+  await closeDialog(page, rehydrated)
+})
+
+test("prompt auto-review button toggles with settings", async ({ page, gotoSession }) => {
+  await gotoSession()
+
+  const button = page.locator(promptAutoReviewSelector)
+  await expect(button).toBeVisible()
+
+  const before = await button.getAttribute("aria-pressed")
+  await button.click()
+  const after = await button.getAttribute("aria-pressed")
+  expect(before).not.toBe(after)
+
+  const settings = await openSettings(page)
+  await settings.getByRole("tab", { name: "Models" }).click()
+  const toggle = settings.locator(settingsModelAutoReviewSelector).locator('[data-slot="switch-input"]')
+  await expect(toggle).toHaveAttribute("aria-checked", after ?? "false")
+  await closeDialog(page, settings)
 })
