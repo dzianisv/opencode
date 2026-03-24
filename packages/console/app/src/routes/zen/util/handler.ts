@@ -468,17 +468,15 @@ export async function handler(
       ...(() => {
         const providerProps = zenData.providers[modelProvider.id]
         const format = providerProps.format
-        const opts = {
+        const providerModel = modelProvider.model
+        if (format === "anthropic") return anthropicHelper({ reqModel, providerModel })
+        if (format === "google") return googleHelper({ reqModel, providerModel })
+        if (format === "openai") return openaiHelper({ reqModel, providerModel })
+        return oaCompatHelper({
           reqModel,
-          providerModel: modelProvider.model,
+          providerModel,
           adjustCacheUsage: providerProps.adjustCacheUsage,
-          safetyIdentifier: modelProvider.safetyIdentifier ? ip : undefined,
-          workspaceID: authInfo?.workspaceID,
-        }
-        if (format === "anthropic") return anthropicHelper(opts)
-        if (format === "google") return googleHelper(opts)
-        if (format === "openai") return openaiHelper(opts)
-        return oaCompatHelper(opts)
+        })
       })(),
     }
   }
