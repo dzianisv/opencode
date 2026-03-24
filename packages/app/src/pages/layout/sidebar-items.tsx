@@ -76,7 +76,7 @@ export type SessionItemProps = {
   mobile?: boolean
   dense?: boolean
   popover?: boolean
-  children: ReadonlyMap<string, string[]>
+  children: Map<string, string[]>
   depth?: number
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
@@ -329,7 +329,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   const childIds = createMemo(() => props.children.get(props.session.id) ?? [])
   const childSessions = createMemo(() =>
     childIds()
-      .map((id) => props.lookup?.get(id) ?? sessionStore.session.find((s) => s.id === id))
+      .map((id) => sessionStore.session.find((s) => s.id === id))
       .filter((s): s is Session => s !== undefined && !s.time?.archived),
   )
 
@@ -344,11 +344,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
         <Show
           when={hoverEnabled()}
           fallback={
-            <Tooltip
-              placement={props.mobile ? "bottom" : "right"}
-              value={prefix() ? `${prefix()} · ${props.session.title}` : props.session.title}
-              gutter={10}
-            >
+            <Tooltip placement={props.mobile ? "bottom" : "right"} value={props.session.title} gutter={10}>
               {item}
             </Tooltip>
           }
@@ -406,8 +402,6 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             session={child}
             list={props.list}
             navList={props.navList}
-            lookup={props.lookup}
-            prefixes={props.prefixes}
             slug={props.slug}
             mobile={props.mobile}
             dense={props.dense}
