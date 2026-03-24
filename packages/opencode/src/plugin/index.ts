@@ -103,15 +103,69 @@ export namespace Plugin {
 
           const { Server } = yield* Effect.promise(() => import("../server/server"))
 
-          const client = createOpencodeClient({
-            baseUrl: "http://localhost:4096",
-            directory: ctx.directory,
-            headers: Flag.OPENCODE_SERVER_PASSWORD
-              ? {
-                  Authorization: `Basic ${Buffer.from(`${Flag.OPENCODE_SERVER_USERNAME ?? "opencode"}:${Flag.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`,
-                }
-              : undefined,
-            fetch: async (...args) => Server.Default().fetch(...args),
+            for (const plugin of INTERNAL_PLUGINS) {
+              log.info("loading internal plugin", { name: plugin.name })
+              const init = await plugin(input).catch((err) => {
+                log.error("failed to load internal plugin", { name: plugin.name, error: err })
+              })
+              if (init) hooks.push(init)
+            }
+
+            let plugins = cfg.plugin ?? []
+            if (plugins.length) await Config.waitForDependencies()
+
+            for (let plugin of plugins) {
+              if (DEPRECATED_PLUGIN_PACKAGES.some((pkg) => plugin.includes(pkg))) continue
+              log.info("loading plugin", { path: plugin })
+              if (!plugin.startsWith("file://")) {
+                const idx = plugin.lastIndexOf("@")
+                const pkg = idx > 0 ? plugin.substring(0, idx) : plugin
+                const version = idx > 0 ? plugin.substring(idx + 1) : "latest"
+                plugin = await BunProc.install(pkg, version).catch((err) => {
+                  const cause = err instanceof Error ? err.cause : err
+                  const detail = cause instanceof Error ? cause.message : String(cause ?? err)
+                  log.error("failed to install plugin", { pkg, version, error: detail })
+                  Bus.publish(Session.Event.Error, {
+                    error: new NamedError.Unknown({
+                      message: `Failed to install plugin ${pkg}@${version}: ${detail}`,
+                    }).toObject(),
+                  })
+                  return ""
+                })
+                if (!plugin) continue
+              }
+
+              // Prevent duplicate initialization when plugins export the same function
+              // as both a named export and default export (e.g., `export const X` and `export default X`).
+              // Object.entries(mod) would return both entries pointing to the same function reference.
+              await import(plugin)
+                .then(async (mod) => {
+                  const seen = new Set<PluginInstance>()
+                  for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
+                    if (seen.has(fn)) continue
+                    seen.add(fn)
+                    hooks.push(await fn(input))
+                  }
+                })
+                .catch((err) => {
+                  const message = err instanceof Error ? err.message : String(err)
+                  log.error("failed to load plugin", { path: plugin, error: message })
+                  Bus.publish(Session.Event.Error, {
+                    error: new NamedError.Unknown({
+                      message: `Failed to load plugin ${plugin}: ${message}`,
+                    }).toObject(),
+                  })
+                })
+            }
+
+            // Notify plugins of current config
+            for (const hook of hooks) {
+              try {
+                await (hook as any).config?.(cfg)
+              } catch (err) {
+                log.error("plugin config hook failed", { error: err })
+              }
+            }
           })
           const cfg = yield* config.get()
           const input: PluginInput = {
