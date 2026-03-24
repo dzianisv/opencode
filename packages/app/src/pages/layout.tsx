@@ -2270,6 +2270,7 @@ export default function Layout(props: ParentProps) {
                                 sortNow={sortNow}
                                 mobile={panelProps.mobile}
                                 popover={popover()}
+                                depth={directory === project()!.worktree ? 0 : 1}
                               />
                             )}
                           </For>

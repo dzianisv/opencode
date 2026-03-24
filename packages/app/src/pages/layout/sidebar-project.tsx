@@ -230,8 +230,9 @@ const ProjectPreviewPanel = (props: {
           {(directory) => {
             const sessions = createMemo(() => props.workspaceSessions(directory))
             const children = createMemo(() => props.workspaceChildren(directory))
+            const sandbox = () => directory !== props.project.worktree
             return (
-              <div class="flex flex-col gap-1">
+              <div class="flex flex-col gap-1" style={{ "padding-left": sandbox() ? "12px" : undefined }}>
                 <div class="px-2 py-0.5 flex items-center gap-1 min-w-0">
                   <div class="shrink-0 size-6 flex items-center justify-center">
                     <Icon name="branch" size="small" class="text-icon-base" />
