@@ -13,6 +13,7 @@ const voiceStub = async (page: Page) => {
       voice: {
         starts: 0,
         cancels: 0,
+        requests: 0,
         spoken: [],
       },
     }
@@ -71,6 +72,22 @@ const voiceStub = async (page: Page) => {
       writable: true,
       value: FakeUtterance,
     })
+    Object.defineProperty(window.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        async getUserMedia() {
+          const state = (window as E2EWindow).__opencode_e2e?.voice
+          if (state) state.requests = (state.requests ?? 0) + 1
+          return {
+            getTracks: () => [
+              {
+                stop() {},
+              },
+            ],
+          }
+        },
+      },
+    })
     Object.defineProperty(window, "speechSynthesis", {
       configurable: true,
       value: {
@@ -109,6 +126,10 @@ test("voice controls transcribe prompt input and speak completed replies", async
     await expect(speaker).toBeVisible()
 
     await voice.click()
+
+    await expect
+      .poll(() => page.evaluate(() => (window as E2EWindow).__opencode_e2e?.voice?.requests ?? 0), { timeout: 10_000 })
+      .toBe(1)
 
     await expect
       .poll(() => page.evaluate(() => (window as E2EWindow).__opencode_e2e?.voice?.starts ?? 0), { timeout: 10_000 })
