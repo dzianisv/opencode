@@ -74,6 +74,7 @@ export type SessionItemProps = {
   dense?: boolean
   popover?: boolean
   children: Map<string, string[]>
+  depth?: number
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   nav: Accessor<HTMLElement | undefined>
@@ -89,6 +90,7 @@ const SessionRow = (props: {
   slug: string
   mobile?: boolean
   dense?: boolean
+  depth?: number
   tint: Accessor<string | undefined>
   isWorking: Accessor<boolean>
   hasPermissions: Accessor<boolean>
@@ -291,6 +293,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       slug={props.slug}
       mobile={props.mobile}
       dense={props.dense}
+      depth={props.depth}
       tint={tint}
       isWorking={isWorking}
       hasPermissions={hasPermissions}
@@ -306,67 +309,102 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
     />
   )
 
+  const depth = () => props.depth ?? 0
+  const pad = () => `${8 + depth() * 12}px`
+  const childIds = createMemo(() => props.children.get(props.session.id) ?? [])
+  const childSessions = createMemo(() =>
+    childIds()
+      .map((id) => sessionStore.session.find((s) => s.id === id))
+      .filter((s): s is Session => s !== undefined && !s.time?.archived),
+  )
+
   return (
-    <div
-      data-session-id={props.session.id}
-      class="group/session relative w-full rounded-md cursor-default pl-2 pr-3 transition-colors
-             hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active"
-    >
-      <Show
-        when={hoverEnabled()}
-        fallback={
-          <Tooltip placement={props.mobile ? "bottom" : "right"} value={props.session.title} gutter={10}>
-            {item}
-          </Tooltip>
-        }
-      >
-        <SessionHoverPreview
-          mobile={props.mobile}
-          nav={props.nav}
-          hoverSession={props.hoverSession}
-          session={props.session}
-          sidebarHovering={props.sidebarHovering}
-          hoverReady={hoverReady}
-          hoverMessages={hoverMessages}
-          language={language}
-          isActive={isActive}
-          slug={props.slug}
-          setHoverSession={props.setHoverSession}
-          messageLabel={messageLabel}
-          onMessageSelect={(message) => {
-            if (!isActive())
-              layout.pendingMessage.set(`${base64Encode(props.session.directory)}/${props.session.id}`, message.id)
-
-            navigate(`${props.slug}/session/${props.session.id}#message-${message.id}`)
-          }}
-          trigger={item}
-        />
-      </Show>
-
+    <>
       <div
-        class={`absolute ${props.dense ? "top-0.5 right-0.5" : "top-1 right-1"} flex items-center gap-0.5 transition-opacity`}
-        classList={{
-          "opacity-100 pointer-events-auto": !!props.mobile,
-          "opacity-0 pointer-events-none": !props.mobile,
-          "group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
-          "group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
-        }}
+        data-session-id={props.session.id}
+        class="group/session relative w-full rounded-md cursor-default pr-3 transition-colors
+               hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active"
+        style={{ "padding-left": pad() }}
       >
-        <Tooltip value={language.t("common.archive")} placement="top">
-          <IconButton
-            icon="archive"
-            variant="ghost"
-            class="size-6 rounded-md"
-            aria-label={language.t("common.archive")}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              void props.archiveSession(props.session)
+        <Show
+          when={hoverEnabled()}
+          fallback={
+            <Tooltip placement={props.mobile ? "bottom" : "right"} value={props.session.title} gutter={10}>
+              {item}
+            </Tooltip>
+          }
+        >
+          <SessionHoverPreview
+            mobile={props.mobile}
+            nav={props.nav}
+            hoverSession={props.hoverSession}
+            session={props.session}
+            sidebarHovering={props.sidebarHovering}
+            hoverReady={hoverReady}
+            hoverMessages={hoverMessages}
+            language={language}
+            isActive={isActive}
+            slug={props.slug}
+            setHoverSession={props.setHoverSession}
+            messageLabel={messageLabel}
+            onMessageSelect={(message) => {
+              if (!isActive())
+                layout.pendingMessage.set(`${base64Encode(props.session.directory)}/${props.session.id}`, message.id)
+
+              navigate(`${props.slug}/session/${props.session.id}#message-${message.id}`)
             }}
+            trigger={item}
           />
-        </Tooltip>
+        </Show>
+
+        <div
+          class={`absolute ${props.dense ? "top-0.5 right-0.5" : "top-1 right-1"} flex items-center gap-0.5 transition-opacity`}
+          classList={{
+            "opacity-100 pointer-events-auto": !!props.mobile,
+            "opacity-0 pointer-events-none": !props.mobile,
+            "group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
+            "group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
+          }}
+        >
+          <Tooltip value={language.t("common.archive")} placement="top">
+            <IconButton
+              icon="archive"
+              variant="ghost"
+              class="size-6 rounded-md"
+              aria-label={language.t("common.archive")}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void props.archiveSession(props.session)
+              }}
+            />
+          </Tooltip>
+        </div>
       </div>
-    </div>
+      <For each={childSessions()}>
+        {(child) => (
+          <SessionItem
+            session={child}
+            list={props.list}
+            navList={props.navList}
+            slug={props.slug}
+            mobile={props.mobile}
+            dense={props.dense}
+            popover={props.popover}
+            children={props.children}
+            depth={depth() + 1}
+            sidebarExpanded={props.sidebarExpanded}
+            sidebarHovering={props.sidebarHovering}
+            nav={props.nav}
+            hoverSession={props.hoverSession}
+            setHoverSession={props.setHoverSession}
+            clearHoverProjectSoon={props.clearHoverProjectSoon}
+            prefetchSession={props.prefetchSession}
+            archiveSession={props.archiveSession}
+          />
+        )}
+      </For>
+    </>
   )
 }
 
