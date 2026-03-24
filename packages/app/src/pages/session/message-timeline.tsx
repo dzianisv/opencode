@@ -370,6 +370,27 @@ export function MessageTimeline(props: {
   let spokenSession = ""
   let spokenMessage = ""
 
+  const speak = (input: { messageID: string; text: string }) => {
+    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+    const Ctor =
+      typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
+    if (!synth || !Ctor) {
+      showToast({
+        title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
+        description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
+      })
+      return
+    }
+
+    spokenMessage = input.messageID
+    const utterance = new Ctor(input.text)
+    utterance.lang =
+      typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
+    utterance.rate = 1
+    synth.cancel()
+    synth.speak(utterance)
+  }
+
   createEffect(() => {
     if (settings.voice.autoSpeak()) return
     const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
@@ -387,21 +408,7 @@ export function MessageTimeline(props: {
     if (!settings.voice.autoSpeak()) return
     if (!latest?.id || latest.id === spokenMessage) return
 
-    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
-    const Ctor =
-      typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
-    if (!synth || !Ctor) {
-      spokenMessage = latest.id
-      return
-    }
-
-    spokenMessage = latest.id
-    const utterance = new Ctor(latest.text)
-    utterance.lang =
-      typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
-    utterance.rate = 1
-    synth.cancel()
-    synth.speak(utterance)
+    speak({ messageID: latest.id, text: latest.text })
   })
 
   const shareSession = () => {
@@ -1069,6 +1076,7 @@ export function MessageTimeline(props: {
                         sessionID={sessionID() ?? ""}
                         messageID={messageID}
                         actions={props.actions}
+                        onSpeak={speak}
                         active={active()}
                         status={active() ? sessionStatus() : undefined}
                         showReasoningSummaries={settings.general.showReasoningSummaries()}
