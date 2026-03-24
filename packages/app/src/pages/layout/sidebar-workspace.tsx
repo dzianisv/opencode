@@ -308,6 +308,7 @@ export const SortableWorkspace = (props: {
   sortNow: Accessor<number>
   mobile?: boolean
   popover?: boolean
+  depth?: number
 }): JSX.Element => {
   const navigate = useNavigate()
   const params = useParams()
@@ -373,6 +374,8 @@ export const SortableWorkspace = (props: {
     globalSync.child(props.directory, { bootstrap: true })
   })
 
+  const depth = () => props.depth ?? 0
+
   return (
     <div
       // @ts-ignore
@@ -381,6 +384,7 @@ export const SortableWorkspace = (props: {
         "opacity-30": sortable.isActiveDraggable,
         "opacity-50 pointer-events-none": busy(),
       }}
+      style={{ "padding-left": depth() > 0 ? `${depth() * 12}px` : undefined }}
     >
       <Collapsible variant="ghost" open={open()} class="shrink-0" onOpenChange={openWrapper}>
         <div class="py-1">
