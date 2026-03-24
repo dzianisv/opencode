@@ -1188,6 +1188,23 @@ export namespace Config {
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
+      voice: z
+        .object({
+          edge: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable server-backed Edge TTS playback"),
+              voice: z.string().optional().describe("Edge neural voice name"),
+              lang: z.string().optional().describe("Edge TTS language code"),
+              output_format: z.string().optional().describe("Edge TTS output format"),
+              pitch: z.string().optional().describe("Edge TTS pitch percent string"),
+              rate: z.string().optional().describe("Edge TTS rate percent string"),
+              volume: z.string().optional().describe("Edge TTS volume percent string"),
+              timeout_ms: z.number().int().positive().optional().describe("Edge TTS timeout in milliseconds"),
+            })
+            .optional(),
+        })
+        .optional()
+        .describe("Voice playback configuration"),
       tools: z.record(z.string(), z.boolean()).optional(),
       enterprise: z
         .object({
