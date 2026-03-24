@@ -259,6 +259,15 @@ export const SettingsGeneral: Component = () => {
             triggerStyle={{ "min-width": "180px" }}
           />
         </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.voice.title")}
+          description={language.t("settings.general.row.voice.description")}
+        >
+          <div data-action="settings-voice-autospeak">
+            <Switch checked={settings.voice.autoSpeak()} onChange={(checked) => settings.voice.setAutoSpeak(checked)} />
+          </div>
+        </SettingsRow>
       </SettingsList>
     </div>
   )

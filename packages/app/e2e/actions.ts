@@ -366,8 +366,7 @@ export async function seedProjects(page: Page, input: { directory: string; extra
             typeof (p as { worktree?: unknown }).worktree === "string",
         )
 
-        if (existing.some((p) => p.worktree === directory)) return
-        nextProjects[origin] = [{ worktree: directory, expanded: true }, ...existing]
+        nextProjects[origin] = [{ worktree: directory, expanded: true }, ...existing.filter((p) => p.worktree !== directory)]
       }
 
       const directories = [args.directory, ...args.extra]
@@ -376,12 +375,18 @@ export async function seedProjects(page: Page, input: { directory: string; extra
         add(args.serverUrl, directory)
       }
 
+      const nextLastProject = {
+        ...(lastProject as Record<string, string>),
+        local: args.directory,
+        [args.serverUrl]: args.directory,
+      }
+
       localStorage.setItem(
         key,
         JSON.stringify({
           list: nextList,
           projects: nextProjects,
-          lastProject,
+          lastProject: nextLastProject,
         }),
       )
       localStorage.setItem(defaultKey, args.serverUrl)

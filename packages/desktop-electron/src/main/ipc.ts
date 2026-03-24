@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
+import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 
 import type { InitStep, ServerReadyData, SqliteMigrationProgress, TitlebarTheme, WslConfig } from "../preload/types"
@@ -145,6 +145,14 @@ export function registerIpcHandlers(deps: Deps) {
     const buffer = image.toPNG().buffer
     const size = image.getSize()
     return { buffer, width: size.width, height: size.height }
+  })
+
+  ipcMain.handle("request-microphone-access", async () => {
+    if (process.platform !== "darwin") return true
+    const status = systemPreferences.getMediaAccessStatus("microphone")
+    if (status === "granted") return true
+    if (status === "denied" || status === "restricted") return false
+    return systemPreferences.askForMediaAccess("microphone")
   })
 
   ipcMain.on("show-notification", (_event: IpcMainEvent, title: string, body?: string) => {

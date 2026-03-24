@@ -1096,4 +1096,26 @@ describe("tool.bash truncation", () => {
       },
     })
   })
+
+  test("spools full large output to file without in-memory cap", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const bytes = 3 * 1024 * 1024
+        const result = await bash.execute(
+          {
+            command: `bun -e "process.stdout.write('a'.repeat(${bytes}))"`,
+            description: "Generate very large output",
+          },
+          ctx,
+        )
+        expect((result.metadata as any).truncated).toBe(true)
+        const filepath = (result.metadata as any).outputPath
+        expect(filepath).toBeTruthy()
+        const stat = await Bun.file(filepath).stat()
+        expect(stat.size).toBe(bytes)
+      },
+    })
+  })
 })

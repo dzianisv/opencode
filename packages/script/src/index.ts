@@ -30,16 +30,21 @@ const CHANNEL = await (async () => {
   return await $`git branch --show-current`.text().then((x) => x.trim())
 })()
 const IS_PREVIEW = CHANNEL !== "latest"
+const pkgs = ["@vibetechnologies/opencode", "opencode-ai"]
 
 const VERSION = await (async () => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
   if (IS_PREVIEW) return `0.0.0-${CHANNEL}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
-  const version = await fetch("https://registry.npmjs.org/opencode-ai/latest")
-    .then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
-      return res.json()
-    })
-    .then((data: any) => data.version)
+  const version = await (async () => {
+    for (const pkg of pkgs) {
+      const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg)}/latest`)
+      if (!res.ok) continue
+      const data = (await res.json()) as { version: string }
+      if (CHANNEL === "latest" && data.version.startsWith("0.0.0-")) continue
+      return data.version
+    }
+    throw new Error("Could not determine latest npm version")
+  })()
   const [major, minor, patch] = version.split(".").map((x: string) => Number(x) || 0)
   const t = env.OPENCODE_BUMP?.toLowerCase()
   if (t === "major") return `${major + 1}.0.0`

@@ -27,6 +27,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Select } from "@opencode-ai/ui/select"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
+import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid"
 import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
@@ -37,6 +38,14 @@ import { useSettings } from "@/context/settings"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
+import { showToast } from "@opencode-ai/ui/toast"
+import {
+  getMediaDevices,
+  getPermissions,
+  getSpeechRecognitionCtor,
+  getSpeechSynthesis,
+  getSpeechSynthesisUtteranceCtor,
+} from "@/utils/runtime-adapters"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
 import { ACCEPTED_FILE_TYPES } from "./prompt-input/files"
@@ -99,6 +108,71 @@ const EXAMPLES = [
 ] as const
 
 const NON_EMPTY_TEXT = /[^\s\u200B]/
+
+type SpeechAlternative = {
+  transcript?: string
+}
+
+type SpeechResult = {
+  isFinal?: boolean
+  0?: SpeechAlternative
+  length: number
+  [index: number]: SpeechAlternative | undefined
+}
+
+type SpeechEvent = {
+  resultIndex?: number
+  results: ArrayLike<SpeechResult>
+}
+
+type SpeechErrorEvent = {
+  error?: string
+  message?: string
+}
+
+type SpeechRecognitionLike = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onstart: ((event: Event) => void) | null
+  onend: ((event: Event) => void) | null
+  onerror: ((event: SpeechErrorEvent) => void) | null
+  onresult: ((event: SpeechEvent) => void) | null
+  start(): void
+  stop(): void
+  abort(): void
+}
+
+type MediaTrackLike = {
+  stop?: () => void
+}
+
+type MediaStreamLike = {
+  getTracks(): ArrayLike<MediaTrackLike>
+}
+
+type MediaDevicesLike = {
+  getUserMedia(constraints: { audio: boolean }): Promise<MediaStreamLike>
+}
+
+type PermissionStateLike = "granted" | "denied" | "prompt"
+
+type PermissionStatusLike = {
+  state: PermissionStateLike
+}
+
+type PermissionsLike = {
+  query(desc: { name: "microphone" }): Promise<PermissionStatusLike>
+}
+
+const transcriptInsert = (input: { transcript: string; before: string; after: string }) => {
+  const text = input.transcript.replace(/\s+/g, " ").trim()
+  if (!text) return
+
+  const lead = input.before && !/\s$/.test(input.before) ? " " : ""
+  const tail = input.after && !/^[\s,.;:!?)}\]]/.test(input.after) ? " " : ""
+  return `${lead}${text}${tail}`
+}
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -274,6 +348,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: "image" | "@mention" | null
     mode: "normal" | "shell"
     applyingHistory: boolean
+    voice: "idle" | "starting" | "listening"
   }>({
     popover: null,
     historyIndex: -1,
@@ -282,6 +357,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     draggingType: null,
     mode: "normal",
     applyingHistory: false,
+    voice: "idle" as "idle" | "starting" | "listening",
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
@@ -294,6 +370,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const buttons = createMemo(() => motion(buttonsSpring()))
   const shell = createMemo(() => motion(1 - buttonsSpring()))
   const control = createMemo(() => ({ height: "28px", ...buttons() }))
+  const voiceSupported = createMemo(
+    () => typeof window !== "undefined" && !!getSpeechRecognitionCtor<SpeechRecognitionLike>(window),
+  )
+  const speakerSupported = createMemo(
+    () =>
+      typeof window !== "undefined" &&
+      !!getSpeechSynthesis<{ speak: (utterance: unknown) => void; cancel: () => void }>(window) &&
+      !!getSpeechSynthesisUtteranceCtor<{ onend: (() => void) | null; onerror: (() => void) | null }>(window),
+  )
 
   const commentCount = createMemo(() => {
     if (store.mode === "shell") return 0
@@ -573,7 +658,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const open = recent()
       const seen = new Set(open)
       const pinned: AtOption[] = open.map((path) => ({ type: "file", path, display: path, recent: true }))
-      if (!query.trim()) return [...agents, ...pinned]
       const paths = await files.searchFilesAndDirectories(query)
       const fileOptions: AtOption[] = paths
         .filter((path) => !seen.has(path))
@@ -626,18 +710,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (!cmd) return
     promptProbe.select(cmd.id)
     closePopover()
-    const images = imageAttachments()
 
     if (cmd.type === "custom") {
       const text = `/${cmd.trigger} `
       setEditorText(text)
-      prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
+      prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
       focusEditorEnd()
       return
     }
 
     clearEditor()
-    prompt.set([...DEFAULT_PROMPT, ...images], 0)
+    prompt.set([{ type: "text", content: "", start: 0, end: 0 }], 0)
     command.trigger(cmd.id, "slash")
   }
 
@@ -983,6 +1066,200 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return true
   }
 
+  let rec: SpeechRecognitionLike | undefined
+  let voiceStop = false
+
+  const stopVoice = (mode: "stop" | "abort" = "stop") => {
+    const current = rec
+    if (!current) return
+    voiceStop = true
+    if (mode === "abort") current.abort()
+    if (mode === "stop") current.stop()
+  }
+
+  const commitTranscript = (value: string) => {
+    const raw = prompt
+      .current()
+      .map((part) => ("content" in part ? part.content : ""))
+      .join("")
+    const cursor = prompt.cursor() ?? promptLength(prompt.current())
+    const content = transcriptInsert({
+      transcript: value,
+      before: raw.slice(0, cursor),
+      after: raw.slice(cursor),
+    })
+    if (!content) return
+    addPart({ type: "text", content, start: 0, end: 0 })
+  }
+
+  const readSpeechError = (value: SpeechErrorEvent) => {
+    if (value.error === "aborted" || value.error === "no-speech") return
+    if (value.error === "not-allowed" || value.error === "service-not-allowed") {
+      showToast({
+        title: language.t("prompt.toast.voiceInputBlocked.title"),
+        description: language.t("prompt.toast.voiceInputBlocked.description"),
+      })
+      return
+    }
+    showToast({
+      title: language.t("prompt.toast.voiceInputFailed.title"),
+      description: value.message || value.error || language.t("prompt.toast.voiceInputFailed.description"),
+    })
+  }
+
+  const readMicError = (value: unknown) => {
+    const name =
+      value instanceof DOMException
+        ? value.name
+        : typeof value === "object" && value !== null && "name" in value && typeof value.name === "string"
+          ? value.name
+          : undefined
+
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      showToast({
+        title: language.t("prompt.toast.voiceInputMissingDevice.title"),
+        description: language.t("prompt.toast.voiceInputMissingDevice.description"),
+      })
+      return
+    }
+
+    if (name === "TypeError" && typeof window !== "undefined" && !window.isSecureContext) {
+      showToast({
+        title: language.t("prompt.toast.voiceInputInsecure.title"),
+        description: language.t("prompt.toast.voiceInputInsecure.description"),
+      })
+      return
+    }
+
+    if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+      showToast({
+        title: language.t("prompt.toast.voiceInputDenied.title"),
+        description: language.t("prompt.toast.voiceInputDenied.description"),
+      })
+      return
+    }
+
+    showToast({
+      title: language.t("prompt.toast.voiceInputFailed.title"),
+      description: value instanceof Error ? value.message : language.t("prompt.toast.voiceInputFailed.description"),
+    })
+  }
+
+  const requestMic = async () => {
+    const access = await platform.requestMicrophoneAccess?.()
+    if (access === false) throw { name: "NotAllowedError" }
+    const perms = typeof window === "undefined" ? undefined : getPermissions<PermissionsLike>(window)
+    const state = await perms
+      ?.query({ name: "microphone" })
+      .then((x) => x.state)
+      .catch(() => undefined)
+    if (state === "denied") throw { name: "NotAllowedError" }
+    const media = typeof window === "undefined" ? undefined : getMediaDevices<MediaDevicesLike>(window)
+    if (!media) return true
+    const stream = await media.getUserMedia({ audio: true })
+    for (const track of Array.from(stream.getTracks())) {
+      track.stop?.()
+    }
+    return true
+  }
+
+  const toggleVoice = async () => {
+    if (store.mode !== "normal") return
+    if (store.voice === "starting" || store.voice === "listening") {
+      stopVoice()
+      return
+    }
+
+    const Ctor = typeof window === "undefined" ? undefined : getSpeechRecognitionCtor<SpeechRecognitionLike>(window)
+    if (!Ctor) {
+      showToast({
+        title: language.t("prompt.toast.voiceInputUnavailable.title"),
+        description: language.t("prompt.toast.voiceInputUnavailable.description"),
+      })
+      return
+    }
+
+    voiceStop = false
+    setStore("voice", "starting")
+
+    const granted = await requestMic().catch((err) => {
+      readMicError(err)
+      return false
+    })
+
+    if (!granted || voiceStop) {
+      voiceStop = false
+      setStore("voice", "idle")
+      return
+    }
+
+    const current = new Ctor()
+    rec = current
+    current.continuous = false
+    current.interimResults = false
+    current.lang = navigator.language || "en-US"
+    current.onstart = () => {
+      setStore("voice", "listening")
+    }
+    current.onresult = (event) => {
+      const start = event.resultIndex ?? 0
+      let text = ""
+      for (let i = start; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (!result?.isFinal) continue
+        text += result[0]?.transcript ?? ""
+      }
+      commitTranscript(text)
+    }
+    current.onerror = (event) => {
+      if (!voiceStop) readSpeechError(event)
+    }
+    current.onend = () => {
+      rec = undefined
+      voiceStop = false
+      setStore("voice", "idle")
+      requestAnimationFrame(() => editorRef?.focus())
+    }
+
+    try {
+      current.start()
+    } catch (err) {
+      rec = undefined
+      setStore("voice", "idle")
+      showToast({
+        title: language.t("prompt.toast.voiceInputFailed.title"),
+        description: err instanceof Error ? err.message : language.t("prompt.toast.voiceInputFailed.description"),
+      })
+    }
+  }
+
+  const toggleSpeaker = () => {
+    if (!speakerSupported()) {
+      showToast({
+        title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
+        description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
+      })
+      return
+    }
+    const next = !settings.voice.autoSpeak()
+    settings.voice.setAutoSpeak(next)
+    if (!next) {
+      const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<{ cancel: () => void }>(window)
+      synth?.cancel()
+    }
+  }
+
+  const voiceLabel = createMemo(() => {
+    if (store.voice === "starting") return language.t("prompt.action.voice.starting")
+    if (store.voice === "listening") return language.t("prompt.action.voice.stop")
+    return language.t("prompt.action.voice.record")
+  })
+  const speakerLabel = createMemo(() =>
+    settings.voice.autoSpeak() ? language.t("prompt.action.voice.mute") : language.t("prompt.action.voice.speak"),
+  )
+
+  onCleanup(() => stopVoice("abort"))
+
   const addToHistory = (prompt: Prompt, mode: "normal" | "shell") => {
     const currentHistory = mode === "shell" ? shellHistory : history
     const setCurrentHistory = mode === "shell" ? setShellHistory : setHistory
@@ -1046,7 +1323,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return true
   }
 
-  const { addAttachments, removeAttachment, handlePaste } = createPromptAttachments({
+  const { addAttachment, removeAttachment, handlePaste } = createPromptAttachments({
     editor: () => editorRef,
     isDialogActive: () => !!dialog.active,
     setDraggingType: (type) => setStore("draggingType", type),
@@ -1075,11 +1352,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     permission.toggleAutoAccept(params.id, sdk.directory)
   }
-  const reviewing = createMemo(() => settings.models.autoReview())
-  const reviewLabel = createMemo(() =>
-    language.t(reviewing() ? "command.models.autoreview.disable" : "command.models.autoreview.enable"),
-  )
-  const toggleReview = () => settings.models.setAutoReview(!settings.models.autoReview())
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,
@@ -1158,6 +1430,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
       if (working()) {
         abort()
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+
+      if (store.voice === "starting" || store.voice === "listening") {
+        stopVoice("abort")
         event.preventDefault()
         event.stopPropagation()
         return
@@ -1249,20 +1528,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     // Note: Shift+Enter is handled earlier, before IME check
     if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      if (event.repeat) return
-      if (
-        working() &&
-        prompt
-          .current()
-          .map((part) => ("content" in part ? part.content : ""))
-          .join("")
-          .trim().length === 0 &&
-        imageAttachments().length === 0 &&
-        commentCount() === 0
-      ) {
-        return
-      }
       handleSubmit(event)
     }
   }
@@ -1325,7 +1590,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"], [data-action="prompt-auto-review"], [data-action="prompt-voice"], [data-action="prompt-speaker"]',
+                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-permissions"], [data-action="prompt-voice"], [data-action="prompt-speaker"]',
               )
             ) {
               return
@@ -1351,9 +1616,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               autocapitalize={store.mode === "normal" ? "sentences" : "off"}
               autocorrect={store.mode === "normal" ? "on" : "off"}
               spellcheck={store.mode === "normal"}
-              inputMode="text"
-              // @ts-expect-error
-              autocomplete="off"
               onInput={handleInput}
               onPaste={handlePaste}
               onCompositionStart={handleCompositionStart}
@@ -1394,12 +1656,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             <input
               ref={fileInputRef}
               type="file"
-              multiple
               accept={ACCEPTED_FILE_TYPES.join(",")}
               class="hidden"
               onChange={(e) => {
-                const list = e.currentTarget.files
-                if (list) void addAttachments(Array.from(list))
+                const file = e.currentTarget.files?.[0]
+                if (file) void addAttachment(file)
                 e.currentTarget.value = ""
               }}
             />
@@ -1424,7 +1685,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           <div class="pointer-events-none absolute bottom-2 left-2">
             <div
               aria-hidden={store.mode !== "normal"}
-              class="pointer-events-auto"
+              class="pointer-events-auto flex items-center gap-1"
               style={{
                 "pointer-events": buttonsSpring() > 0.5 ? "auto" : "none",
               }}
@@ -1448,6 +1709,61 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Icon name="plus" class="size-4.5" />
                 </Button>
               </TooltipKeybind>
+
+              <Show when={voiceSupported()}>
+                <Tooltip placement="top" value={voiceLabel()}>
+                  <Button
+                    data-action="prompt-voice"
+                    type="button"
+                    variant="ghost"
+                    classList={{
+                      "size-8 p-0": true,
+                      "animate-pulse": store.voice === "starting" || store.voice === "listening",
+                      "hover:bg-surface-success-base": store.voice === "starting" || store.voice === "listening",
+                    }}
+                    style={buttons()}
+                    onClick={toggleVoice}
+                    disabled={store.mode !== "normal"}
+                    tabIndex={store.mode === "normal" ? undefined : -1}
+                    aria-label={voiceLabel()}
+                    aria-pressed={store.voice === "starting" || store.voice === "listening"}
+                  >
+                    <Icon
+                      name="microphone"
+                      size="small"
+                      classList={{
+                        "text-icon-success-base": store.voice === "starting" || store.voice === "listening",
+                      }}
+                    />
+                  </Button>
+                </Tooltip>
+              </Show>
+
+              <Show when={speakerSupported()}>
+                <Tooltip placement="top" value={speakerLabel()}>
+                  <Button
+                    data-action="prompt-speaker"
+                    type="button"
+                    variant="ghost"
+                    classList={{
+                      "size-8 p-0": true,
+                      "hover:bg-surface-success-base": settings.voice.autoSpeak(),
+                    }}
+                    style={buttons()}
+                    onClick={toggleSpeaker}
+                    disabled={store.mode !== "normal"}
+                    tabIndex={store.mode === "normal" ? undefined : -1}
+                    aria-label={speakerLabel()}
+                    aria-pressed={settings.voice.autoSpeak()}
+                  >
+                    <Icon
+                      name="speaker"
+                      size="small"
+                      classList={{ "text-icon-success-base": settings.voice.autoSpeak() }}
+                    />
+                  </Button>
+                </Tooltip>
+              </Show>
             </div>
           </div>
         </div>
@@ -1504,15 +1820,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           size="normal"
                           class="min-w-0 max-w-[320px] text-13-regular text-text-base group"
                           style={control()}
-                          onClick={() => {
-                            void import("@/components/dialog-select-model-unpaid").then((x) => {
-                              dialog.show(() => <x.DialogSelectModelUnpaid model={local.model} />)
-                            })
-                          }}
+                          onClick={() => dialog.show(() => <DialogSelectModelUnpaid model={local.model} />)}
                         >
                           <Show when={local.model.current()?.provider?.id}>
                             <ProviderIcon
-                              id={local.model.current()?.provider?.id ?? ""}
+                              id={local.model.current()!.provider.id}
                               class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
                               style={{ "will-change": "opacity", transform: "translateZ(0)" }}
                             />
@@ -1544,7 +1856,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       >
                         <Show when={local.model.current()?.provider?.id}>
                           <ProviderIcon
-                            id={local.model.current()?.provider?.id ?? ""}
+                            id={local.model.current()!.provider.id}
                             class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
                             style={{ "will-change": "opacity", transform: "translateZ(0)" }}
                           />
@@ -1600,23 +1912,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <Icon name="shield" size="small" classList={{ "text-icon-success-base": accepting() }} />
                   </Button>
                 </TooltipKeybind>
-                <Tooltip placement="top" value={reviewLabel()}>
-                  <Button
-                    data-action="prompt-auto-review"
-                    variant="ghost"
-                    onClick={toggleReview}
-                    classList={{
-                      "h-7 w-7 p-0 shrink-0 flex items-center justify-center": true,
-                      "text-text-base": !reviewing(),
-                      "hover:bg-surface-success-base": reviewing(),
-                    }}
-                    style={control()}
-                    aria-label={reviewLabel()}
-                    aria-pressed={reviewing()}
-                  >
-                    <Icon name="review" size="small" classList={{ "text-icon-success-base": reviewing() }} />
-                  </Button>
-                </Tooltip>
               </div>
             </div>
           </div>

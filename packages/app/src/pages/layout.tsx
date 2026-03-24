@@ -776,7 +776,7 @@ export default function Layout(props: ParentProps) {
       directory,
       sessionID,
       task: (rev) =>
-        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk }))
+        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk, preview: true }))
           .then((messages) => {
             if (prefetchToken.value !== token) return
             if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
@@ -995,16 +995,17 @@ export default function Layout(props: ParentProps) {
   }
 
   async function archiveSession(session: Session) {
-    const [store, setStore] = globalSync.child(session.directory)
+    const [store, setStore] = globalSync.child(session.directory, { bootstrap: false })
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = sessions[index + 1] ?? sessions[index - 1]
 
-    await globalSDK.client.session.update({
+    const result = await globalSDK.client.session.update({
       directory: session.directory,
       sessionID: session.id,
       time: { archived: Date.now() },
     })
+    if (result.error) return
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
@@ -2371,6 +2372,8 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+      recentLabel={() => "Recently Active"}
+      onOpenRecent={() => navigate("/recent")}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }
