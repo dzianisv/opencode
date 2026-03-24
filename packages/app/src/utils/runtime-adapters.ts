@@ -38,6 +38,26 @@ export const getSpeechRecognitionCtor = <T>(value: unknown): (new () => T) | und
   return ctor as new () => T
 }
 
+export const getMediaDevices = <T>(value: unknown): T | undefined => {
+  if (!isRecord(value)) return
+  const nav = value.navigator
+  if (!isRecord(nav)) return
+  const media = nav.mediaDevices
+  if (!isRecord(media)) return
+  if (typeof media.getUserMedia !== "function") return
+  return media as T
+}
+
+export const getPermissions = <T>(value: unknown): T | undefined => {
+  if (!isRecord(value)) return
+  const nav = value.navigator
+  if (!isRecord(nav)) return
+  const perms = nav.permissions
+  if (!isRecord(perms)) return
+  if (typeof perms.query !== "function") return
+  return perms as T
+}
+
 export const getSpeechSynthesis = <T>(value: unknown): T | undefined => {
   if (!isRecord(value)) return
   const synth = value.speechSynthesis
@@ -47,9 +67,7 @@ export const getSpeechSynthesis = <T>(value: unknown): T | undefined => {
   return synth as T
 }
 
-export const getSpeechSynthesisUtteranceCtor = <T>(
-  value: unknown,
-): (new (text?: string) => T) | undefined => {
+export const getSpeechSynthesisUtteranceCtor = <T>(value: unknown): (new (text?: string) => T) | undefined => {
   if (!isRecord(value)) return
   if (typeof value.SpeechSynthesisUtterance !== "function") return
   return value.SpeechSynthesisUtterance as new (text?: string) => T

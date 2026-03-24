@@ -88,7 +88,7 @@ export type Platform = {
   /** Read image from clipboard (desktop only) */
   readClipboardImage?(): Promise<File | null>
 
-  /** Request microphone access (desktop only) */
+  /** Request microphone access from the host app (desktop only) */
   requestMicrophoneAccess?(): Promise<boolean>
 }
 
