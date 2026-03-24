@@ -577,6 +577,7 @@ export const SessionRoutes = lazy(() =>
               .min(0)
               .optional()
               .meta({ description: "Maximum number of messages to return" }),
+            preview: z.coerce.boolean().optional().meta({ description: "Hint that the response is for sidebar preview" }),
             before: z
               .string()
               .optional()

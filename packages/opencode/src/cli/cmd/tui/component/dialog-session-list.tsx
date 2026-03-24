@@ -2,15 +2,15 @@ import { useDialog } from "@tui/ui/dialog"
 import { DialogSelect } from "@tui/ui/dialog-select"
 import { useRoute } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
-import { createMemo, createSignal, createResource, onMount, Show } from "solid-js"
+import { createMemo, createSignal, createResource, onMount } from "solid-js"
 import { Locale } from "@/util/locale"
 import { useKeybind } from "../context/keybind"
 import { useTheme } from "../context/theme"
 import { useSDK } from "../context/sdk"
 import { DialogSessionRename } from "./dialog-session-rename"
-import { useKV } from "../context/kv"
 import { createDebouncedSignal } from "../util/signal"
 import { Spinner } from "./spinner"
+import { buildSessionTree } from "../util/session-tree"
 
 export function DialogSessionList() {
   const dialog = useDialog()
@@ -19,7 +19,6 @@ export function DialogSessionList() {
   const keybind = useKeybind()
   const { theme } = useTheme()
   const sdk = useSDK()
-  const kv = useKV()
 
   const [toDelete, setToDelete] = createSignal<string>()
   const [search, setSearch] = createDebouncedSignal("", 150)
@@ -36,27 +35,30 @@ export function DialogSessionList() {
 
   const options = createMemo(() => {
     const today = new Date().toDateString()
-    return sessions()
-      .filter((x) => x.parentID === undefined)
-      .toSorted((a, b) => b.time.updated - a.time.updated)
-      .map((x) => {
-        const date = new Date(x.time.updated)
-        let category = date.toDateString()
-        if (category === today) {
-          category = "Today"
-        }
-        const isDeleting = toDelete() === x.id
-        const status = sync.data.session_status?.[x.id]
-        const isWorking = status?.type === "busy"
-        return {
-          title: isDeleting ? `Press ${keybind.print("session_delete")} again to confirm` : x.title,
-          bg: isDeleting ? theme.error : undefined,
-          value: x.id,
-          category,
-          footer: Locale.time(x.time.updated),
-          gutter: isWorking ? <Spinner /> : undefined,
-        }
-      })
+    const all = sessions()
+    const nodes = buildSessionTree(all)
+
+    return nodes.map((node) => {
+      const x = node.session
+      const date = new Date(x.time.updated)
+      let category = date.toDateString()
+      if (category === today) {
+        category = "Today"
+      }
+      const isDeleting = toDelete() === x.id
+      const status = sync.data.session_status?.[x.id]
+      const isWorking = status?.type === "busy"
+      const prefix = node.prefix
+      const label = isDeleting ? `Press ${keybind.print("session_delete")} again to confirm` : x.title
+      return {
+        title: prefix ? `${prefix} ${label}` : label,
+        bg: isDeleting ? theme.error : undefined,
+        value: x.id,
+        category: node.depth === 0 ? category : undefined,
+        footer: Locale.time(x.time.updated),
+        gutter: isWorking ? <Spinner /> : undefined,
+      }
+    })
   })
 
   onMount(() => {

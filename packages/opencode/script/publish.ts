@@ -14,21 +14,26 @@ for (const filepath of new Bun.Glob("*/package.json").scanSync({ cwd: "./dist" }
 }
 console.log("binaries", binaries)
 const version = Object.values(binaries)[0]
+const scope = "@vibetechnologies/opencode"
+const out = "./dist/npm"
 
-await $`mkdir -p ./dist/${pkg.name}`
-await $`cp -r ./bin ./dist/${pkg.name}/bin`
-await $`cp ./script/postinstall.mjs ./dist/${pkg.name}/postinstall.mjs`
-await Bun.file(`./dist/${pkg.name}/LICENSE`).write(await Bun.file("../../LICENSE").text())
+await $`mkdir -p ${out}`
+await $`cp -r ./bin ${out}/bin`
+await $`cp ./script/postinstall.mjs ${out}/postinstall.mjs`
+await Bun.file(`${out}/LICENSE`).write(await Bun.file("../../LICENSE").text())
 
-await Bun.file(`./dist/${pkg.name}/package.json`).write(
+await Bun.file(`${out}/package.json`).write(
   JSON.stringify(
     {
-      name: pkg.name + "-ai",
+      name: scope,
       bin: {
         [pkg.name]: `./bin/${pkg.name}`,
       },
       scripts: {
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
+      },
+      publishConfig: {
+        access: "public",
       },
       version: version,
       license: pkg.license,
@@ -47,7 +52,8 @@ const tasks = Object.entries(binaries).map(async ([name]) => {
   await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(`./dist/${name}`)
 })
 await Promise.all(tasks)
-await $`cd ./dist/${pkg.name} && bun pm pack && npm publish *.tgz --access public --tag ${Script.channel}`
+await $`bun pm pack`.cwd(out)
+await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(out)
 
 const image = "ghcr.io/anomalyco/opencode"
 const platforms = "linux/amd64,linux/arm64"

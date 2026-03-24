@@ -46,8 +46,7 @@ import type {
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
-  GlobalUpgradeErrors,
-  GlobalUpgradeResponses,
+  GlobalSessionListResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -268,6 +267,44 @@ export class Config extends HeyApiClient {
   }
 }
 
+export class Session extends HeyApiClient {
+  /**
+   * List sessions globally
+   *
+   * List sessions across all projects, sorted by most recently updated.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      start?: number
+      cursor?: number
+      search?: string
+      limit?: number
+      roots?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "start" },
+            { in: "query", key: "cursor" },
+            { in: "query", key: "search" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "roots" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<GlobalSessionListResponses, unknown, ThrowOnError>({
+      url: "/global/session",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -305,33 +342,14 @@ export class Global extends HeyApiClient {
     })
   }
 
-  /**
-   * Upgrade opencode
-   *
-   * Upgrade opencode to the specified version or latest if not specified.
-   */
-  public upgrade<ThrowOnError extends boolean = false>(
-    parameters?: {
-      target?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "target" }] }])
-    return (options?.client ?? this.client).post<GlobalUpgradeResponses, GlobalUpgradeErrors, ThrowOnError>({
-      url: "/global/upgrade",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+
+  private _session?: Session
+  get session(): Session {
+    return (this._session ??= new Session({ client: this.client }))
   }
 }
 
@@ -1034,7 +1052,7 @@ export class Workspace extends HeyApiClient {
   }
 }
 
-export class Session extends HeyApiClient {
+export class Session2 extends HeyApiClient {
   /**
    * List sessions
    *
@@ -1116,9 +1134,9 @@ export class Experimental extends HeyApiClient {
     return (this._workspace ??= new Workspace({ client: this.client }))
   }
 
-  private _session?: Session
-  get session(): Session {
-    return (this._session ??= new Session({ client: this.client }))
+  private _session?: Session2
+  get session(): Session2 {
+    return (this._session ??= new Session2({ client: this.client }))
   }
 
   private _resource?: Resource
@@ -1270,7 +1288,7 @@ export class Worktree extends HeyApiClient {
   }
 }
 
-export class Session2 extends HeyApiClient {
+export class Session3 extends HeyApiClient {
   /**
    * List sessions
    *
@@ -1819,6 +1837,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       limit?: number
+      preview?: boolean
       before?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -1832,6 +1851,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "limit" },
+            { in: "query", key: "preview" },
             { in: "query", key: "before" },
           ],
         },
@@ -2522,9 +2542,6 @@ export class Oauth extends HeyApiClient {
       directory?: string
       workspace?: string
       method?: number
-      inputs?: {
-        [key: string]: string
-      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2537,7 +2554,6 @@ export class Oauth extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "method" },
-            { in: "body", key: "inputs" },
           ],
         },
       ],
@@ -2865,38 +2881,6 @@ export class File extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<FileStatusResponses, unknown, ThrowOnError>({
       url: "/file/status",
-      ...options,
-      ...params,
-    })
-  }
-}
-
-export class Event extends HeyApiClient {
-  /**
-   * Subscribe to events
-   *
-   * Get events
-   */
-  public subscribe<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, unknown, ThrowOnError>({
-      url: "/event",
       ...options,
       ...params,
     })
@@ -3924,6 +3908,38 @@ export class Formatter extends HeyApiClient {
   }
 }
 
+export class Event extends HeyApiClient {
+  /**
+   * Subscribe to events
+   *
+   * Get events
+   */
+  public subscribe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, unknown, ThrowOnError>({
+      url: "/event",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class OpencodeClient extends HeyApiClient {
   public static readonly __registry = new HeyApiRegistry<OpencodeClient>()
 
@@ -3972,9 +3988,9 @@ export class OpencodeClient extends HeyApiClient {
     return (this._worktree ??= new Worktree({ client: this.client }))
   }
 
-  private _session?: Session2
-  get session(): Session2 {
-    return (this._session ??= new Session2({ client: this.client }))
+  private _session?: Session3
+  get session(): Session3 {
+    return (this._session ??= new Session3({ client: this.client }))
   }
 
   private _part?: Part
@@ -4005,11 +4021,6 @@ export class OpencodeClient extends HeyApiClient {
   private _file?: File
   get file(): File {
     return (this._file ??= new File({ client: this.client }))
-  }
-
-  private _event?: Event
-  get event(): Event {
-    return (this._event ??= new Event({ client: this.client }))
   }
 
   private _mcp?: Mcp
@@ -4055,5 +4066,10 @@ export class OpencodeClient extends HeyApiClient {
   private _formatter?: Formatter
   get formatter(): Formatter {
     return (this._formatter ??= new Formatter({ client: this.client }))
+  }
+
+  private _event?: Event
+  get event(): Event {
+    return (this._event ??= new Event({ client: this.client }))
   }
 }

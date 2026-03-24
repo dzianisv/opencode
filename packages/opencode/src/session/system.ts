@@ -38,6 +38,10 @@ export namespace SystemPrompt {
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
+        ``,
+        `# Session Naming`,
+        `Once you understand what the user wants, use the rename tool to give this session a short descriptive title (3-7 words) that reflects the task. Do this early, before diving into the work. Update the title if the task changes significantly.`,
+        ``,
         `<directories>`,
         `  ${
           project.vcs === "git" && false
