@@ -72,8 +72,6 @@ function createGlobalSync() {
   let projectWritten = false
   let bootedAt = 0
   let bootingRoot = false
-  let eventFrame: number | undefined
-  let eventTimer: ReturnType<typeof setTimeout> | undefined
 
   onCleanup(() => {
     active = false
@@ -259,7 +257,6 @@ function createGlobalSync() {
         directory,
         global: {
           config: globalStore.config,
-          path: globalStore.path,
           project: globalStore.project,
           provider: globalStore.provider,
         },
