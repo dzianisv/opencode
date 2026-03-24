@@ -23,12 +23,6 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
     navigate(`/${base64Encode(next)}${path}${location.search}${location.hash}`, { replace: true })
   })
 
-  createEffect(() => {
-    const id = params.id
-    if (!id) return
-    void sync.session.sync(id)
-  })
-
   return (
     <DataProvider
       data={sync.data}
