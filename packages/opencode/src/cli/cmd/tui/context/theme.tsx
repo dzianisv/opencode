@@ -310,18 +310,14 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       if (value === "dark" || value === "light") return value
       return
     }
-
-    setStore(
-      produce((draft) => {
-        const lock = pick(kv.get("theme_mode_lock"))
-        const mode = pick(kv.get("theme_mode", props.mode))
-        draft.mode = lock ?? mode ?? props.mode
-        draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "opencode")
-        draft.active = typeof active === "string" ? active : "opencode"
-        draft.ready = false
-      }),
-    )
+    const lock = pick(kv.get("theme_mode_lock"))
+    const [store, setStore] = createStore({
+      themes: DEFAULT_THEMES,
+      mode: lock ?? pick(kv.get("theme_mode", props.mode)) ?? props.mode,
+      lock,
+      active: (config.theme ?? kv.get("theme", "opencode")) as string,
+      ready: false,
+    })
 
     createEffect(() => {
       const theme = config.theme
@@ -375,16 +371,30 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         })
     }
 
-    function update(mode: "dark" | "light") {
+    function apply(mode: "dark" | "light") {
+      kv.set("theme_mode", mode)
       if (store.mode === mode) return
       setStore("mode", mode)
-      kv.set("theme_mode", mode)
       renderer.clearPaletteCache()
       resolveSystemTheme(mode)
     }
 
+    function pin(mode: "dark" | "light" = store.mode) {
+      setStore("lock", mode)
+      kv.set("theme_mode_lock", mode)
+      apply(mode)
+    }
+
+    function free() {
+      setStore("lock", undefined)
+      kv.set("theme_mode_lock", undefined)
+      const mode = renderer.themeMode
+      if (mode) apply(mode)
+    }
+
     const handle = (mode: "dark" | "light") => {
-      update(mode)
+      if (store.lock) return
+      apply(mode)
     }
     renderer.on(CliRenderEvents.THEME_MODE, handle)
     onCleanup(() => {
@@ -446,7 +456,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         free()
       },
       setMode(mode: "dark" | "light") {
-        update(mode)
+        pin(mode)
       },
       set(theme: string) {
         if (!hasTheme(theme)) return false
