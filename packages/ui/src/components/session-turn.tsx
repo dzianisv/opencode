@@ -144,6 +144,7 @@ export function SessionTurn(
     messageID: string
     messages?: MessageType[]
     actions?: UserActions
+    onSpeak?: (input: { messageID: string; text: string }) => void
     showReasoningSummaries?: boolean
     shellToolDefaultOpen?: boolean
     editToolDefaultOpen?: boolean
@@ -393,7 +394,7 @@ export function SessionTurn(
               class={props.classes?.container}
             >
               <div data-slot="session-turn-message-content" aria-live="off">
-                <Message message={message()!} parts={parts()} actions={props.actions} />
+                <Message message={message()!} parts={parts()} actions={props.actions} onSpeak={props.onSpeak} />
               </div>
               <Show when={divider()}>
                 <div data-slot="session-turn-compaction">
