@@ -134,6 +134,7 @@ export interface MessageProps {
   actions?: UserActions
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
+  onSpeak?: (input: { messageID: string; text: string }) => void
 }
 
 export type SessionAction = (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -150,6 +151,7 @@ export interface MessagePartProps {
   defaultOpen?: boolean
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
+  onSpeak?: (input: { messageID: string; text: string }) => void
 }
 
 export type PartComponent = Component<MessagePartProps>
@@ -702,6 +704,7 @@ export function Message(props: MessageProps) {
             parts={props.parts}
             showAssistantCopyPartID={props.showAssistantCopyPartID}
             showReasoningSummaries={props.showReasoningSummaries}
+            onSpeak={props.onSpeak}
           />
         )}
       </Match>
@@ -714,6 +717,7 @@ export function AssistantMessageDisplay(props: {
   parts: PartType[]
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
+  onSpeak?: (input: { messageID: string; text: string }) => void
 }) {
   const emptyTools: ToolPart[] = []
   const part = createMemo(() => index(props.parts))
@@ -773,6 +777,7 @@ export function AssistantMessageDisplay(props: {
                       part={item()!}
                       message={props.message}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
+                      onSpeak={props.onSpeak}
                     />
                   </Show>
                 )
@@ -1129,6 +1134,7 @@ export function Part(props: MessagePartProps) {
         defaultOpen={props.defaultOpen}
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
+        onSpeak={props.onSpeak}
       />
     </Show>
   )
@@ -1369,6 +1375,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     if (typeof props.showAssistantCopyPartID === "string") return props.showAssistantCopyPartID === part().id
     return isLastTextPart()
   })
+  const showSpeak = createMemo(() => props.message.role === "assistant" && isLastTextPart() && !!displayText())
   const [copied, setCopied] = createSignal(false)
 
   const handleCopy = async () => {
@@ -1401,6 +1408,18 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
                 aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
               />
             </Tooltip>
+            <Show when={showSpeak()}>
+              <Tooltip value={i18n.t("ui.message.speakResponse")} placement="top" gutter={4}>
+                <IconButton
+                  icon="speaker"
+                  size="normal"
+                  variant="ghost"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => props.onSpeak?.({ messageID: props.message.id, text: displayText() })}
+                  aria-label={i18n.t("ui.message.speakResponse")}
+                />
+              </Tooltip>
+            </Show>
             <Show when={meta()}>
               <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
                 {meta()}
