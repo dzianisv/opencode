@@ -295,8 +295,15 @@ export const dict = {
   "prompt.toast.promptSendFailed.description": "Unable to retrieve session",
   "prompt.toast.voiceInputBlocked.title": "Microphone access blocked",
   "prompt.toast.voiceInputBlocked.description": "Allow microphone access in the browser, then try voice input again.",
+  "prompt.toast.voiceInputDenied.title": "Microphone permission denied",
+  "prompt.toast.voiceInputDenied.description":
+    "Chrome already denied microphone access for this site. Change the site microphone permission to Allow, then reload.",
   "prompt.toast.voiceInputUnavailable.title": "Voice input unavailable",
   "prompt.toast.voiceInputUnavailable.description": "This browser does not expose SpeechRecognition.",
+  "prompt.toast.voiceInputInsecure.title": "Voice input requires a secure page",
+  "prompt.toast.voiceInputInsecure.description": "Open OpenCode on HTTPS or localhost to use the microphone in Chrome.",
+  "prompt.toast.voiceInputMissingDevice.title": "No microphone found",
+  "prompt.toast.voiceInputMissingDevice.description": "Connect a microphone and try voice input again.",
   "prompt.toast.voiceInputFailed.title": "Voice input failed",
   "prompt.toast.voiceInputFailed.description": "Speech recognition could not start.",
   "prompt.toast.voicePlaybackUnavailable.title": "Voice playback unavailable",
@@ -746,7 +753,8 @@ export const dict = {
   "settings.general.row.reasoningSummaries.title": "Show reasoning summaries",
   "settings.general.row.reasoningSummaries.description": "Display model reasoning summaries in the timeline",
   "settings.general.row.voice.title": "Speak assistant replies",
-  "settings.general.row.voice.description": "Automatically read completed assistant replies aloud in supported browsers",
+  "settings.general.row.voice.description":
+    "Automatically read completed assistant replies aloud in supported browsers",
   "settings.general.row.shellToolPartsExpanded.title": "Expand shell tool parts",
   "settings.general.row.shellToolPartsExpanded.description":
     "Show shell tool parts expanded by default in the timeline",
