@@ -5,6 +5,29 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { useGlobalSync } from "@/context/global-sync"
 import { DateTime } from "luxon"
 
+type RecentSession = {
+  id: string
+  title: string
+  directory: string
+  project?: { id: string; name?: string; worktree: string } | null
+  time: { created: number; updated: number; archived?: number }
+  summary?: { additions?: number; deletions?: number; files?: number }
+  parentID?: string
+}
+
+type FlatEntry = { session: RecentSession; depth: number }
+
+function flatten(roots: RecentSession[], children: Map<string, RecentSession[]>): FlatEntry[] {
+  const result: FlatEntry[] = []
+  function walk(session: RecentSession, depth: number) {
+    result.push({ session, depth })
+    const kids = children.get(session.id)
+    if (kids) for (const child of kids) walk(child, depth + 1)
+  }
+  for (const root of roots) walk(root, 0)
+  return result
+}
+
 export default function Recent() {
   const navigate = useNavigate()
   const sync = useGlobalSync()
@@ -13,23 +36,28 @@ export default function Recent() {
   const [sessions] = createResource(
     () => search(),
     async (query) => {
-      const res = await fetch(
-        `/global/session?roots=true&limit=50${query ? `&search=${encodeURIComponent(query)}` : ""}`,
-      )
+      const res = await fetch(`/global/session?limit=100${query ? `&search=${encodeURIComponent(query)}` : ""}`)
       if (!res.ok) return []
-      return res.json() as Promise<
-        Array<{
-          id: string
-          title: string
-          directory: string
-          project?: { id: string; name?: string; worktree: string } | null
-          time: { created: number; updated: number; archived?: number }
-          summary?: { additions?: number; deletions?: number; files?: number }
-          parentID?: string
-        }>
-      >
+      return res.json() as Promise<RecentSession[]>
     },
   )
+
+  const tree = createMemo(() => {
+    const all = sessions() ?? []
+    const ids = new Set(all.map((s) => s.id))
+    const children = new Map<string, RecentSession[]>()
+    const roots: RecentSession[] = []
+    for (const session of all) {
+      if (!session.parentID || !ids.has(session.parentID)) {
+        roots.push(session)
+        continue
+      }
+      const list = children.get(session.parentID)
+      if (list) list.push(session)
+      else children.set(session.parentID, [session])
+    }
+    return flatten(roots, children)
+  })
 
   const projects = createMemo(() => {
     const map = new Map<string, string>()
@@ -71,7 +99,10 @@ export default function Recent() {
         <h1 class="text-16-semibold text-color-primary-base">Recently Active</h1>
         <div class="flex-1" />
         <div class="relative">
-          <Icon name="magnifying-glass" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-color-dimmed-base" />
+          <Icon
+            name="magnifying-glass"
+            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-color-dimmed-base"
+          />
           <input
             type="text"
             placeholder="Search sessions..."
@@ -93,32 +124,38 @@ export default function Recent() {
         </Show>
 
         <div class="divide-y divide-border-base">
-          <For each={sessions()}>
-            {(session) => (
+          <For each={tree()}>
+            {(entry) => (
               <button
-                class="w-full flex items-start gap-3 px-6 py-3 hover:bg-background-hover-base transition-colors text-left"
-                onClick={() => open(session)}
+                class="w-full flex items-start gap-3 py-3 hover:bg-background-hover-base transition-colors text-left"
+                style={{ "padding-left": `${24 + entry.depth * 20}px`, "padding-right": "24px" }}
+                onClick={() => open(entry.session)}
               >
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="text-13-medium text-color-primary-base truncate">{session.title}</span>
-                    <Show when={session.summary && session.summary.files}>
+                    <Show when={entry.depth > 0}>
+                      <Icon name="fork" class="size-3 text-color-dimmed-base shrink-0" />
+                    </Show>
+                    <span class="text-13-medium text-color-primary-base truncate">{entry.session.title}</span>
+                    <Show when={entry.session.summary && entry.session.summary.files}>
                       <span class="shrink-0 text-11-regular text-color-dimmed-base">
-                        {session.summary!.files} file{session.summary!.files !== 1 ? "s" : ""}
+                        {entry.session.summary!.files} file{entry.session.summary!.files !== 1 ? "s" : ""}
                       </span>
                     </Show>
                   </div>
                   <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-12-regular text-color-secondary-base truncate">{label(session)}</span>
-                    <span class="text-11-regular text-color-dimmed-base">{ago(session.time.updated)}</span>
+                    <span class="text-12-regular text-color-secondary-base truncate">{label(entry.session)}</span>
+                    <span class="text-11-regular text-color-dimmed-base">{ago(entry.session.time.updated)}</span>
                   </div>
-                  <Show when={session.summary && (session.summary.additions || session.summary.deletions)}>
+                  <Show
+                    when={entry.session.summary && (entry.session.summary.additions || entry.session.summary.deletions)}
+                  >
                     <div class="flex items-center gap-1.5 mt-1">
-                      <Show when={session.summary!.additions}>
-                        <span class="text-11-regular text-icon-success-base">+{session.summary!.additions}</span>
+                      <Show when={entry.session.summary!.additions}>
+                        <span class="text-11-regular text-icon-success-base">+{entry.session.summary!.additions}</span>
                       </Show>
-                      <Show when={session.summary!.deletions}>
-                        <span class="text-11-regular text-icon-critical-base">-{session.summary!.deletions}</span>
+                      <Show when={entry.session.summary!.deletions}>
+                        <span class="text-11-regular text-icon-critical-base">-{entry.session.summary!.deletions}</span>
                       </Show>
                     </div>
                   </Show>
