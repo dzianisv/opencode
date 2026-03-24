@@ -47,7 +47,7 @@ function mockGitFailure(failArg: string) {
         }),
       )
     }),
-  ).pipe(Layer.provide(CrossSpawnSpawner.defaultLayer))
+  ).pipe(Layer.provide(CrossSpawnSpawner.layer), Layer.provide(NodeFileSystem.layer), Layer.provide(NodePath.layer))
 }
 
 function projectLayerWithFailure(failArg: string) {
@@ -349,9 +349,7 @@ describe("Project.update", () => {
     const { project } = await Project.fromDirectory(tmp.path)
 
     let eventPayload: any = null
-    const on = (data: any) => {
-      eventPayload = data
-    }
+    const on = (data: any) => { eventPayload = data }
     GlobalBus.on("event", on)
 
     try {
