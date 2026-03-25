@@ -9,8 +9,7 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
-import { SyncEvent } from "../sync"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import type { SQL } from "../storage/db"
 import { SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
@@ -879,6 +878,142 @@ export namespace Session {
     }),
     (input) => runPromise((svc) => svc.updatePartDelta(input)),
   )
+
+  export const getUsage = fn(
+    z.object({
+      model: z.custom<Provider.Model>(),
+      usage: z.custom<LanguageModelV2Usage>(),
+      metadata: z.custom<ProviderMetadata>().optional(),
+    }),
+    (input) => {
+      const safe = (value: number) => {
+        if (!Number.isFinite(value)) return 0
+        return value
+      }
+      const inputTokens = safe(input.usage.inputTokens ?? 0)
+      const outputTokens = safe(input.usage.outputTokens ?? 0)
+      const reasoningTokens = safe(input.usage.reasoningTokens ?? 0)
+
+      const cacheReadInputTokens = safe(input.usage.cachedInputTokens ?? 0)
+      const cacheWriteInputTokens = safe(
+        (input.metadata?.["anthropic"]?.["cacheCreationInputTokens"] ??
+          // @ts-expect-error
+          input.metadata?.["bedrock"]?.["usage"]?.["cacheWriteInputTokens"] ??
+          // @ts-expect-error
+          input.metadata?.["venice"]?.["usage"]?.["cacheCreationInputTokens"] ??
+          0) as number,
+      )
+
+      // OpenRouter provides inputTokens as the total count of input tokens (including cached).
+      // AFAIK other providers (OpenRouter/OpenAI/Gemini etc.) do it the same way e.g. vercel/ai#8794 (comment)
+      // Anthropic does it differently though - inputTokens doesn't include cached tokens.
+      // It looks like OpenCode's cost calculation assumes all providers return inputTokens the same way Anthropic does (I'm guessing getUsage logic was originally implemented with anthropic), so it's causing incorrect cost calculation for OpenRouter and others.
+      const excludesCachedTokens = !!(input.metadata?.["anthropic"] || input.metadata?.["bedrock"])
+      const adjustedInputTokens = safe(
+        excludesCachedTokens ? inputTokens : inputTokens - cacheReadInputTokens - cacheWriteInputTokens,
+      )
+
+      const total = iife(() => {
+        // Anthropic doesn't provide total_tokens, also ai sdk will vastly undercount if we
+        // don't compute from components
+        if (
+          input.model.api.npm === "@ai-sdk/anthropic" ||
+          input.model.api.npm === "@ai-sdk/amazon-bedrock" ||
+          input.model.api.npm === "@ai-sdk/google-vertex/anthropic"
+        ) {
+          return adjustedInputTokens + outputTokens + cacheReadInputTokens + cacheWriteInputTokens
+        }
+        return input.usage.totalTokens
+      })
+
+      const tokens = {
+        total,
+        input: adjustedInputTokens,
+        output: outputTokens,
+        reasoning: reasoningTokens,
+        cache: {
+          write: cacheWriteInputTokens,
+          read: cacheReadInputTokens,
+        },
+      }
+
+      const costInfo =
+        input.model.cost?.experimentalOver200K && tokens.input + tokens.cache.read > 200_000
+          ? input.model.cost.experimentalOver200K
+          : input.model.cost
+      return {
+        cost: safe(
+          new Decimal(0)
+            .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+            // TODO: update models.dev to have better pricing model, for now:
+            // charge reasoning tokens at the same rate as output tokens
+            .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+            .toNumber(),
+        ),
+        tokens,
+      }
+    },
+  )
+
+  /**
+   * Recover orphaned assistant messages left incomplete after a server crash or restart.
+   * Finds assistant messages with no `time.completed`, forces their non-terminal tool
+   * parts to error status, marks the messages as completed, and emits bus events so
+   * connected frontends update.
+   *
+   * @see https://github.com/anomalyco/opencode/issues/19023
+   */
+  export async function recover() {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is null`,
+          ),
+        )
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("recovering orphaned assistant messages", { count: rows.length })
+    const now = Date.now()
+    for (const row of rows) {
+      const msg = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Assistant
+      // Fix non-terminal tool parts
+      const parts = await MessageV2.parts(row.id)
+      for (const part of parts) {
+        if (part.type !== "tool") continue
+        if (part.state.status === "completed" || part.state.status === "error") continue
+        await updatePart({
+          ...part,
+          state: {
+            ...part.state,
+            status: "error",
+            error: "Tool execution was interrupted by server restart",
+            time: {
+              start: part.state.status === "running" ? part.state.time.start : now,
+              end: now,
+            },
+          },
+        })
+      }
+      // Mark message completed
+      msg.time.completed = now
+      await updateMessage(msg)
+      log.info("recovered orphaned message", { messageID: row.id, sessionID: row.session_id })
+    }
+  }
+
+  export class BusyError extends Error {
+    constructor(public readonly sessionID: string) {
+      super(`Session ${sessionID} is busy`)
+    }
+  }
 
   export const initialize = fn(
     z.object({ sessionID: SessionID.zod, modelID: ModelID.zod, providerID: ProviderID.zod, messageID: MessageID.zod }),
