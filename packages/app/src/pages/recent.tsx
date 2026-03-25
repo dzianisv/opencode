@@ -2,6 +2,7 @@ import { createResource, createSignal, For, Show, createMemo } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { base64Encode } from "@opencode-ai/util/encode"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { DateTime } from "luxon"
 
@@ -30,15 +31,20 @@ function flatten(roots: RecentSession[], children: Map<string, RecentSession[]>)
 
 export default function Recent() {
   const navigate = useNavigate()
+  const globalSDK = useGlobalSDK()
   const sync = useGlobalSync()
   const [search, setSearch] = createSignal("")
 
   const [sessions] = createResource(
     () => search(),
     async (query) => {
-      const res = await fetch(`/global/session?limit=100${query ? `&search=${encodeURIComponent(query)}` : ""}`)
-      if (!res.ok) return []
-      return res.json() as Promise<RecentSession[]>
+      return globalSDK.client.global.session
+        .list({
+          limit: 100,
+          search: query || undefined,
+        })
+        .then((x) => (x.data ?? []) as RecentSession[])
+        .catch(() => [])
     },
   )
 
