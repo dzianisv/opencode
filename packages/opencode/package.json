@@ -30,6 +30,13 @@
   "exports": {
     "./*": "./src/*.ts"
   },
+  "imports": {
+    "#db": {
+      "bun": "./src/storage/db.bun.ts",
+      "node": "./src/storage/db.node.ts",
+      "default": "./src/storage/db.bun.ts"
+    }
+  },
   "devDependencies": {
     "@babel/core": "7.28.4",
     "@effect/language-service": "0.79.0",
@@ -99,8 +106,8 @@
     "@opencode-ai/sdk": "workspace:*",
     "@opencode-ai/util": "workspace:*",
     "@openrouter/ai-sdk-provider": "1.5.4",
-    "@opentui/core": "0.1.87",
-    "@opentui/solid": "0.1.87",
+    "@opentui/core": "0.1.90",
+    "@opentui/solid": "0.1.90",
     "@parcel/watcher": "2.5.1",
     "@pierre/diffs": "catalog:",
     "@solid-primitives/event-bus": "1.1.2",

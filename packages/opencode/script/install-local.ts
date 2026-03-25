@@ -12,14 +12,16 @@ const dst = path.join(process.env.HOME || "", ".local", "bin", os === "windows" 
 process.chdir(dir)
 
 await $`mkdir -p ${path.dirname(dst)}`
-await $`cp ${src} ${dst}`
+
+if (os === "windows") {
+  await $`cp ${src} ${dst}`
+}
+
+if (os !== "windows") {
+  const res = await $`ln -sf ${src} ${dst}`.nothrow()
+  if (res.exitCode !== 0) await $`cp ${src} ${dst}`
+}
 
 if (os !== "windows") {
   await $`chmod +x ${dst}`
-}
-
-if (os === "darwin") {
-  await $`codesign --remove-signature ${dst}`.nothrow()
-  await $`codesign --force --sign - ${dst}`
-  await $`codesign --verify --verbose=4 ${dst}`
 }
