@@ -57,54 +57,29 @@ export type EventServerInstanceDisposed = {
 export type EventServerConnected = {
   type: "server.connected"
   properties: {
-    command:
-      | "session.list"
-      | "session.new"
-      | "session.share"
-      | "session.interrupt"
-      | "session.compact"
-      | "session.page.up"
-      | "session.page.down"
-      | "session.line.up"
-      | "session.line.down"
-      | "session.half.page.up"
-      | "session.half.page.down"
-      | "session.first"
-      | "session.last"
-      | "prompt.clear"
-      | "prompt.submit"
-      | "agent.cycle"
-      | string
+    [key: string]: unknown
   }
 }
 
-export type EventTuiToastShow = {
-  type: "tui.toast.show"
+export type EventGlobalDisposed = {
+  type: "global.disposed"
   properties: {
-    title?: string
-    message: string
-    variant: "info" | "success" | "warning" | "error"
-    /**
-     * Duration in milliseconds
-     */
-    duration?: number
+    [key: string]: unknown
   }
 }
 
-export type EventTuiSessionSelect = {
-  type: "tui.session.select"
+export type EventLspClientDiagnostics = {
+  type: "lsp.client.diagnostics"
   properties: {
-    /**
-     * Session ID to navigate to
-     */
-    sessionID: string
+    serverID: string
+    path: string
   }
 }
 
-export type EventMcpToolsChanged = {
-  type: "mcp.tools.changed"
+export type EventLspUpdated = {
+  type: "lsp.updated"
   properties: {
-    server: string
+    [key: string]: unknown
   }
 }
 
@@ -2339,6 +2314,41 @@ export type GlobalDisposeResponses = {
 }
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
+
+export type GlobalUpgradeData = {
+  body?: {
+    target?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/upgrade"
+}
+
+export type GlobalUpgradeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalUpgradeError = GlobalUpgradeErrors[keyof GlobalUpgradeErrors]
+
+export type GlobalUpgradeResponses = {
+  /**
+   * Upgrade result
+   */
+  200:
+    | {
+        success: true
+        version: string
+      }
+    | {
+        success: false
+        error: string
+      }
+}
+
+export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
 
 export type GlobalSessionListData = {
   body?: never

@@ -47,6 +47,8 @@ import type {
   GlobalEventResponses,
   GlobalHealthResponses,
   GlobalSessionListResponses,
+  GlobalUpgradeErrors,
+  GlobalUpgradeResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -359,21 +361,26 @@ export class Global extends HeyApiClient {
   }
 
   /**
-   * Get memory diagnostics
+   * Upgrade opencode
    *
-   * Returns process memory, instance cache state, session counts, and optional process-tree memory.
+   * Upgrade opencode to the specified version or latest if not specified.
    */
-  public memory<ThrowOnError extends boolean = false>(
+  public upgrade<ThrowOnError extends boolean = false>(
     parameters?: {
-      children?: boolean
+      target?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "children" }] }])
-    return (options?.client ?? this.client).get<GlobalMemoryResponses, unknown, ThrowOnError>({
-      url: "/global/memory",
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "target" }] }])
+    return (options?.client ?? this.client).post<GlobalUpgradeResponses, GlobalUpgradeErrors, ThrowOnError>({
+      url: "/global/upgrade",
       ...options,
       ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
