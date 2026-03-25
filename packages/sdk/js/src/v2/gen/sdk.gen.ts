@@ -47,6 +47,8 @@ import type {
   GlobalEventResponses,
   GlobalHealthResponses,
   GlobalSessionListResponses,
+  GlobalUpgradeErrors,
+  GlobalUpgradeResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -378,11 +380,6 @@ export class Global extends HeyApiClient {
         ...params.headers,
       },
     })
-  }
-
-  private _syncEvent?: SyncEvent
-  get syncEvent(): SyncEvent {
-    return (this._syncEvent ??= new SyncEvent({ client: this.client }))
   }
 
   private _config?: Config
