@@ -11,9 +11,11 @@ import { Command } from "../command"
 import { Instance } from "./instance"
 import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
+import { Session } from "@/session"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
+  await Session.recover()
   await Plugin.init()
   ShareNext.init()
   Format.init()
