@@ -9,7 +9,7 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import type { SQL } from "../storage/db"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
@@ -866,6 +866,57 @@ export namespace Session {
       }
     },
   )
+
+  /**
+   * Recover orphaned assistant messages left incomplete after a server crash or restart.
+   * Finds assistant messages with no `time.completed`, forces their non-terminal tool
+   * parts to error status, marks the messages as completed, and emits bus events so
+   * connected frontends update.
+   *
+   * @see https://github.com/anomalyco/opencode/issues/19023
+   */
+  export async function recover() {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is null`,
+          ),
+        )
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("recovering orphaned assistant messages", { count: rows.length })
+    const now = Date.now()
+    for (const row of rows) {
+      const msg = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Assistant
+      // Fix non-terminal tool parts
+      const parts = await MessageV2.parts(row.id)
+      for (const part of parts) {
+        if (part.type !== "tool") continue
+        if (part.state.status === "completed" || part.state.status === "error") continue
+        await updatePart({
+          ...part,
+          state: {
+            ...part.state,
+            status: "error",
+            error: "Tool execution was interrupted by server restart",
+            time: {
+              start: part.state.status === "running" ? part.state.time.start : now,
+              end: now,
+            },
+          },
+        })
+      }
+      // Mark message completed
+      msg.time.completed = now
+      await updateMessage(msg)
+      log.info("recovered orphaned message", { messageID: row.id, sessionID: row.session_id })
+    }
+  }
 
   export class BusyError extends Error {
     constructor(public readonly sessionID: string) {
