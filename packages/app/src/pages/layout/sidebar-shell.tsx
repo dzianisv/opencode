@@ -30,8 +30,7 @@ export const SidebarContent = (props: {
   onOpenSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
-  recentLabel: Accessor<string>
-  onOpenRecent: () => void
+  renderRecentTile: () => JSX.Element
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
@@ -65,6 +64,7 @@ export const SidebarContent = (props: {
             <DragDropSensors />
             <ConstrainDragXAxis />
             <div class="h-full w-full flex flex-col items-center gap-3 px-3 py-3 overflow-y-auto no-scrollbar">
+              {props.renderRecentTile()}
               <SortableProvider ids={props.projects().map((p) => p.worktree)}>
                 <For each={props.projects()}>{(project) => props.renderProject(project)}</For>
               </SortableProvider>
@@ -92,15 +92,6 @@ export const SidebarContent = (props: {
           </DragDropProvider>
         </div>
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
-          <Tooltip placement={placement()} value={props.recentLabel()}>
-            <IconButton
-              icon="status"
-              variant="ghost"
-              size="large"
-              onClick={props.onOpenRecent}
-              aria-label={props.recentLabel()}
-            />
-          </Tooltip>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
             <IconButton
               icon="settings-gear"

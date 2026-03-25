@@ -705,6 +705,9 @@ export const dict = {
   "sidebar.project.clearNotifications": "Clear notifications",
   "sidebar.empty.title": "No projects open",
   "sidebar.empty.description": "Open a project to get started",
+  "sidebar.recent.description": "Across all projects",
+  "common.search": "Search",
+  "common.noResults": "No results",
 
   "debugBar.ariaLabel": "Development performance diagnostics",
   "debugBar.na": "n/a",
