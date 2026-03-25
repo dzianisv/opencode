@@ -1,12 +1,13 @@
 import { BusEvent } from "@/bus/bus-event"
+import { Effect, Layer, ServiceMap } from "effect"
 import path from "path"
 import z from "zod"
-import { NamedError } from "@opencode-ai/util/error"
 import { Log } from "../util/log"
 import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
 import { Process } from "@/util/process"
 import { buffer } from "node:stream/consumers"
+import semver from "semver"
 
 declare global {
   const OPENCODE_VERSION: string
@@ -75,6 +76,7 @@ export namespace Installation {
   }
 
   export type Method = Awaited<ReturnType<typeof method>>
+  export type ReleaseType = "patch" | "minor" | "major"
 
   export const Event = {
     Updated: BusEvent.define(
@@ -89,6 +91,17 @@ export namespace Installation {
         version: z.string(),
       }),
     ),
+  }
+
+  export function getReleaseType(current: string, latest: string): ReleaseType {
+    const currMajor = semver.major(current)
+    const currMinor = semver.minor(current)
+    const nextMajor = semver.major(latest)
+    const nextMinor = semver.minor(latest)
+
+    if (nextMajor > currMajor) return "major"
+    if (nextMinor > currMinor) return "minor"
+    return "patch"
   }
 
   export const Info = z
@@ -174,12 +187,15 @@ export namespace Installation {
     return "unknown"
   }
 
-  export const UpgradeFailedError = NamedError.create(
-    "UpgradeFailedError",
-    z.object({
-      stderr: z.string(),
-    }),
-  )
+  export class UpgradeFailedError extends Error {
+    stderr: string
+
+    constructor(input: { stderr: string }) {
+      super(input.stderr)
+      this.name = "UpgradeFailedError"
+      this.stderr = input.stderr
+    }
+  }
 
   async function getBrewFormula() {
     const tapFormula = await text(["brew", "list", "--formula", "anomalyco/tap/opencode"])
@@ -322,4 +338,27 @@ export namespace Installation {
       })
       .then((data: any) => data.tag_name.replace(/^v/, ""))
   }
+
+  export interface Interface {
+    readonly info: () => Effect.Effect<Info>
+    readonly method: () => Effect.Effect<Method>
+    readonly latest: (method?: Method) => Effect.Effect<string>
+    readonly upgrade: (method: Method, target: string) => Effect.Effect<void, UpgradeFailedError>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Installation") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      info: () => Effect.promise(() => info()),
+      method: () => Effect.promise(() => method()),
+      latest: (method) => Effect.promise(() => latest(method)),
+      upgrade: (method, target) =>
+        Effect.tryPromise({
+          try: () => upgrade(method, target),
+          catch: (err) => new UpgradeFailedError({ stderr: err instanceof Error ? err.message : String(err) }),
+        }),
+    }),
+  )
 }
