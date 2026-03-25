@@ -1,15 +1,13 @@
-import { Effect, Layer, Schema, ServiceMap, Stream } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
-import { makeRuntime } from "@/effect/run-service"
-import { withTransientReadRetry } from "@/util/effect-http-client"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { BusEvent } from "@/bus/bus-event"
+import { Effect, Layer, ServiceMap } from "effect"
 import path from "path"
 import z from "zod"
-import { BusEvent } from "@/bus/bus-event"
-import { Flag } from "../flag/flag"
 import { Log } from "../util/log"
-import { CHANNEL as channel, VERSION as version } from "./meta"
+import { iife } from "@/util/iife"
+import { Flag } from "../flag/flag"
+import { Process } from "@/util/process"
+import { buffer } from "node:stream/consumers"
+import semver from "semver"
 
 import semver from "semver"
 
@@ -44,6 +42,31 @@ export namespace Installation {
 
   export type Method = "curl" | "npm" | "yarn" | "pnpm" | "bun" | "brew" | "scoop" | "choco" | "unknown"
 
+  async function upgradeCurl(target: string) {
+    const body = await fetch("https://opencode.ai/install").then((res) => {
+      if (!res.ok) throw new Error(res.statusText)
+      return res.text()
+    })
+    const proc = Process.spawn(["bash"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        VERSION: target,
+      },
+    })
+    if (!proc.stdin || !proc.stdout || !proc.stderr) throw new Error("Process output not available")
+    proc.stdin.end(body)
+    const [code, stdout, stderr] = await Promise.all([proc.exited, buffer(proc.stdout), buffer(proc.stderr)])
+    return {
+      code,
+      stdout,
+      stderr,
+    }
+  }
+
+  export type Method = Awaited<ReturnType<typeof method>>
   export type ReleaseType = "patch" | "minor" | "major"
 
   export const Event = {
@@ -64,11 +87,11 @@ export namespace Installation {
   export function getReleaseType(current: string, latest: string): ReleaseType {
     const currMajor = semver.major(current)
     const currMinor = semver.minor(current)
-    const newMajor = semver.major(latest)
-    const newMinor = semver.minor(latest)
+    const nextMajor = semver.major(latest)
+    const nextMinor = semver.minor(latest)
 
-    if (newMajor > currMajor) return "major"
-    if (newMinor > currMinor) return "minor"
+    if (nextMajor > currMajor) return "major"
+    if (nextMinor > currMinor) return "minor"
     return "patch"
   }
 
@@ -132,7 +155,15 @@ export namespace Installation {
     return "unknown"
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Installation") {}
+  export class UpgradeFailedError extends Error {
+    stderr: string
+
+    constructor(input: { stderr: string }) {
+      super(input.stderr)
+      this.name = "UpgradeFailedError"
+      this.stderr = input.stderr
+    }
+  }
 
   export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner> =
     Layer.effect(
@@ -394,4 +425,27 @@ export namespace Installation {
       })
       .then((data: any) => data.tag_name.replace(/^v/, ""))
   }
+
+  export interface Interface {
+    readonly info: () => Effect.Effect<Info>
+    readonly method: () => Effect.Effect<Method>
+    readonly latest: (method?: Method) => Effect.Effect<string>
+    readonly upgrade: (method: Method, target: string) => Effect.Effect<void, UpgradeFailedError>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Installation") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      info: () => Effect.promise(() => info()),
+      method: () => Effect.promise(() => method()),
+      latest: (method) => Effect.promise(() => latest(method)),
+      upgrade: (method, target) =>
+        Effect.tryPromise({
+          try: () => upgrade(method, target),
+          catch: (err) => new UpgradeFailedError({ stderr: err instanceof Error ? err.message : String(err) }),
+        }),
+    }),
+  )
 }
