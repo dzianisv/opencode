@@ -135,12 +135,12 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
   }
 
   if (method !== "curl" && method !== "unknown") {
-    const pkg = await Installation.pkg(method)
+    const name = pkg(method)
     const cmds: Record<string, string> = {
-      npm: `npm uninstall -g ${pkg}`,
-      pnpm: `pnpm uninstall -g ${pkg}`,
-      bun: `bun remove -g ${pkg}`,
-      yarn: `yarn global remove ${pkg}`,
+      npm: `npm uninstall -g ${name}`,
+      pnpm: `pnpm uninstall -g ${name}`,
+      bun: `bun remove -g ${name}`,
+      yarn: `yarn global remove ${name}`,
       brew: "brew uninstall opencode",
       choco: "choco uninstall opencode",
       scoop: "scoop uninstall opencode",
@@ -187,12 +187,12 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
   }
 
   if (method !== "curl" && method !== "unknown") {
-    const pkg = await Installation.pkg(method)
+    const name = pkg(method)
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", pkg],
-      pnpm: ["pnpm", "uninstall", "-g", pkg],
-      bun: ["bun", "remove", "-g", pkg],
-      yarn: ["yarn", "global", "remove", pkg],
+      npm: ["npm", "uninstall", "-g", name],
+      pnpm: ["pnpm", "uninstall", "-g", name],
+      bun: ["bun", "remove", "-g", name],
+      yarn: ["yarn", "global", "remove", name],
       brew: ["brew", "uninstall", "opencode"],
       choco: ["choco", "uninstall", "opencode"],
       scoop: ["scoop", "uninstall", "opencode"],
