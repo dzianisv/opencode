@@ -767,9 +767,19 @@ function App() {
       duration: 30000,
     })
 
-    const result = await sdk.client.global.upgrade({ target: version })
+    const method = await Installation.method()
+    if (method === "unknown") {
+      toast.show({
+        variant: "error",
+        title: "Update Failed",
+        message: "Automatic update is unavailable for this installation.",
+        duration: 10000,
+      })
+      return
+    }
 
-    if (result.error || !result.data?.success) {
+    const err = await Installation.upgrade(method, version).catch((err) => err)
+    if (err) {
       toast.show({
         variant: "error",
         title: "Update Failed",
@@ -782,7 +792,7 @@ function App() {
     await DialogAlert.show(
       dialog,
       "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
+      `Successfully updated to OpenCode v${version}. Please restart the application.`,
     )
 
     exit()
