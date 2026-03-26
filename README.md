@@ -1,3 +1,14 @@
+## Fork Notice
+
+> [!IMPORTANT]
+> This fork exists because we wanted an OpenCode branch that prioritizes runtime stability and orchestration UX.
+>
+> Memory usage and leak-related work comes first, motivated by upstream reports like [anomalyco/opencode#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645), [#19167](https://github.com/anomalyco/opencode/issues/19167), and [#19247](https://github.com/anomalyco/opencode/issues/19247).
+>
+> We also carry voice-to-text, text-to-speech, and recent-session improvements that make multi-session orchestration less brittle: bounded shell output, MCP cleanup and shutdown work, browser and desktop voice controls, and a stronger Recently Active flow.
+>
+> If you care more about long-running stability and session orchestration than strict upstream parity, this is the branch we are actively using.
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>
