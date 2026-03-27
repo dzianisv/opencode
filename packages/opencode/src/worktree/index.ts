@@ -127,7 +127,7 @@ export namespace Worktree {
     }),
   )
 
-  function slugify(input: string) {
+  function slug(input: string) {
     return input
       .trim()
       .toLowerCase()
@@ -136,8 +136,36 @@ export namespace Worktree {
       .replace(/-+$/, "")
   }
 
-  function failedRemoves(...chunks: string[]) {
-    return chunks.filter(Boolean).flatMap((chunk) =>
+  function stamp() {
+    const date = new Date(Date.now())
+    const pad = (value: number) => String(value).padStart(2, "0")
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate()),
+      pad(date.getHours()),
+      pad(date.getMinutes()),
+    ].join("-")
+  }
+
+  async function exists(target: string) {
+    return fs
+      .stat(target)
+      .then(() => true)
+      .catch(() => false)
+  }
+
+  function outputText(input: Uint8Array | undefined) {
+    if (!input?.length) return ""
+    return new TextDecoder().decode(input).trim()
+  }
+
+  function errorText(result: { stdout?: Uint8Array; stderr?: Uint8Array }) {
+    return [outputText(result.stderr), outputText(result.stdout)].filter(Boolean).join("\n")
+  }
+
+  function failed(result: { stdout?: Uint8Array; stderr?: Uint8Array }) {
+    return [outputText(result.stderr), outputText(result.stdout)].filter(Boolean).flatMap((chunk) =>
       chunk
         .split("\n")
         .map((line) => line.trim())
@@ -198,13 +226,11 @@ export namespace Worktree {
         ),
       )
 
-      const MAX_NAME_ATTEMPTS = 26
-      const candidate = Effect.fn("Worktree.candidate")(function* (root: string, base?: string) {
-        const ctx = yield* InstanceState.context
-        for (const attempt of Array.from({ length: MAX_NAME_ATTEMPTS }, (_, i) => i)) {
-          const name = base ? (attempt === 0 ? base : `${base}-${Slug.create()}`) : Slug.create()
-          const branch = `opencode/${name}`
-          const directory = pathSvc.join(root, name)
+  async function candidate(root: string, base: string) {
+    for (const attempt of Array.from({ length: 100 }, (_, i) => i)) {
+      const name = attempt === 0 ? base : `${base}-${attempt + 1}`
+      const branch = `opencode/${name}`
+      const directory = path.join(root, name)
 
           if (yield* fs.exists(directory).pipe(Effect.orDie)) continue
 
@@ -242,10 +268,12 @@ export namespace Worktree {
         yield* project.addSandbox(ctx.project.id, info.directory).pipe(Effect.catch(() => Effect.void))
       })
 
-      const boot = Effect.fnUntraced(function* (info: Info, startCommand?: string) {
-        const ctx = yield* InstanceState.context
-        const projectID = ctx.project.id
-        const extra = startCommand?.trim()
+    const base =
+      slug(name || "") ||
+      `${slug(path.basename(Instance.project.worktree)) || "worktree"}-${stamp()}`
+
+    return candidate(root, base)
+  }
 
         const populated = yield* git(["reset", "--hard"], { cwd: info.directory })
         if (populated.code !== 0) {

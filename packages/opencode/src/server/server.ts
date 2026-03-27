@@ -12,6 +12,7 @@ import { WorkspaceRouterMiddleware } from "./router"
 import { websocket } from "hono/bun"
 import { errors } from "./error"
 import { GlobalRoutes } from "./routes/global"
+import { TtsRoutes } from "./routes/tts"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { errorHandler } from "./middleware"
@@ -106,6 +107,7 @@ export namespace Server {
         return zipped(c, next)
       })
       .route("/global", GlobalRoutes())
+      .route("/tts", TtsRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
@@ -304,10 +306,7 @@ export namespace Server {
             host: "app.opencode.ai",
           },
         })
-        response.headers.set(
-          "Content-Security-Policy",
-          csp,
-        )
+        response.headers.set("Content-Security-Policy", csp)
         return response
       })
   }

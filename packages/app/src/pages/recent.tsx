@@ -2,37 +2,14 @@ import { createResource, createSignal, For, Show, createMemo } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { base64Encode } from "@opencode-ai/util/encode"
+import { type GlobalSession } from "@opencode-ai/sdk/v2/client"
 import { useGlobalSDK } from "@/context/global-sdk"
-import { useGlobalSync } from "@/context/global-sync"
 import { DateTime } from "luxon"
-
-type RecentSession = {
-  id: string
-  title: string
-  directory: string
-  project?: { id: string; name?: string; worktree: string } | null
-  time: { created: number; updated: number; archived?: number }
-  summary?: { additions?: number; deletions?: number; files?: number }
-  parentID?: string
-}
-
-type FlatEntry = { session: RecentSession; depth: number }
-
-function flatten(roots: RecentSession[], children: Map<string, RecentSession[]>): FlatEntry[] {
-  const result: FlatEntry[] = []
-  function walk(session: RecentSession, depth: number) {
-    result.push({ session, depth })
-    const kids = children.get(session.id)
-    if (kids) for (const child of kids) walk(child, depth + 1)
-  }
-  for (const root of roots) walk(root, 0)
-  return result
-}
+import { flattenRecentRoots, organizeRecentSessions, recentPrefix, recentTime } from "@/utils/recent-session"
 
 export default function Recent() {
   const navigate = useNavigate()
   const globalSDK = useGlobalSDK()
-  const sync = useGlobalSync()
   const [search, setSearch] = createSignal("")
 
   const [sessions] = createResource(
@@ -43,43 +20,15 @@ export default function Recent() {
           limit: 100,
           search: query || undefined,
         })
-        .then((x) => (x.data ?? []) as RecentSession[])
+        .then((x) => (x.data ?? []) as GlobalSession[])
         .catch(() => [])
     },
   )
 
-  const tree = createMemo(() => {
-    const all = sessions() ?? []
-    const ids = new Set(all.map((s) => s.id))
-    const children = new Map<string, RecentSession[]>()
-    const roots: RecentSession[] = []
-    for (const session of all) {
-      if (!session.parentID || !ids.has(session.parentID)) {
-        roots.push(session)
-        continue
-      }
-      const list = children.get(session.parentID)
-      if (list) list.push(session)
-      else children.set(session.parentID, [session])
-    }
-    return flatten(roots, children)
-  })
-
-  const projects = createMemo(() => {
-    const map = new Map<string, string>()
-    for (const p of sync.data.project) {
-      map.set(p.worktree, p.name || p.worktree.split("/").pop() || p.worktree)
-    }
-    return map
-  })
+  const data = createMemo(() => organizeRecentSessions(sessions() ?? []))
 
   function ago(ts: number) {
     return DateTime.fromMillis(ts).toRelative() ?? ""
-  }
-
-  function label(session: { directory: string; project?: { name?: string; worktree: string } | null }) {
-    if (session.project?.name) return session.project.name
-    return projects().get(session.directory) || session.directory.split("/").pop() || session.directory
   }
 
   function open(session: { id: string; directory: string }) {
@@ -129,46 +78,82 @@ export default function Recent() {
           </div>
         </Show>
 
-        <div class="divide-y divide-border-base">
-          <For each={tree()}>
-            {(entry) => (
-              <button
-                class="w-full flex items-start gap-3 py-3 hover:bg-background-hover-base transition-colors text-left"
-                style={{ "padding-left": `${24 + entry.depth * 20}px`, "padding-right": "24px" }}
-                onClick={() => open(entry.session)}
-              >
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <Show when={entry.depth > 0}>
-                      <Icon name="fork" class="size-3 text-color-dimmed-base shrink-0" />
-                    </Show>
-                    <span class="text-13-medium text-color-primary-base truncate">{entry.session.title}</span>
-                    <Show when={entry.session.summary && entry.session.summary.files}>
-                      <span class="shrink-0 text-11-regular text-color-dimmed-base">
-                        {entry.session.summary!.files} file{entry.session.summary!.files !== 1 ? "s" : ""}
-                      </span>
-                    </Show>
+        <div class="flex flex-col gap-6 px-4 py-4">
+          <For each={data().sections}>
+            {(group) => {
+              const list = () =>
+                flattenRecentRoots({
+                  roots: group.items,
+                  lookup: data().lookup,
+                  children: data().children,
+                })
+
+              return (
+                <section class="flex flex-col gap-1">
+                  <div class="px-2 pb-1 text-[11px] leading-4 text-color-dimmed-base uppercase tracking-[0.08em]">
+                    {group.label}
                   </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-12-regular text-color-secondary-base truncate">{label(entry.session)}</span>
-                    <span class="text-11-regular text-color-dimmed-base">{ago(entry.session.time.updated)}</span>
+                  <div class="overflow-hidden rounded-xl border border-border-base">
+                    <For each={list()}>
+                      {(entry, index) => (
+                        <button
+                          classList={{
+                            "w-full flex items-start gap-3 py-3 hover:bg-background-hover-base transition-colors text-left":
+                              true,
+                            "border-t border-border-base": index() > 0,
+                          }}
+                          style={{ "padding-left": `${16 + entry.depth * 18}px`, "padding-right": "16px" }}
+                          onClick={() => open(entry.session)}
+                        >
+                          <div class="mt-0.5 shrink-0 text-color-dimmed-base">
+                            <Show when={entry.depth > 0} fallback={<Icon name="status" class="size-3.5" />}>
+                              <Icon name="fork" class="size-3.5" />
+                            </Show>
+                          </div>
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                              <span class="text-13-medium text-color-primary-base truncate">{entry.session.title}</span>
+                              <Show when={entry.session.summary && entry.session.summary.files}>
+                                <span class="shrink-0 text-11-regular text-color-dimmed-base">
+                                  {entry.session.summary!.files} file{entry.session.summary!.files !== 1 ? "s" : ""}
+                                </span>
+                              </Show>
+                            </div>
+                            <div class="flex items-center gap-2 mt-0.5 min-w-0">
+                              <span class="text-11-regular text-color-secondary-base truncate">
+                                {recentPrefix(entry.session)}
+                              </span>
+                              <span class="shrink-0 text-11-regular text-color-dimmed-base">
+                                {ago(recentTime(entry.session))}
+                              </span>
+                            </div>
+                            <Show
+                              when={
+                                entry.session.summary && (entry.session.summary.additions || entry.session.summary.deletions)
+                              }
+                            >
+                              <div class="flex items-center gap-1.5 mt-1">
+                                <Show when={entry.session.summary!.additions}>
+                                  <span class="text-11-regular text-icon-success-base">
+                                    +{entry.session.summary!.additions}
+                                  </span>
+                                </Show>
+                                <Show when={entry.session.summary!.deletions}>
+                                  <span class="text-11-regular text-icon-critical-base">
+                                    -{entry.session.summary!.deletions}
+                                  </span>
+                                </Show>
+                              </div>
+                            </Show>
+                          </div>
+                          <Icon name="chevron-right" class="size-4 text-color-dimmed-base shrink-0 mt-1" />
+                        </button>
+                      )}
+                    </For>
                   </div>
-                  <Show
-                    when={entry.session.summary && (entry.session.summary.additions || entry.session.summary.deletions)}
-                  >
-                    <div class="flex items-center gap-1.5 mt-1">
-                      <Show when={entry.session.summary!.additions}>
-                        <span class="text-11-regular text-icon-success-base">+{entry.session.summary!.additions}</span>
-                      </Show>
-                      <Show when={entry.session.summary!.deletions}>
-                        <span class="text-11-regular text-icon-critical-base">-{entry.session.summary!.deletions}</span>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-                <Icon name="chevron-right" class="size-4 text-color-dimmed-base shrink-0 mt-1" />
-              </button>
-            )}
+                </section>
+              )
+            }}
           </For>
         </div>
       </div>

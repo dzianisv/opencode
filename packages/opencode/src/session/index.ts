@@ -709,8 +709,41 @@ export namespace Session {
     runPromise((svc) => svc.setTitle(input)),
   )
 
-  export const setArchived = fn(z.object({ sessionID: SessionID.zod, time: z.number().optional() }), (input) =>
-    runPromise((svc) => svc.setArchived(input)),
+  export const setArchived = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      time: z.number().optional(),
+    }),
+    async (input) => {
+      const info = Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({ time_archived: input.time })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+
+      if (input.time === undefined) return info
+
+      const list = await children(input.sessionID)
+      await Promise.all(
+        list
+          .filter((session) => session.time.archived !== input.time)
+          .map((session) =>
+            setArchived({
+              sessionID: session.id,
+              time: input.time,
+            }),
+          ),
+      )
+
+      return info
+    },
   )
 
   export const setPermission = fn(z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset }), (input) =>
