@@ -41,6 +41,7 @@ import { Filesystem } from "@/util/filesystem"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
+import { TtsRoutes } from "./routes/tts"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 
@@ -143,6 +144,7 @@ export namespace Server {
         }),
       )
       .route("/global", GlobalRoutes())
+      .route("/tts", TtsRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
@@ -550,10 +552,7 @@ export namespace Server {
             host: "app.opencode.ai",
           },
         })
-        response.headers.set(
-          "Content-Security-Policy",
-          csp,
-        )
+        response.headers.set("Content-Security-Policy", csp)
         return response
       })
   }
