@@ -371,24 +371,49 @@ export function MessageTimeline(props: {
   let spokenMessage = ""
 
   const speak = (input: { messageID: string; text: string }) => {
-    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
-    const Ctor =
-      typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
-    if (!synth || !Ctor) {
-      showToast({
-        title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
-        description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
+    spokenMessage = input.messageID
+    const conn = server.current?.http
+    const run = async () => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (conn?.password) {
+        headers.Authorization = `Basic ${btoa(`${conn.username ?? "opencode"}:${conn.password}`)}`
+      }
+
+      const res = await (platform.fetch ?? fetch)(new URL("/tts/edge", conn?.url ?? globalSDK.url).toString(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: input.text }),
       })
-      return
+
+      if (!res.ok) throw new Error(`Edge TTS request failed (${res.status})`)
+      const blob = await res.blob()
+      clearAudio()
+      audioUrl = URL.createObjectURL(blob)
+      audio = new Audio(audioUrl)
+      await audio.play()
     }
 
-    spokenMessage = input.messageID
-    const utterance = new Ctor(input.text)
-    utterance.lang =
-      typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
-    utterance.rate = 1
-    synth.cancel()
-    synth.speak(utterance)
+    void run().catch(() => {
+      const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+      const Ctor =
+        typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
+      if (!synth || !Ctor) {
+        showToast({
+          title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
+          description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
+        })
+        return
+      }
+
+      const utterance = new Ctor(input.text)
+      utterance.lang =
+        typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
+      utterance.rate = 1
+      synth.cancel()
+      synth.speak(utterance)
+    })
   }
 
   createEffect(() => {
