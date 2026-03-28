@@ -98,6 +98,8 @@ export namespace Pty {
     Deleted: BusEvent.define("pty.deleted", z.object({ id: PtyID.zod })),
   }
 
+  let total = 0
+
   export interface Interface {
     readonly list: () => Effect.Effect<Info[]>
     readonly get: (id: PtyID) => Effect.Effect<Info | undefined>
@@ -139,6 +141,7 @@ export namespace Pty {
 
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
+              total = Math.max(0, total - state.sessions.size)
               for (const session of state.sessions.values()) {
                 teardown(session)
               }
@@ -155,6 +158,7 @@ export namespace Pty {
         const session = state.sessions.get(id)
         if (!session) return
         state.sessions.delete(id)
+        total = Math.max(0, total - 1)
         log.info("removing session", { id })
         teardown(session)
         void Bus.publish(Event.Deleted, { id: session.info.id })
@@ -222,6 +226,7 @@ export namespace Pty {
             subscribers: new Map(),
           }
           state.sessions.set(id, session)
+          total += 1
           proc.onData(
             Instance.bind((chunk) => {
               session.cursor += chunk.length
@@ -369,6 +374,10 @@ export namespace Pty {
 
   export async function get(id: PtyID) {
     return runPromise((svc) => svc.get(id))
+  }
+
+  export function count() {
+    return total
   }
 
   export async function resize(id: PtyID, cols: number, rows: number) {
