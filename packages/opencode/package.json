@@ -15,6 +15,8 @@
     "copy:local": "bun run script/install-local.ts",
     "install:local": "bun run --cwd ../app build && bun run build:local && bun run sign:local && bun run copy:local",
     "profile:memory": "bun run script/memory-profile.ts",
+    "profile:memory:wait": "bun run script/memory-profile.ts -- bun run --conditions=browser ./src/index.ts debug wait",
+    "profile:memory:workload": "bun run script/memory-workload.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "random": "echo 'Random script updated at $(date)' && echo 'Change queued successfully' && echo 'Another change made' && echo 'Yet another change' && echo 'One more change' && echo 'Final change' && echo 'Another final change' && echo 'Yet another final change'",
     "clean": "echo 'Cleaning up...' && rm -rf node_modules dist",
