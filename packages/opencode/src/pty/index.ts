@@ -29,7 +29,8 @@ export namespace Pty {
   type Active = {
     info: Info
     process: IPty
-    buffer: string
+    chunks: string[]
+    bufferSize: number
     bufferCursor: number
     cursor: number
     subscribers: Map<unknown, Socket>
@@ -98,6 +99,8 @@ export namespace Pty {
     Deleted: BusEvent.define("pty.deleted", z.object({ id: PtyID.zod })),
   }
 
+  let total = 0
+
   export interface Interface {
     readonly list: () => Effect.Effect<Info[]>
     readonly get: (id: PtyID) => Effect.Effect<Info | undefined>
@@ -139,6 +142,7 @@ export namespace Pty {
 
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
+              total = Math.max(0, total - state.sessions.size)
               for (const session of state.sessions.values()) {
                 teardown(session)
               }
@@ -155,6 +159,7 @@ export namespace Pty {
         const session = state.sessions.get(id)
         if (!session) return
         state.sessions.delete(id)
+        total = Math.max(0, total - 1)
         log.info("removing session", { id })
         teardown(session)
         void Bus.publish(Event.Deleted, { id: session.info.id })
@@ -216,12 +221,14 @@ export namespace Pty {
           const session: Active = {
             info,
             process: proc,
-            buffer: "",
+            chunks: [],
+            bufferSize: 0,
             bufferCursor: 0,
             cursor: 0,
             subscribers: new Map(),
           }
           state.sessions.set(id, session)
+          total += 1
           proc.onData(
             Instance.bind((chunk) => {
               session.cursor += chunk.length
@@ -242,11 +249,14 @@ export namespace Pty {
                 }
               }
 
-              session.buffer += chunk
-              if (session.buffer.length <= BUFFER_LIMIT) return
-              const excess = session.buffer.length - BUFFER_LIMIT
-              session.buffer = session.buffer.slice(excess)
-              session.bufferCursor += excess
+              session.chunks.push(chunk)
+              session.bufferSize += chunk.length
+              if (session.bufferSize <= BUFFER_LIMIT) return
+              while (session.bufferSize > BUFFER_LIMIT && session.chunks.length > 1) {
+                const dropped = session.chunks.shift()!
+                session.bufferSize -= dropped.length
+                session.bufferCursor += dropped.length
+              }
             }),
           )
           proc.onExit(
@@ -319,11 +329,11 @@ export namespace Pty {
           cursor === -1 ? end : typeof cursor === "number" && Number.isSafeInteger(cursor) ? Math.max(0, cursor) : 0
 
         const data = (() => {
-          if (!session.buffer) return ""
+          if (session.bufferSize === 0) return ""
           if (from >= end) return ""
           const offset = Math.max(0, from - start)
-          if (offset >= session.buffer.length) return ""
-          return session.buffer.slice(offset)
+          if (offset >= session.bufferSize) return ""
+          return session.chunks.join("").slice(offset)
         })()
 
         if (data) {
@@ -369,6 +379,10 @@ export namespace Pty {
 
   export async function get(id: PtyID) {
     return runPromise((svc) => svc.get(id))
+  }
+
+  export function count() {
+    return total
   }
 
   export async function resize(id: PtyID, cols: number, rows: number) {

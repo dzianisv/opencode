@@ -184,15 +184,20 @@ export const BashTool = Tool.define("bash", async () => {
       await fs.mkdir(Truncate.DIR, { recursive: true })
       const file = createWriteStream(outputPath)
 
-      let output = ""
       let bytes = 0
       let lines = 0
+      let kept = 0
+      let lineKept = 0
       let cut = false
       let over = false
       let streamError: Error | undefined
-      let meta_at = 0
-      let meta_bytes = 0
       let paused = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let dirty = false
+
+      const out: string[] = []
+      const preview: string[] = []
+      let previewLen = 0
 
       // Initialize metadata with empty output
       ctx.metadata({
@@ -202,14 +207,21 @@ export const BashTool = Tool.define("bash", async () => {
         },
       })
 
-      const publish = (force = false) => {
-        const now = Date.now()
-        if (!force && bytes - meta_bytes < 8 * 1024 && now - meta_at < 150) return
-        meta_at = now
-        meta_bytes = bytes
+      const renderPreview = () => {
+        const text = preview.join("")
+        if (previewLen > MAX_METADATA_LENGTH) {
+          return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+        }
+        return text
+      }
+
+      const publish = () => {
+        timer = undefined
+        if (!dirty) return
+        dirty = false
         ctx.metadata({
           metadata: {
-            output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
+            output: renderPreview(),
             description: params.description,
             truncated: over || cut,
           },
@@ -221,8 +233,13 @@ export const BashTool = Tool.define("bash", async () => {
       })
 
       const toBytes = (value: string, max: number) => Buffer.from(value, "utf-8").subarray(0, max).toString("utf-8")
+      const clip = (text: string) => {
+        const lines = text.split("\n").slice(0, MAX_OUTPUT_LINES).join("\n")
+        return toBytes(lines, MAX_OUTPUT_BYTES)
+      }
 
       const append = (chunk: Buffer) => {
+        const text = chunk.toString()
         bytes += chunk.byteLength
         for (const value of chunk) {
           if (value === 10) lines++
@@ -243,20 +260,24 @@ export const BashTool = Tool.define("bash", async () => {
         }
 
         if (!cut) {
-          output += chunk.toString()
-          if (Buffer.byteLength(output, "utf-8") > MAX_OUTPUT_BYTES) {
-            output = toBytes(output, MAX_OUTPUT_BYTES)
-            cut = true
-            over = true
-          }
-          const count = output.split("\n").length
-          if (count > MAX_OUTPUT_LINES) {
-            output = output.split("\n").slice(0, MAX_OUTPUT_LINES).join("\n")
+          out.push(text)
+          kept += chunk.byteLength
+          lineKept += text.split("\n").length - 1
+          if (kept > MAX_OUTPUT_BYTES || lineKept + 1 > MAX_OUTPUT_LINES) {
+            const short = clip(out.join(""))
+            out.length = 0
+            out.push(short)
             cut = true
             over = true
           }
         }
-        publish()
+
+        if (previewLen <= MAX_METADATA_LENGTH) {
+          preview.push(text)
+          previewLen += text.length
+        }
+        dirty = true
+        if (!timer) timer = setTimeout(publish, 100)
       }
       proc.stdout?.on("data", append)
       proc.stderr?.on("data", append)
@@ -307,6 +328,11 @@ export const BashTool = Tool.define("bash", async () => {
         await new Promise<void>((resolve) => file.end(() => resolve()))
       }
 
+      if (timer) clearTimeout(timer)
+      publish()
+
+      let output = out.join("")
+
       const resultMetadata: string[] = []
 
       if (timedOut) {
@@ -344,8 +370,6 @@ export const BashTool = Tool.define("bash", async () => {
               return `${short}\n\n...${Math.max(0, removed)} ${unit} truncated...\n\n${hint}`
             })()
           : output
-
-      publish(true)
 
       return {
         title: params.description,

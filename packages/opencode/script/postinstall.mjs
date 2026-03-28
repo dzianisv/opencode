@@ -50,51 +50,31 @@ function detectPlatformAndArch() {
 function findBinary() {
   const { platform, arch } = detectPlatformAndArch()
   const packageName = `opencode-${platform}-${arch}`
-  const binaryName = platform === "windows" ? "opencode.exe" : "opencode"
 
   try {
     // Use require.resolve to find the package
     const packageJsonPath = require.resolve(`${packageName}/package.json`)
     const packageDir = path.dirname(packageJsonPath)
-    const binaryPath = path.join(packageDir, "bin", binaryName)
+    const binaryPath = path.join(packageDir, "bin", platform === "windows" ? "opencode.exe" : "opencode")
 
     if (!fs.existsSync(binaryPath)) {
       throw new Error(`Binary not found at ${binaryPath}`)
     }
 
-    return { binaryPath, binaryName }
+    return { binaryPath }
   } catch (error) {
     throw new Error(`Could not find package ${packageName}: ${error.message}`)
   }
 }
 
-function prepareBinDirectory(binaryName) {
-  const binDir = path.join(__dirname, "bin")
-  const targetPath = path.join(binDir, binaryName)
-
-  // Ensure bin directory exists
-  if (!fs.existsSync(binDir)) {
-    fs.mkdirSync(binDir, { recursive: true })
+function installBinary(sourcePath, targetPath) {
+  if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath)
+  try {
+    fs.linkSync(sourcePath, targetPath)
+  } catch {
+    fs.copyFileSync(sourcePath, targetPath)
   }
-
-  // Remove existing binary/symlink if it exists
-  if (fs.existsSync(targetPath)) {
-    fs.unlinkSync(targetPath)
-  }
-
-  return { binDir, targetPath }
-}
-
-function symlinkBinary(sourcePath, binaryName) {
-  const { targetPath } = prepareBinDirectory(binaryName)
-
-  fs.symlinkSync(sourcePath, targetPath)
-  console.log(`opencode binary symlinked: ${targetPath} -> ${sourcePath}`)
-
-  // Verify the file exists after operation
-  if (!fs.existsSync(targetPath)) {
-    throw new Error(`Failed to symlink binary to ${targetPath}`)
-  }
+  fs.chmodSync(targetPath, 0o755)
 }
 
 async function main() {
@@ -106,17 +86,12 @@ async function main() {
       return
     }
 
-    // On non-Windows platforms, just verify the binary package exists
-    // Don't replace the wrapper script - it handles binary execution
+    // Install the native binary directly so `opencode` does not keep a Node wrapper alive.
     const { binaryPath } = findBinary()
-    const target = path.join(__dirname, "bin", ".opencode")
-    if (fs.existsSync(target)) fs.unlinkSync(target)
-    try {
-      fs.linkSync(binaryPath, target)
-    } catch {
-      fs.copyFileSync(binaryPath, target)
-    }
-    fs.chmodSync(target, 0o755)
+    const cache = path.join(__dirname, "bin", ".opencode")
+    const entry = path.join(__dirname, "bin", "opencode")
+    installBinary(binaryPath, cache)
+    installBinary(binaryPath, entry)
   } catch (error) {
     console.error("Failed to setup opencode binary:", error.message)
     process.exit(1)
