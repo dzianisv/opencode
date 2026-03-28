@@ -199,7 +199,7 @@ export const Instance = {
 
     try {
       const ctx = await existing
-      return await context.provide(ctx, async () => {
+      return context.provide(ctx, async () => {
         return input.fn()
       })
     } finally {

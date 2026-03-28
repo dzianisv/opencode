@@ -9,11 +9,6 @@ import { MCP } from "../../mcp"
 import { Instance } from "../../project/instance"
 import { Log } from "../../util/log"
 import { Memory } from "../../diagnostic/memory"
-import { Session } from "../../session"
-import { SessionPrompt } from "../../session/prompt"
-import { pickResume, ResumePrompt } from "../../session/auto-resume"
-import { WorkspaceContext } from "../../control-plane/workspace-context"
-import { InstanceBootstrap } from "../../project/bootstrap"
 
 const log = Log.create({ service: "serve" })
 
@@ -104,12 +99,10 @@ export const ServeCommand = cmd({
       await server.stop()
     }
 
-    const signal = await new Promise<string>((resolve) => {
-      for (const item of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-        process.once(item, () => resolve(item))
-      }
-    })
-
-    await shutdown(signal)
+    process.on("SIGTERM", () => void shutdown("SIGTERM"))
+    process.on("SIGINT", () => void shutdown("SIGINT"))
+    await new Promise(() => {})
+    Memory.stop()
+    await server.stop()
   },
 })
