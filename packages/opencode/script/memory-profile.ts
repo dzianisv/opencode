@@ -1,227 +1,274 @@
-const base = process.env["OPENCODE_BASE_URL"] || "http://127.0.0.1:4096"
-const dir = process.env["OPENCODE_DIRECTORY"] || process.cwd()
-const ms = Number(process.env["OPENCODE_PROFILE_DURATION_MS"] || 60 * 60 * 1000)
-const batch = Number(process.env["OPENCODE_PROFILE_BATCH"] || 8)
-const min = Number(process.env["OPENCODE_PROFILE_MIN_SESSIONS"] || 10)
-const max = Number(process.env["OPENCODE_PROFILE_MAX_SESSIONS"] || 30)
-const poll = Number(process.env["OPENCODE_PROFILE_POLL_MS"] || 1000)
-const list = Number(process.env["OPENCODE_PROFILE_LIST_EVERY"] || 4)
-const add = Number(process.env["OPENCODE_PROFILE_ADD_EVERY"] || 5)
-const drop = Number(process.env["OPENCODE_PROFILE_DROP_EVERY"] || 7)
-const stop = Number(process.env["OPENCODE_PROFILE_STOP_TREE_MB"] || 5120)
+#!/usr/bin/env bun
 
-const q = (path: string, opt?: Record<string, string | number | boolean | null | undefined>) => {
-  const url = new URL(path, base)
-  url.searchParams.set("directory", dir)
-  for (const k of Object.keys(opt || {})) {
-    const val = opt?.[k]
-    if (val === undefined || val === null) continue
-    url.searchParams.set(k, String(val))
-  }
-  return url
+import path from "path"
+
+const raw = process.argv.slice(2)
+const split = raw.indexOf("--")
+const arg = split === -1 ? raw : raw.slice(0, split)
+const cmd = split === -1 ? [] : raw.slice(split + 1)
+
+const opt = {
+  duration: 120,
+  interval: 2000,
+  warmup: 5,
+  out: "",
+  max_delta: undefined as number | undefined,
 }
 
-const req = async (
-  path: string,
-  init?: RequestInit,
-  opt?: Record<string, string | number | boolean | null | undefined>,
-) => {
-  const res = await fetch(q(path, opt), {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers || {}),
-    },
-  })
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "")
-    throw new Error(`${init?.method || "GET"} ${path} ${res.status} ${txt.slice(0, 200)}`)
+for (let i = 0; i < arg.length; i++) {
+  const x = arg[i]
+  if ((x === "--duration" || x === "-d") && arg[i + 1]) {
+    opt.duration = Number(arg[++i])
+    continue
   }
-  const txt = await res.text()
-  if (!txt) return null
-  return JSON.parse(txt)
-}
-
-const wait = (ms: number) => new Promise((done) => setTimeout(done, ms))
-
-const hit = (vals: number[]) => {
-  if (!vals.length) return null
-  return {
-    start: vals[0],
-    end: vals[vals.length - 1],
-    min: Math.min(...vals),
-    max: Math.max(...vals),
-    delta: Number((vals[vals.length - 1] - vals[0]).toFixed(2)),
+  if ((x === "--interval" || x === "-i") && arg[i + 1]) {
+    opt.interval = Number(arg[++i])
+    continue
+  }
+  if ((x === "--warmup" || x === "-w") && arg[i + 1]) {
+    opt.warmup = Number(arg[++i])
+    continue
+  }
+  if ((x === "--out" || x === "-o") && arg[i + 1]) {
+    opt.out = arg[++i]
+    continue
+  }
+  if (x === "--max-delta-mb" && arg[i + 1]) {
+    opt.max_delta = Number(arg[++i])
+    continue
+  }
+  if (x === "--help" || x === "-h") {
+    usage()
+    process.exit(0)
   }
 }
 
-const fit = (rows: any[], key: string) => {
-  if (rows.length < 2) return 0
-  const xs = rows.map((x) => (x.t - rows[0].t) / 60000)
-  const ys = rows.map((x) => x[key])
-  const xm = xs.reduce((a, b) => a + b, 0) / xs.length
-  const ym = ys.reduce((a, b) => a + b, 0) / ys.length
-  const num = xs.reduce((a, _, i) => a + (xs[i] - xm) * (ys[i] - ym), 0)
-  const den = xs.reduce((a, x) => a + (x - xm) * (x - xm), 0)
-  if (den === 0) return 0
-  return Number((num / den).toFixed(2))
+if (!cmd.length) {
+  usage()
+  throw new Error("Missing target command. Pass it after '--'.")
 }
 
-const one = async () => {
-  const mem = await req("/global/memory", undefined, { children: true })
-  return {
-    t: Date.now(),
-    rss_mb: Number((mem.rss_bytes / 1048576).toFixed(2)),
-    heap_used_mb: Number((mem.heap_used_bytes / 1048576).toFixed(2)),
-    heap_total_mb: Number((mem.heap_total_bytes / 1048576).toFixed(2)),
-    ext_mb: Number((mem.external_bytes / 1048576).toFixed(2)),
-    tree_rss_mb: Number((((mem.tree || {}).rss_bytes || 0) / 1048576).toFixed(2)),
-    sessions_total: mem.session?.total || 0,
-    sessions_active: mem.session?.active || 0,
-    instances: mem.instance?.size || 0,
-    pty_active: mem.pty?.active || 0,
-  }
+if (!Number.isFinite(opt.duration) || opt.duration <= 0) {
+  throw new Error("duration must be > 0")
+}
+if (!Number.isFinite(opt.interval) || opt.interval <= 0) {
+  throw new Error("interval must be > 0")
+}
+if (!Number.isFinite(opt.warmup) || opt.warmup < 0) {
+  throw new Error("warmup must be >= 0")
 }
 
-const run = async () => {
-  const now = Date.now()
-  const ses: string[] = []
-  const rows: any[] = []
-  let prompts = 0
-  let shells = 0
-  let adds = 0
-  let drops = 0
-  let errs = 0
-  let loops = 0
-  let log = 0
-  let hit_stop = false
+const out =
+  opt.out ||
+  path.join(process.cwd(), `memory-profile-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}.json`)
 
-  console.log(`[memory-profile] base=${base} directory=${dir} duration_ms=${ms}`)
+console.log(`memory-profile: launching -> ${cmd.join(" ")}`)
+console.log(`memory-profile: duration=${opt.duration}s interval=${opt.interval}ms warmup=${opt.warmup}s`)
+console.log(`memory-profile: output=${out}`)
 
-  await req("/global/health")
-
-  const make = async () => {
-    const out = await req("/session", { method: "POST", body: "{}" })
-    ses.push(out.id)
-    adds++
-    return out.id as string
-  }
-
-  const del = async (id: string) => {
-    await req(`/session/${id}`, { method: "DELETE" })
-    const ix = ses.indexOf(id)
-    if (ix >= 0) ses.splice(ix, 1)
-    drops++
-  }
-
-  const pick = () => ses[Math.floor(Math.random() * ses.length)]
-
-  while (ses.length < min) await make()
-
-  while (Date.now() - now < ms) {
-    loops++
-
-    if (ses.length < min) await make().catch(() => errs++)
-
-    await Promise.all(
-      Array.from({ length: batch }).flatMap((_, i) => {
-        const id = pick()
-        if (!id) return []
-        const list: Promise<unknown>[] = []
-        list.push(
-          req(`/session/${id}/message`, {
-            method: "POST",
-            body: JSON.stringify({
-              agent: "build",
-              noReply: true,
-              parts: [{ type: "text", text: `mem profile prompt ${loops}-${i} ${Date.now()}` }],
-            }),
-          }).then(() => prompts++).catch(() => errs++),
-        )
-        if ((loops + i) % 3 === 0) {
-          list.push(
-            req(`/session/${id}/shell`, {
-              method: "POST",
-              body: JSON.stringify({
-                agent: "build",
-                command: `echo mem-${loops}-${i}-${Date.now()} && ls >/dev/null && pwd >/dev/null`,
-              }),
-            }).then(() => shells++).catch(() => errs++),
-          )
-        }
-        return list
-      }),
-    )
-
-    if (loops % list === 0) await req("/session", undefined, { limit: 50 }).catch(() => errs++)
-    if (loops % add === 0 && ses.length < max) await make().catch(() => errs++)
-    if (loops % drop === 0 && ses.length > min) await del(ses[0]).catch(() => errs++)
-
-    const m = await one().catch(() => {
-      errs++
-      return null
-    })
-
-    if (m) rows.push(m)
-
-    if (m && stop > 0 && m.tree_rss_mb >= stop) {
-      hit_stop = true
-      console.error(
-        `[memory-profile] stop tree_rss_mb=${m.tree_rss_mb}MB threshold=${stop}MB`,
-      )
-      break
-    }
-
-    if (m && Date.now() - log > 30000) {
-      log = Date.now()
-      console.log(
-        `[memory-profile] loops=${loops} sessions=${ses.length} prompts=${prompts} shells=${shells} rss=${m.rss_mb}MB heap=${m.heap_used_mb}/${m.heap_total_mb}MB tree=${m.tree_rss_mb}MB errors=${errs}`,
-      )
-    }
-
-    await wait(poll)
-  }
-
-  const rss = rows.map((x) => x.rss_mb)
-  const heap = rows.map((x) => x.heap_used_mb)
-  const tree = rows.map((x) => x.tree_rss_mb)
-  const cut = rows.slice(Math.floor(rows.length / 2))
-
-  const out = {
-    started_at: new Date(now).toISOString(),
-    ended_at: new Date().toISOString(),
-    duration_sec: Math.round((Date.now() - now) / 1000),
-    prompts,
-    shells,
-    adds,
-    drops,
-    errors: errs,
-    sessions_left: ses.length,
-    sample_count: rows.length,
-    rss_mb: hit(rss),
-    heap_used_mb: hit(heap),
-    tree_rss_mb: hit(tree),
-    slope_mb_per_min: {
-      rss: fit(rows, "rss_mb"),
-      heap_used: fit(rows, "heap_used_mb"),
-      tree_rss: fit(rows, "tree_rss_mb"),
-      rss_half: fit(cut, "rss_mb"),
-      heap_used_half: fit(cut, "heap_used_mb"),
-      tree_rss_half: fit(cut, "tree_rss_mb"),
-    },
-    threshold_hit: hit_stop,
-    threshold_tree_mb: stop,
-    final: rows[rows.length - 1] || null,
-  }
-
-  const path = `/tmp/opencode-memory-profile-${Date.now()}.json`
-  await Bun.write(path, JSON.stringify({ summary: out, samples: rows }, null, 2))
-
-  console.log(`[memory-profile] done ${path}`)
-  console.log(JSON.stringify(out, null, 2))
-}
-
-run().catch((err) => {
-  console.error("[memory-profile] failed", err)
-  process.exit(1)
+const run = Bun.spawn(cmd, {
+  cwd: process.cwd(),
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
 })
+
+const ready = await wait(run.pid, 5000)
+if (!ready) {
+  console.log("memory-profile: warning target pid not yet visible in ps output")
+}
+if (opt.warmup > 0) {
+  const done = await Promise.race([run.exited.then(() => true), Bun.sleep(opt.warmup * 1000).then(() => false)])
+  if (done) {
+    const code = await run.exited
+    throw new Error(`Target exited during warmup with code ${code}`)
+  }
+}
+
+const start = Date.now()
+const rows: {
+  at: string
+  elapsed_ms: number
+  total_rss_kb: number
+  proc: {
+    pid: number
+    ppid: number
+    rss_kb: number
+    cmd: string
+  }[]
+}[] = []
+
+let alive = true
+for (;;) {
+  rows.push(sample(run.pid, start))
+
+  if (Date.now() - start >= opt.duration * 1000) break
+  const done = await Promise.race([run.exited.then(() => true), Bun.sleep(opt.interval).then(() => false)])
+  if (done) {
+    alive = false
+    break
+  }
+}
+
+if (alive) {
+  stop(rows.at(-1)?.proc.map((x) => x.pid) ?? [], "SIGTERM")
+  const done = await Promise.race([run.exited.then(() => true), Bun.sleep(3000).then(() => false)])
+  if (!done) {
+    stop(rows.at(-1)?.proc.map((x) => x.pid) ?? [], "SIGKILL")
+  }
+}
+
+const total = rows.map((x) => x.total_rss_kb)
+const first = total[0] ?? 0
+const last = total.at(-1) ?? 0
+const peak = total.length ? Math.max(...total) : 0
+const delta = last - first
+const span = ((rows.at(-1)?.elapsed_ms ?? 0) - (rows[0]?.elapsed_ms ?? 0)) / 1000
+const slope = span > 0 ? delta / span : 0
+
+const report = {
+  cmd,
+  pid: run.pid,
+  started_at: new Date(start).toISOString(),
+  ended_at: new Date().toISOString(),
+  config: opt,
+  summary: {
+    start_rss_mb: mb(first),
+    end_rss_mb: mb(last),
+    peak_rss_mb: mb(peak),
+    delta_rss_mb: mb(delta),
+    slope_mb_per_s: mb(slope),
+    samples: rows.length,
+  },
+  samples: rows,
+}
+
+await Bun.write(out, JSON.stringify(report, null, 2))
+
+console.log("")
+console.log("memory-profile: summary")
+console.log(`  start rss: ${mb(first).toFixed(2)} MB`)
+console.log(`  end rss:   ${mb(last).toFixed(2)} MB`)
+console.log(`  peak rss:  ${mb(peak).toFixed(2)} MB`)
+console.log(`  delta rss: ${mb(delta).toFixed(2)} MB`)
+console.log(`  slope:     ${mb(slope).toFixed(4)} MB/s`)
+
+if (opt.max_delta !== undefined && mb(delta) > opt.max_delta) {
+  console.error(`memory-profile: FAIL delta ${mb(delta).toFixed(2)} MB > max ${opt.max_delta.toFixed(2)} MB`)
+  process.exit(1)
+}
+
+console.log("memory-profile: PASS")
+
+function usage() {
+  console.log("Usage:")
+  console.log("  bun run script/memory-profile.ts [options] -- <command> [args...]")
+  console.log("")
+  console.log("Options:")
+  console.log("  -d, --duration <seconds>    sample duration (default: 120)")
+  console.log("  -i, --interval <ms>         sample interval (default: 2000)")
+  console.log("  -w, --warmup <seconds>      settle time before sampling (default: 5)")
+  console.log("  -o, --out <path>            output json path")
+  console.log("      --max-delta-mb <mb>     fail if end-start RSS exceeds threshold")
+  console.log("")
+  console.log("Example:")
+  console.log(
+    "  bun run script/memory-profile.ts -d 60 -i 1000 -w 5 -- bun run --conditions=browser ./src/index.ts debug wait",
+  )
+}
+
+function sample(pid: number, start: number) {
+  const list = ps()
+  const sub = tree(list, pid)
+  const total = sub.reduce((sum, item) => sum + item.rss_kb, 0)
+  return {
+    at: new Date().toISOString(),
+    elapsed_ms: Date.now() - start,
+    total_rss_kb: total,
+    proc: sub,
+  }
+}
+
+function ps() {
+  const out = Bun.spawnSync(["ps", "-axo", "pid=,ppid=,rss=,command="], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (out.exitCode !== 0) {
+    const err = new TextDecoder().decode(out.stderr).trim() || `exit ${out.exitCode}`
+    throw new Error(`ps failed: ${err}`)
+  }
+
+  return new TextDecoder()
+    .decode(out.stdout)
+    .split("\n")
+    .map((line) => parse(line))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+}
+
+function parse(line: string) {
+  const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/)
+  if (!match) return
+  return {
+    pid: Number(match[1]),
+    ppid: Number(match[2]),
+    rss_kb: Number(match[3]),
+    cmd: match[4],
+  }
+}
+
+function tree(
+  rows: {
+    pid: number
+    ppid: number
+    rss_kb: number
+    cmd: string
+  }[],
+  root: number,
+) {
+  const map = new Map<number, typeof rows>()
+  const head = rows.find((item) => item.pid === root)
+  for (const row of rows) {
+    const next = map.get(row.ppid) ?? []
+    next.push(row)
+    map.set(row.ppid, next)
+  }
+
+  const out: typeof rows = head ? [head] : []
+  const seen = new Set<number>()
+  const queue = [root]
+  while (queue.length) {
+    const cur = queue.shift()!
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    const child = map.get(cur) ?? []
+    for (const row of child) {
+      out.push(row)
+      queue.push(row.pid)
+    }
+  }
+  return out
+}
+
+function stop(pids: number[], sig: NodeJS.Signals) {
+  for (const pid of pids) {
+    if (pid === process.pid) continue
+    try {
+      process.kill(pid, sig)
+    } catch {}
+  }
+}
+
+function mb(kb: number) {
+  return kb / 1024
+}
+
+async function wait(pid: number, timeout: number) {
+  const end = Date.now() + timeout
+  for (;;) {
+    const ok = ps().some((item) => item.pid === pid)
+    if (ok) return true
+    if (Date.now() >= end) return false
+    await Bun.sleep(100)
+  }
+}
