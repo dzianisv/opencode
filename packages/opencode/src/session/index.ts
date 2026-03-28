@@ -405,7 +405,7 @@ export namespace Session {
       time: z.number().optional(),
     }),
     async (input) => {
-      return Database.use((db) => {
+      const info = Database.use((db) => {
         const row = db
           .update(SessionTable)
           .set({ time_archived: input.time })
@@ -417,6 +417,22 @@ export namespace Session {
         Database.effect(() => Bus.publish(Event.Updated, { info }))
         return info
       })
+
+      if (input.time === undefined) return info
+
+      const list = await children(input.sessionID)
+      await Promise.all(
+        list
+          .filter((session) => session.time.archived !== input.time)
+          .map((session) =>
+            setArchived({
+              sessionID: session.id,
+              time: input.time,
+            }),
+          ),
+      )
+
+      return info
     },
   )
 
