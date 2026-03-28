@@ -69,11 +69,14 @@ export type SessionItemProps = {
   session: Session
   list: Session[]
   navList?: Accessor<Session[]>
+  lookup?: ReadonlyMap<string, Session>
+  prefixes?: ReadonlyMap<string, string>
+  prefix?: string
   slug: string
   mobile?: boolean
   dense?: boolean
   popover?: boolean
-  children: Map<string, string[]>
+  children: ReadonlyMap<string, string[]>
   depth?: number
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
@@ -82,11 +85,12 @@ export type SessionItemProps = {
   setHoverSession: (id: string | undefined) => void
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
-  archiveSession: (session: Session) => Promise<void>
+  archiveSession: (session: Session) => Promise<boolean>
 }
 
 const SessionRow = (props: {
   session: Session
+  prefix?: string
   slug: string
   mobile?: boolean
   dense?: boolean
@@ -117,9 +121,9 @@ const SessionRow = (props: {
       props.clearHoverProjectSoon()
     }}
   >
-    <div class="flex items-center gap-1 w-full">
+    <div class={`flex gap-1 w-full ${props.prefix ? "items-start" : "items-center"}`}>
       <div
-        class="shrink-0 size-6 flex items-center justify-center"
+        class={`shrink-0 size-6 flex items-center justify-center ${props.prefix ? "mt-0.5" : ""}`}
         style={{ color: props.tint() ?? "var(--icon-interactive-base)" }}
       >
         <Switch fallback={<Icon name="dash" size="small" class="text-icon-weak" />}>
@@ -137,9 +141,18 @@ const SessionRow = (props: {
           </Match>
         </Switch>
       </div>
-      <span class="text-14-regular text-text-strong grow-1 min-w-0 overflow-hidden text-ellipsis truncate">
-        {props.session.title}
-      </span>
+      <div class="flex flex-col grow-1 min-w-0">
+        <span class="text-14-regular text-text-strong min-w-0 overflow-hidden text-ellipsis truncate">
+          {props.session.title}
+        </span>
+        <Show when={props.prefix}>
+          {(value) => (
+            <span class="text-[11px] leading-4 text-text-weak truncate whitespace-nowrap">
+              {value()}
+            </span>
+          )}
+        </Show>
+      </div>
     </div>
   </A>
 )
@@ -287,9 +300,11 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
     const text = parts.find((part): part is TextPart => part?.type === "text" && !part.synthetic && !part.ignored)
     return text?.text
   }
+  const prefix = createMemo(() => props.prefix ?? props.prefixes?.get(props.session.id))
   const item = (
     <SessionRow
       session={props.session}
+      prefix={prefix()}
       slug={props.slug}
       mobile={props.mobile}
       dense={props.dense}
@@ -314,7 +329,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   const childIds = createMemo(() => props.children.get(props.session.id) ?? [])
   const childSessions = createMemo(() =>
     childIds()
-      .map((id) => sessionStore.session.find((s) => s.id === id))
+      .map((id) => props.lookup?.get(id) ?? sessionStore.session.find((s) => s.id === id))
       .filter((s): s is Session => s !== undefined && !s.time?.archived),
   )
 
@@ -329,7 +344,11 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
         <Show
           when={hoverEnabled()}
           fallback={
-            <Tooltip placement={props.mobile ? "bottom" : "right"} value={props.session.title} gutter={10}>
+            <Tooltip
+              placement={props.mobile ? "bottom" : "right"}
+              value={prefix() ? `${prefix()} · ${props.session.title}` : props.session.title}
+              gutter={10}
+            >
               {item}
             </Tooltip>
           }
@@ -387,6 +406,8 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             session={child}
             list={props.list}
             navList={props.navList}
+            lookup={props.lookup}
+            prefixes={props.prefixes}
             slug={props.slug}
             mobile={props.mobile}
             dense={props.dense}

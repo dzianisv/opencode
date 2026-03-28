@@ -75,6 +75,14 @@ test("can create a workspace", async ({ page, withProject }) => {
   await page.setViewportSize({ width: 1400, height: 800 })
 
   await withProject(async ({ slug }) => {
+    const name = path
+      .basename(base64Decode(slug))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+/, "")
+      .replace(/-+$/, "")
+    const pattern = new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}(?:-\\d+)?`)
+
     await openSidebar(page)
     await setWorkspacesEnabled(page, slug, true)
 
@@ -102,6 +110,7 @@ test("can create a workspace", async ({ page, withProject }) => {
       .toBe(true)
 
     await expect(page.locator(workspaceItemSelector(next.slug)).first()).toBeVisible()
+    await expect(page.locator(workspaceItemSelector(next.slug)).getByText(pattern).first()).toBeVisible()
 
     await cleanupTestProject(next.directory)
   })

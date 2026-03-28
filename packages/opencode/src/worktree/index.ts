@@ -123,76 +123,6 @@ export namespace Worktree {
     }),
   )
 
-  const ADJECTIVES = [
-    "brave",
-    "calm",
-    "clever",
-    "cosmic",
-    "crisp",
-    "curious",
-    "eager",
-    "gentle",
-    "glowing",
-    "happy",
-    "hidden",
-    "jolly",
-    "kind",
-    "lucky",
-    "mighty",
-    "misty",
-    "neon",
-    "nimble",
-    "playful",
-    "proud",
-    "quick",
-    "quiet",
-    "shiny",
-    "silent",
-    "stellar",
-    "sunny",
-    "swift",
-    "tidy",
-    "witty",
-  ] as const
-
-  const NOUNS = [
-    "cabin",
-    "cactus",
-    "canyon",
-    "circuit",
-    "comet",
-    "eagle",
-    "engine",
-    "falcon",
-    "forest",
-    "garden",
-    "harbor",
-    "island",
-    "knight",
-    "lagoon",
-    "meadow",
-    "moon",
-    "mountain",
-    "nebula",
-    "orchid",
-    "otter",
-    "panda",
-    "pixel",
-    "planet",
-    "river",
-    "rocket",
-    "sailor",
-    "squid",
-    "star",
-    "tiger",
-    "wizard",
-    "wolf",
-  ] as const
-
-  function pick<const T extends readonly string[]>(list: T) {
-    return list[Math.floor(Math.random() * list.length)]
-  }
-
   function slug(input: string) {
     return input
       .trim()
@@ -202,8 +132,16 @@ export namespace Worktree {
       .replace(/-+$/, "")
   }
 
-  function randomName() {
-    return `${pick(ADJECTIVES)}-${pick(NOUNS)}`
+  function stamp() {
+    const date = new Date(Date.now())
+    const pad = (value: number) => String(value).padStart(2, "0")
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate()),
+      pad(date.getHours()),
+      pad(date.getMinutes()),
+    ].join("-")
   }
 
   async function exists(target: string) {
@@ -267,9 +205,9 @@ export namespace Worktree {
     return process.platform === "win32" ? normalized.toLowerCase() : normalized
   }
 
-  async function candidate(root: string, base?: string) {
-    for (const attempt of Array.from({ length: 26 }, (_, i) => i)) {
-      const name = base ? (attempt === 0 ? base : `${base}-${randomName()}`) : randomName()
+  async function candidate(root: string, base: string) {
+    for (const attempt of Array.from({ length: 100 }, (_, i) => i)) {
+      const name = attempt === 0 ? base : `${base}-${attempt + 1}`
       const branch = `opencode/${name}`
       const directory = path.join(root, name)
 
@@ -343,8 +281,11 @@ export namespace Worktree {
     const root = path.join(Global.Path.data, "worktree", Instance.project.id)
     await fs.mkdir(root, { recursive: true })
 
-    const base = name ? slug(name) : ""
-    return candidate(root, base || undefined)
+    const base =
+      slug(name || "") ||
+      `${slug(path.basename(Instance.project.worktree)) || "worktree"}-${stamp()}`
+
+    return candidate(root, base)
   }
 
   export async function createFromInfo(info: Info, startCommand?: string) {
