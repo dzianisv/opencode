@@ -4,9 +4,10 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { type GlobalSession } from "@opencode-ai/sdk/v2/client"
+import { type GlobalSession, type Session } from "@opencode-ai/sdk/v2/client"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
+import { organizeRecentSessions } from "@/utils/recent-session"
 import { SessionItem, SessionSkeleton, type SessionItemProps } from "./sidebar-items"
 
 const LIMIT = 20
@@ -17,7 +18,6 @@ async function query(
 ) {
   const result = await client.global.session
     .list({
-      roots: true,
       limit: opts.limit ?? LIMIT,
       search: opts.search,
       cursor: opts.cursor,
@@ -76,18 +76,7 @@ export const RecentSidebarPanel = (props: {
     booted: false,
   })
 
-  const children = createMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const session of store.sessions) {
-      if (!session.parentID) continue
-      const list = map.get(session.parentID) ?? []
-      list.push(session.id)
-      map.set(session.parentID, list)
-    }
-    return map
-  })
-
-  const roots = createMemo(() => store.sessions.filter((s) => !s.parentID))
+  const data = createMemo(() => organizeRecentSessions(store.sessions))
 
   const load = async (reset?: boolean) => {
     setStore("loading", true)
@@ -120,6 +109,24 @@ export const RecentSidebarPanel = (props: {
   }
 
   const slug = (session: GlobalSession) => base64Encode(session.directory)
+  const archiveSession = async (session: Session) => {
+    const ok = await props.sessionProps.archiveSession(session)
+    if (!ok) return false
+
+    const drop = new Set<string>()
+    const walk = (id: string) => {
+      if (drop.has(id)) return
+      drop.add(id)
+      for (const child of data().children.get(id) ?? []) {
+        walk(child)
+      }
+    }
+
+    walk(session.id)
+    setStore("sessions", (prev) => prev.filter((item) => !drop.has(item.id)))
+    void load(true)
+    return true
+  }
 
   return (
     <div
@@ -161,24 +168,36 @@ export const RecentSidebarPanel = (props: {
           <SessionSkeleton />
         </Show>
 
-        <Show when={store.booted && roots().length === 0 && !store.loading}>
+        <Show when={store.booted && data().roots.length === 0 && !store.loading}>
           <div class="flex items-center justify-center py-8 text-text-weak text-14-regular">
             {language.t("common.noResults")}
           </div>
         </Show>
 
-        <nav class="flex flex-col gap-1">
-          <For each={roots()}>
-            {(session) => (
-              <SessionItem
-                {...props.sessionProps}
-                session={session}
-                list={roots()}
-                slug={slug(session)}
-                mobile={props.mobile}
-                popover={popover()}
-                children={children()}
-              />
+        <nav class="flex flex-col gap-4">
+          <For each={data().sections}>
+            {(group) => (
+              <section class="flex flex-col gap-1">
+                <div class="px-2 pt-1 pb-1 text-[11px] leading-4 text-text-weak uppercase tracking-[0.08em]">
+                  {group.label}
+                </div>
+                <For each={group.items}>
+                  {(session) => (
+                    <SessionItem
+                      {...props.sessionProps}
+                      session={session}
+                      list={store.sessions}
+                      slug={slug(session)}
+                      mobile={props.mobile}
+                      popover={popover()}
+                      children={data().children}
+                      lookup={data().lookup}
+                      prefixes={data().prefixes}
+                      archiveSession={archiveSession}
+                    />
+                  )}
+                </For>
+              </section>
             )}
           </For>
 

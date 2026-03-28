@@ -1000,18 +1000,42 @@ export default function Layout(props: ParentProps) {
     const [store, setStore] = globalSync.child(session.directory, { bootstrap: false })
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
+    const children = new Map<string, string[]>()
+    for (const item of sessions) {
+      if (!item.parentID) continue
+      const list = children.get(item.parentID) ?? []
+      list.push(item.id)
+      children.set(item.parentID, list)
+    }
 
-    const result = await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
-    })
-    if (result.error) return
+    const drop = new Set<string>()
+    const walk = (id: string) => {
+      if (drop.has(id)) return
+      drop.add(id)
+      for (const child of children.get(id) ?? []) {
+        walk(child)
+      }
+    }
+
+    walk(session.id)
+
+    const nextSession = [sessions[index + 1], sessions[index - 1]].find((item) => item && !drop.has(item.id))
+
+    const result = await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        time: { archived: Date.now() },
+      })
+      .catch(() => undefined)
+    if (!result || result.error) return false
     setStore(
       produce((draft) => {
-        const match = Binary.search(draft.session, session.id, (s) => s.id)
-        if (match.found) draft.session.splice(match.index, 1)
+        for (const id of drop) {
+          const match = Binary.search(draft.session, id, (s) => s.id)
+          if (!match.found) continue
+          draft.session.splice(match.index, 1)
+        }
       }),
     )
     if (session.id === params.id) {
@@ -1021,6 +1045,7 @@ export default function Layout(props: ParentProps) {
         navigate(`/${params.dir}/session`)
       }
     }
+    return true
   }
 
   command.register("layout", () => {
@@ -1953,7 +1978,7 @@ export default function Layout(props: ParentProps) {
 
     if (!created?.directory) return
 
-    setWorkspaceName(created.directory, created.branch, project.id, created.branch)
+    setWorkspaceName(created.directory, created.name, project.id, created.branch)
 
     const local = project.worktree
     const key = workspaceKey(created.directory)
