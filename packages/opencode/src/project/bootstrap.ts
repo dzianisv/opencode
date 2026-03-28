@@ -12,6 +12,7 @@ import { Instance } from "./instance"
 import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { Session } from "@/session"
+import { GC } from "@/util/gc"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })

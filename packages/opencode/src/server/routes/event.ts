@@ -68,6 +68,15 @@ export const EventRoutes = () =>
           }
         })
 
+        const stop = () => {
+          if (done) return
+          done = true
+          clearInterval(heartbeat)
+          unsub()
+          q.close()
+          log.info("event disconnected")
+        }
+
         stream.onAbort(stop)
 
         try {

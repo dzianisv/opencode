@@ -99,10 +99,12 @@ export const ServeCommand = cmd({
       await server.stop()
     }
 
-    process.on("SIGTERM", () => void shutdown("SIGTERM"))
-    process.on("SIGINT", () => void shutdown("SIGINT"))
-    await new Promise(() => {})
-    Memory.stop()
-    await server.stop()
+    const signal = await new Promise<string>((resolve) => {
+      for (const item of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+        process.once(item, () => resolve(item))
+      }
+    })
+
+    await shutdown(signal)
   },
 })

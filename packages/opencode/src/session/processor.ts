@@ -26,7 +26,6 @@ import { Question } from "@/question"
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const FLUSH_INTERVAL = 50
-  const DEFAULT_MAX_RETRIES_BEFORE_FALLBACK = 3
   const log = Log.create({ service: "session.processor" })
 
   export type Result = "compact" | "stop" | "continue"
