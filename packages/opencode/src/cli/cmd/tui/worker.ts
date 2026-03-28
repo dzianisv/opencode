@@ -35,6 +35,27 @@ process.on("uncaughtException", (e) => {
   })
 })
 
+let disposing = false
+const graceful = async (signal: string) => {
+  if (disposing) return
+  disposing = true
+  Log.Default.info("worker received signal, disposing", { signal })
+  if (eventStream.abort) eventStream.abort.abort()
+  await Instance.disposeAll().catch((error) => {
+    Log.Default.error("worker disposal failed", { error: error instanceof Error ? error.message : error })
+  })
+  if (server) {
+    await server.stop(true).catch((error) => {
+      Log.Default.error("worker server stop failed", { error: error instanceof Error ? error.message : error })
+    })
+  }
+  process.exit(0)
+}
+
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+  process.on(signal, () => void graceful(signal))
+}
+
 // Subscribe to global events and forward them via RPC
 GlobalBus.on("event", (event) => {
   Rpc.emit("global.event", event)
