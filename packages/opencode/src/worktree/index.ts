@@ -275,9 +275,39 @@ export namespace Worktree {
     return candidate(root, base)
   }
 
-        const populated = yield* git(["reset", "--hard"], { cwd: info.directory })
-        if (populated.code !== 0) {
-          const message = populated.stderr || populated.text || "Failed to populate worktree"
+  export async function makeWorktreeInfo(name?: string): Promise<Info> {
+    if (Instance.project.vcs !== "git") {
+      throw new NotGitError({ message: "Worktrees are only supported for git projects" })
+    }
+
+    const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+    await fs.mkdir(root, { recursive: true })
+
+    const base =
+      slug(name || "") ||
+      `${slug(path.basename(Instance.project.worktree)) || "worktree"}-${stamp()}`
+
+    return candidate(root, base)
+  }
+
+  export async function createFromInfo(info: Info, startCommand?: string) {
+    const created = await git(["worktree", "add", "--no-checkout", "-b", info.branch, info.directory], {
+      cwd: Instance.worktree,
+    })
+    if (created.exitCode !== 0) {
+      throw new CreateFailedError({ message: errorText(created) || "Failed to create git worktree" })
+    }
+
+    await Project.addSandbox(Instance.project.id, info.directory).catch(() => undefined)
+
+    const projectID = Instance.project.id
+    const extra = startCommand?.trim()
+
+    return () => {
+      const start = async () => {
+        const populated = await git(["reset", "--hard"], { cwd: info.directory })
+        if (populated.exitCode !== 0) {
+          const message = errorText(populated) || "Failed to populate worktree"
           log.error("worktree checkout failed", { directory: info.directory, message })
           GlobalBus.emit("event", {
             directory: info.directory,
