@@ -5,6 +5,7 @@ import { makeRunPromise } from "@/effect/run-service"
 import { SessionID } from "./schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
+import { GC } from "@/util/gc"
 
 export namespace SessionStatus {
   export const Info = z
@@ -56,7 +57,11 @@ export namespace SessionStatus {
     Service,
     Effect.gen(function* () {
       const state = yield* InstanceState.make(
-        Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
+        Effect.fn("SessionStatus.state")(function* () {
+          const data = new Map<SessionID, Info>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => GC.clear(data.keys())))
+          return data
+        }),
       )
 
       const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
@@ -72,9 +77,17 @@ export namespace SessionStatus {
         const data = yield* InstanceState.get(state)
         yield* Effect.promise(() => Bus.publish(Event.Status, { sessionID, status }))
         if (status.type === "idle") {
+          GC.set(sessionID, false)
           yield* Effect.promise(() => Bus.publish(Event.Idle, { sessionID }))
           data.delete(sessionID)
           return
+        }
+        if (status.type === "busy") {
+          GC.set(sessionID, true)
+          GC.touch()
+        } else {
+          GC.set(sessionID, false)
+          GC.touch()
         }
         data.set(sessionID, status)
       })
