@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import path from "path"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
+import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util/log"
+import { tmpdir } from "../fixture/fixture"
 
 const root = path.join(__dirname, "../..")
 Log.init({ print: false })
@@ -128,5 +130,57 @@ describe("session.prompt_async error handling", () => {
     const route = src.slice(start, end)
     expect(route).toContain(".catch(")
     expect(route).toContain("Bus.publish(Session.Event.Error")
+  })
+
+  test("prompt_async keeps an instance ref until detached work finishes", async () => {
+    await using tmp = await tmpdir()
+    const app = Server.Default()
+    const hold = Promise.withResolvers<void>()
+    const seen = Promise.withResolvers<void>()
+    const prompt = spyOn(SessionPrompt as any, "prompt").mockImplementation(async () => {
+      seen.resolve()
+      await hold.promise
+      return {} as MessageV2.WithParts
+    })
+
+    try {
+      const session = await Instance.provide({
+        directory: tmp.path,
+        fn: () => Session.create({}),
+      })
+
+      const res = await app.request(`/session/${session.id}/prompt_async`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-opencode-directory": tmp.path,
+        },
+        body: JSON.stringify({
+          parts: [{ type: "text", text: "hi" }],
+        }),
+      })
+
+      expect(res.status).toBe(204)
+      await seen.promise
+      await Bun.sleep(25)
+
+      const busy = Instance.stats().entries.find((item) => item.directory === tmp.path)
+      expect(busy?.refs).toBe(1)
+
+      hold.resolve()
+      await Bun.sleep(25)
+
+      const idle = Instance.stats().entries.find((item) => item.directory === tmp.path)
+      expect(idle?.refs).toBe(0)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () => Session.remove(session.id),
+      })
+    } finally {
+      hold.resolve()
+      prompt.mockRestore()
+      await Instance.disposeAll()
+    }
   })
 })
