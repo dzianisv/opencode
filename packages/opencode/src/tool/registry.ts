@@ -32,6 +32,7 @@ import { Truncate } from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
+import { existsSync } from "fs"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -39,15 +40,21 @@ export namespace ToolRegistry {
   export const state = Instance.state(async () => {
     const custom = [] as Tool.Info[]
 
-    const matches = await Config.directories().then((dirs) =>
+    const files = await Config.directories().then((dirs) =>
       dirs.flatMap((dir) =>
-        Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
+        Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }).map((file) => ({
+          dir,
+          file,
+        })),
       ),
     )
-    if (matches.length) await Config.waitForDependencies()
-    for (const match of matches) {
-      const namespace = path.basename(match, path.extname(match))
-      const mod = await import(pathToFileURL(match).href)
+    const deps = files.some((item) => {
+      return existsSync(path.join(item.dir, "package.json")) || existsSync(path.join(item.dir, "node_modules"))
+    })
+    if (deps) await Config.waitForDependencies()
+    for (const item of files) {
+      const namespace = path.basename(item.file, path.extname(item.file))
+      const mod = await import(pathToFileURL(item.file).href)
       for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
         custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
       }

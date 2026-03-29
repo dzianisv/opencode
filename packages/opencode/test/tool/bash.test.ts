@@ -9,6 +9,8 @@ import type { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 
+type Request = Omit<Permission.Request, "id" | "sessionID" | "tool">
+
 const ctx = {
   sessionID: SessionID.make("ses_test"),
   messageID: MessageID.make(""),
@@ -18,6 +20,24 @@ const ctx = {
   messages: [],
   metadata: () => {},
   ask: async () => {},
+}
+
+const stop = new Error("stop")
+
+const record = (requests: Request[], halt = true) => ({
+  ...ctx,
+  ask: async (req: Request) => {
+    requests.push(req)
+    if (halt) throw stop
+  },
+})
+
+const halted = async <T>(promise: Promise<T>) => {
+  try {
+    await promise
+  } catch (err) {
+    if (err !== stop) throw err
+  }
 }
 
 const projectRoot = path.join(__dirname, "../..")
@@ -49,19 +69,15 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "echo hello",
             description: "Echo hello",
           },
-          testCtx,
+          record(requests),
+        )
         )
         expect(requests.length).toBe(1)
         expect(requests[0].permission).toBe("bash")
@@ -76,19 +92,15 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "echo foo && echo bar",
             description: "Echo twice",
           },
-          testCtx,
+          record(requests),
+        )
         )
         expect(requests.length).toBe(1)
         expect(requests[0].permission).toBe("bash")
@@ -104,19 +116,15 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "cd ../",
             description: "Change to parent directory",
           },
-          testCtx,
+          record(requests),
+        )
         )
         const extDirReq = requests.find((r) => r.permission === "external_directory")
         expect(extDirReq).toBeDefined()
@@ -130,20 +138,16 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "ls",
             workdir: os.tmpdir(),
             description: "List temp dir",
           },
-          testCtx,
+          record(requests),
+        )
         )
         const extDirReq = requests.find((r) => r.permission === "external_directory")
         expect(extDirReq).toBeDefined()
@@ -163,20 +167,16 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
+        const requests: Request[] = []
         const filepath = path.join(outerTmp.path, "outside.txt")
-        await bash.execute(
+        await halted(
+          bash.execute(
           {
             command: `cat ${filepath}`,
             description: "Read external file",
           },
-          testCtx,
+          record(requests),
+        )
         )
         const extDirReq = requests.find((r) => r.permission === "external_directory")
         const expected = path.join(outerTmp.path, "*")
@@ -193,22 +193,18 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
+        const requests: Request[] = []
 
         await Bun.write(path.join(tmp.path, "tmpfile"), "x")
 
-        await bash.execute(
+        await halted(
+          bash.execute(
           {
             command: `rm -rf ${path.join(tmp.path, "nested")}`,
             description: "remove nested dir",
           },
-          testCtx,
+          record(requests),
+        )
         )
 
         const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -223,19 +219,15 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "ls -la",
             description: "List files",
           },
-          testCtx,
+          record(requests),
+        )
         )
         expect(requests.length).toBe(1)
         expect(requests[0].always.length).toBeGreaterThan(0)
@@ -250,19 +242,15 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute(
+        const requests: Request[] = []
+        await halted(
+          bash.execute(
           {
             command: "cd .",
             description: "Stay in current directory",
           },
-          testCtx,
+          record(requests),
+        )
         )
         const bashReq = requests.find((r) => r.permission === "bash")
         expect(bashReq).toBeUndefined()
@@ -276,14 +264,8 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute({ command: "cat > /tmp/output.txt", description: "Redirect ls output" }, testCtx)
+        const requests: Request[] = []
+        await halted(bash.execute({ command: "cat > /tmp/output.txt", description: "Redirect ls output" }, record(requests)))
         const bashReq = requests.find((r) => r.permission === "bash")
         expect(bashReq).toBeDefined()
         expect(bashReq!.patterns).toContain("cat > /tmp/output.txt")
@@ -297,14 +279,8 @@ describe("tool.bash permissions", () => {
       directory: tmp.path,
       fn: async () => {
         const bash = await BashTool.init()
-        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        const testCtx = {
-          ...ctx,
-          ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-            requests.push(req)
-          },
-        }
-        await bash.execute({ command: "ls -la", description: "List" }, testCtx)
+        const requests: Request[] = []
+        await halted(bash.execute({ command: "ls -la", description: "List" }, record(requests)))
         const bashReq = requests.find((r) => r.permission === "bash")
         expect(bashReq).toBeDefined()
         const pattern = bashReq!.always[0]

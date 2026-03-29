@@ -152,6 +152,43 @@ export namespace Project {
         return pathSvc.resolve(cwd, name)
       }
 
+      const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item, index) => item === b[index])
+
+      const existingDirectories = Effect.fnUntraced(function* (dirs: string[]) {
+        const unique = [...new Set(dirs.map((dir) => AppFileSystem.resolve(dir)))]
+        return yield* Effect.forEach(
+          unique,
+          (dir) =>
+            fsys.exists(dir).pipe(
+              Effect.orDie,
+              Effect.map((exists) => (exists ? dir : undefined)),
+            ),
+          { concurrency: "unbounded" },
+        ).pipe(Effect.map((items) => items.filter((item): item is string => item !== undefined)))
+      })
+
+      const gitWorktrees = Effect.fnUntraced(function* (root: string) {
+        const list = yield* git(["worktree", "list", "--porcelain"], { cwd: root })
+        if (list.code !== 0) {
+          log.warn("failed to enumerate git worktrees", {
+            directory: root,
+            stderr: list.stderr.trim(),
+            stdout: list.text.trim(),
+          })
+          return undefined
+        }
+
+        const primary = AppFileSystem.resolve(root)
+        const dirs = list.text
+          .split("\n")
+          .map((line) => line.trim())
+          .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length).trim()] : []))
+          .map((dir) => AppFileSystem.resolve(resolveGitPath(root, dir)))
+          .filter((dir) => dir !== primary)
+
+        return yield* existingDirectories(dirs)
+      })
+
       const scope = yield* Scope.Scope
 
       const readCachedProjectId = Effect.fnUntraced(function* (dir: string) {
@@ -265,17 +302,12 @@ export namespace Project {
           vcs: data.vcs,
           time: { ...existing.time, updated: Date.now() },
         }
-        if (data.sandbox !== result.worktree && !result.sandboxes.includes(data.sandbox))
-          result.sandboxes.push(data.sandbox)
-        result.sandboxes = yield* Effect.forEach(
-          result.sandboxes,
-          (s) =>
-            fsys.exists(s).pipe(
-              Effect.orDie,
-              Effect.map((exists) => (exists ? s : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
+        const discovered =
+          data.vcs === "git" && data.id !== ProjectID.global ? yield* gitWorktrees(result.worktree) : undefined
+        result.sandboxes = discovered ?? (yield* existingDirectories(result.sandboxes))
+        const sandbox = AppFileSystem.resolve(data.sandbox)
+        const worktree = AppFileSystem.resolve(result.worktree)
+        if (sandbox !== worktree && !result.sandboxes.includes(sandbox)) result.sandboxes.push(sandbox)
 
         yield* db((d) =>
           d
@@ -397,15 +429,18 @@ export namespace Project {
         const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
         if (!row) return []
         const data = fromRow(row)
-        return yield* Effect.forEach(
-          data.sandboxes,
-          (dir) =>
-            fsys.isDir(dir).pipe(
-              Effect.orDie,
-              Effect.map((ok) => (ok ? dir : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
+        const next = (data.vcs === "git" ? yield* gitWorktrees(data.worktree) : undefined) ?? (yield* existingDirectories(data.sandboxes))
+        if (sameList(data.sandboxes, next)) return next
+        const result = yield* db((d) =>
+          d
+            .update(ProjectTable)
+            .set({ sandboxes: next, time_updated: Date.now() })
+            .where(eq(ProjectTable.id, id))
+            .returning()
+            .get(),
+        )
+        if (result) yield* emitUpdated(fromRow(result))
+        return next
       })
 
       const addSandbox = Effect.fn("Project.addSandbox")(function* (id: ProjectID, directory: string) {
