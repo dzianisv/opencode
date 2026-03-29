@@ -232,8 +232,8 @@ describe("tool.bash permissions", () => {
         }
         await bash.execute(
           {
-            command: "git log --oneline -5",
-            description: "Git log",
+            command: "ls -la",
+            description: "List files",
           },
           testCtx,
         )
