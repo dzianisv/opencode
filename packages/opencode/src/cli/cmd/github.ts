@@ -770,13 +770,29 @@ export const GithubRunCommand = cmd({
 
       async function getUserPrompt() {
         const customPrompt = process.env["PROMPT"]
-        // For repo events and issues events, PROMPT is required since there's no comment to extract from
-        if (isRepoEvent || isIssuesEvent) {
+        // For repo events, PROMPT is required since there's no comment/issue to extract from
+        if (isRepoEvent) {
           if (!customPrompt) {
-            const eventType = isRepoEvent ? "scheduled and workflow_dispatch" : "issues"
-            throw new Error(`PROMPT input is required for ${eventType} events`)
+            throw new Error(`PROMPT input is required for scheduled and workflow_dispatch events`)
           }
           return { userPrompt: customPrompt, promptFiles: [] }
+        }
+        // For issues events: auto-extract issue title+body when assigned or opened, otherwise require PROMPT
+        if (isIssuesEvent) {
+          if (customPrompt) {
+            return { userPrompt: customPrompt, promptFiles: [] }
+          }
+          const issuesPayload = payload as IssuesEvent
+          if (issuesPayload.action === "assigned" || issuesPayload.action === "opened") {
+            const issue = issuesPayload.issue
+            const labels = issue.labels?.map((l) => (typeof l === "string" ? l : l.name)).filter(Boolean)
+            const labelText = labels?.length ? `\nLabels: ${labels.join(", ")}` : ""
+            return {
+              userPrompt: `Issue #${issue.number}: ${issue.title}${labelText}\n\n${issue.body || "No description provided."}`,
+              promptFiles: [],
+            }
+          }
+          throw new Error(`PROMPT input is required for issues events with action "${issuesPayload.action}"`)
         }
 
         if (customPrompt) {
