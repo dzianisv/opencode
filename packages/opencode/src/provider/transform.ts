@@ -333,6 +333,8 @@ export namespace ProviderTransform {
     if (!model.capabilities.reasoning) return {}
 
     const id = model.id.toLowerCase()
+    const gpt5 = /(^|\/)gpt-5(?:[.-]|$)/.test(id)
+    const xhigh = /(^|\/)gpt-5\.(2|3|4)(?:[.-]|$)/.test(id) || (gpt5 && model.release_date >= "2025-12-04")
     const isAnthropicAdaptive = ["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) =>
       model.api.id.includes(v),
     )
@@ -472,8 +474,11 @@ export namespace ProviderTransform {
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
         if (id === "o1-mini") return {}
         const azureEfforts = ["low", "medium", "high"]
-        if (id.includes("gpt-5-") || id === "gpt-5") {
+        if (gpt5) {
           azureEfforts.unshift("minimal")
+        }
+        if (xhigh) {
+          azureEfforts.push("xhigh")
         }
         return Object.fromEntries(
           azureEfforts.map((effort) => [
@@ -490,17 +495,17 @@ export namespace ProviderTransform {
         if (id === "gpt-5-pro") return {}
         const openaiEfforts = iife(() => {
           if (id.includes("codex")) {
-            if (id.includes("5.2") || id.includes("5.3")) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
+            if (xhigh) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
             return WIDELY_SUPPORTED_EFFORTS
           }
           const arr = [...WIDELY_SUPPORTED_EFFORTS]
-          if (id.includes("gpt-5-") || id === "gpt-5") {
+          if (gpt5) {
             arr.unshift("minimal")
           }
           if (model.release_date >= "2025-11-13") {
             arr.unshift("none")
           }
-          if (model.release_date >= "2025-12-04") {
+          if (xhigh) {
             arr.push("xhigh")
           }
           return arr
