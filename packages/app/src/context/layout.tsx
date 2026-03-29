@@ -90,6 +90,10 @@ export function pruneSessionKeys(input: {
     .slice(input.max)
 }
 
+export function workspaceState(value?: boolean, fallback?: boolean, defaults?: boolean) {
+  return value ?? fallback ?? defaults ?? false
+}
+
 function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): SessionTabs {
   const all = current?.all ?? []
   if (tab === "review") return { all: all.filter((x) => x !== "review"), active: tab }
@@ -599,14 +603,14 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         resize(width: number) {
           setStore("sidebar", "width", width)
         },
-        workspaces(directory: string) {
-          return () => store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
+        workspaces(directory: string, fallback?: boolean) {
+          return () => workspaceState(store.sidebar.workspaces[directory], fallback, store.sidebar.workspacesDefault)
         },
         setWorkspaces(directory: string, value: boolean) {
           setStore("sidebar", "workspaces", directory, value)
         },
-        toggleWorkspaces(directory: string) {
-          const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
+        toggleWorkspaces(directory: string, fallback?: boolean) {
+          const current = workspaceState(store.sidebar.workspaces[directory], fallback, store.sidebar.workspacesDefault)
           setStore("sidebar", "workspaces", directory, !current)
         },
       },
