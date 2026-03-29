@@ -633,7 +633,7 @@ export default function Layout(props: ParentProps) {
     const project = currentProject()
     if (!project) return false
     if (project.vcs !== "git") return false
-    return layout.sidebar.workspaces(project.worktree)()
+    return layout.sidebar.workspaces(project.worktree, true)()
   })
 
   const visibleSessionDirs = createMemo(() => {
@@ -661,7 +661,7 @@ export default function Layout(props: ParentProps) {
           workspaceKey(item.worktree) === key || item.sandboxes?.some((sandbox) => workspaceKey(sandbox) === key),
       )
       if (!project) continue
-      if (project.vcs === "git" && layout.sidebar.workspaces(project.worktree)()) continue
+      if (project.vcs === "git" && layout.sidebar.workspaces(project.worktree, true)()) continue
       setStore("workspaceExpanded", directory, false)
     }
   })
@@ -1159,8 +1159,8 @@ export default function Layout(props: ParentProps) {
           const project = currentProject()
           if (!project) return
           if (project.vcs !== "git") return
-          const wasEnabled = layout.sidebar.workspaces(project.worktree)()
-          layout.sidebar.toggleWorkspaces(project.worktree)
+          const wasEnabled = layout.sidebar.workspaces(project.worktree, true)()
+          layout.sidebar.toggleWorkspaces(project.worktree, true)
           showToast({
             title: wasEnabled
               ? language.t("toast.workspace.disabled.title")
@@ -1473,13 +1473,14 @@ export default function Layout(props: ParentProps) {
   }
 
   function toggleProjectWorkspaces(project: LocalProject) {
-    const enabled = layout.sidebar.workspaces(project.worktree)()
+    const fallback = project.vcs === "git" ? true : undefined
+    const enabled = layout.sidebar.workspaces(project.worktree, fallback)()
     if (enabled) {
-      layout.sidebar.toggleWorkspaces(project.worktree)
+      layout.sidebar.toggleWorkspaces(project.worktree, fallback)
       return
     }
     if (project.vcs !== "git") return
-    layout.sidebar.toggleWorkspaces(project.worktree)
+    layout.sidebar.toggleWorkspaces(project.worktree, fallback)
   }
 
   const showEditProjectDialog = (project: LocalProject) => {
@@ -2052,7 +2053,7 @@ export default function Layout(props: ParentProps) {
     closeProject,
     showEditProjectDialog,
     toggleProjectWorkspaces,
-    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
+    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree, true)(),
     workspaceIds,
     workspaceLabel,
     sessionProps: {
@@ -2107,7 +2108,7 @@ export default function Layout(props: ParentProps) {
       const item = project()
       if (!item) return false
       if (item.vcs !== "git") return false
-      return layout.sidebar.workspaces(item.worktree)()
+      return layout.sidebar.workspaces(item.worktree, true)()
     })
     const canToggle = createMemo(() => {
       const item = project()

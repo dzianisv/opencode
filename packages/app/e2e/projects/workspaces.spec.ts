@@ -17,10 +17,28 @@ import {
   setWorkspacesEnabled,
   slugFromUrl,
   waitDir,
+  waitSession,
   waitSlug,
 } from "../actions"
 import { dropdownMenuContentSelector, inlineInputSelector, workspaceItemSelector } from "../selectors"
 import { createSdk, dirSlug } from "../utils"
+
+async function waitWorkspaceItem(page: Page, slug: string) {
+  await expect
+    .poll(
+      async () => {
+        const item = page.locator(workspaceItemSelector(slug)).first()
+        try {
+          await item.hover({ timeout: 500 })
+          return true
+        } catch {
+          return false
+        }
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true)
+}
 
 async function setupWorkspaceTest(page: Page, project: { slug: string }) {
   const rootSlug = project.slug
@@ -33,21 +51,7 @@ async function setupWorkspaceTest(page: Page, project: { slug: string }) {
   await waitDir(page, next.directory)
 
   await openSidebar(page)
-
-  await expect
-    .poll(
-      async () => {
-        const item = page.locator(workspaceItemSelector(next.slug)).first()
-        try {
-          await item.hover({ timeout: 500 })
-          return true
-        } catch {
-          return false
-        }
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true)
+  await waitWorkspaceItem(page, next.slug)
 
   return { rootSlug, slug: next.slug, directory: next.directory }
 }
@@ -58,16 +62,35 @@ test("can enable and disable workspaces from project menu", async ({ page, withP
   await withProject(async ({ slug }) => {
     await openSidebar(page)
 
-    await expect(page.getByRole("button", { name: "New session" }).first()).toBeVisible()
-    await expect(page.getByRole("button", { name: "New workspace" })).toHaveCount(0)
-
-    await setWorkspacesEnabled(page, slug, true)
     await expect(page.getByRole("button", { name: "New workspace" }).first()).toBeVisible()
-    await expect(page.locator(workspaceItemSelector(slug)).first()).toBeVisible()
+    await waitWorkspaceItem(page, slug)
 
     await setWorkspacesEnabled(page, slug, false)
     await expect(page.getByRole("button", { name: "New session" }).first()).toBeVisible()
     await expect(page.locator(workspaceItemSelector(slug))).toHaveCount(0)
+
+    await setWorkspacesEnabled(page, slug, true)
+    await expect(page.getByRole("button", { name: "New workspace" }).first()).toBeVisible()
+    await waitWorkspaceItem(page, slug)
+  })
+})
+
+test("existing git workspaces auto-show after reload", async ({ page, withProject }) => {
+  await page.setViewportSize({ width: 1400, height: 800 })
+
+  await withProject(async ({ directory, slug, trackDirectory }) => {
+    const created = await createSdk(directory).worktree.create().then((result) => result.data)
+    if (!created?.directory) throw new Error("Failed to create workspace")
+
+    trackDirectory(created.directory)
+
+    await page.reload()
+    await waitSession(page, { directory })
+    await openSidebar(page)
+
+    await expect(page.getByRole("button", { name: "New workspace" }).first()).toBeVisible()
+    await waitWorkspaceItem(page, slug)
+    await waitWorkspaceItem(page, dirSlug(created.directory))
   })
 })
 
