@@ -22,9 +22,3 @@ await fs.rename(tmp, dst)
 if (os !== "windows") {
   await fs.chmod(dst, 0o755)
 }
-
-if (os === "darwin") {
-  await $`codesign --remove-signature ${dst}`.nothrow()
-  await $`codesign --force --sign - ${dst}`
-  await $`codesign --verify --verbose=4 ${dst}`
-}
