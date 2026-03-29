@@ -189,6 +189,21 @@ export function formatPromptTooLargeError(files: { filename: string; content: st
   return `PROMPT_TOO_LARGE: The prompt exceeds the model's context limit.${fileDetails}`
 }
 
+/**
+ * Builds a prompt string from a GitHub issue payload.
+ * Used when an issue is assigned or opened to auto-extract the issue context.
+ */
+export function buildIssuePrompt(issue: {
+  number: number
+  title: string
+  body?: string | null
+  labels?: (string | { name?: string })[]
+}): string {
+  const labels = issue.labels?.map((l) => (typeof l === "string" ? l : l.name)).filter(Boolean)
+  const labelText = labels?.length ? `\nLabels: ${labels.join(", ")}` : ""
+  return `Issue #${issue.number}: ${issue.title}${labelText}\n\n${issue.body || "No description provided."}`
+}
+
 export const GithubCommand = cmd({
   command: "github",
   describe: "manage GitHub agent",
@@ -784,11 +799,8 @@ export const GithubRunCommand = cmd({
           }
           const issuesPayload = payload as IssuesEvent
           if (issuesPayload.action === "assigned" || issuesPayload.action === "opened") {
-            const issue = issuesPayload.issue
-            const labels = issue.labels?.map((l) => (typeof l === "string" ? l : l.name)).filter(Boolean)
-            const labelText = labels?.length ? `\nLabels: ${labels.join(", ")}` : ""
             return {
-              userPrompt: `Issue #${issue.number}: ${issue.title}${labelText}\n\n${issue.body || "No description provided."}`,
+              userPrompt: buildIssuePrompt(issuesPayload.issue),
               promptFiles: [],
             }
           }
