@@ -814,7 +814,7 @@ export namespace MCP {
       }
     },
     async (state) => {
-      await Promise.all(Object.keys(state.clients).map((name) => release(name)))
+      await Promise.all(Object.entries(state.clients).map(([name, client]) => release(name, client)))
       pendingOAuthTransports.clear()
     },
   )
@@ -867,7 +867,7 @@ export namespace MCP {
   export async function add(name: string, mcp: Config.Mcp) {
     const s = await state()
     if (s.clients[name]) {
-      await release(name)
+      await release(name, s.clients[name])
       delete s.clients[name]
     }
     const result = await acquire(name, mcp)
@@ -1272,7 +1272,7 @@ export namespace MCP {
 
     const s = await state()
     if (s.clients[name]) {
-      await release(name)
+      await release(name, s.clients[name])
       delete s.clients[name]
     }
     const result = await acquire(name, { ...mcp, enabled: true })
@@ -1295,7 +1295,7 @@ export namespace MCP {
     const s = await state()
     const client = s.clients[name]
     if (client) {
-      await release(name)
+      await release(name, client)
       delete s.clients[name]
     }
     s.status[name] = { status: "disabled" }
@@ -1322,7 +1322,7 @@ export namespace MCP {
             error: e instanceof Error ? e.message : String(e),
           }
           s.status[clientName] = failedStatus
-          await release(clientName)
+          await release(clientName, client, true)
           delete s.clients[clientName]
           return undefined
         })
