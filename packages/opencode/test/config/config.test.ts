@@ -746,6 +746,11 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
 
   const prev = process.env.OPENCODE_CONFIG_DIR
   process.env.OPENCODE_CONFIG_DIR = tmp.extra
+  const run = spyOn(BunProc, "run").mockImplementation(async () => ({
+    code: 0,
+    stdout: Buffer.alloc(0),
+    stderr: Buffer.alloc(0),
+  }))
 
   try {
     await Instance.provide({
@@ -758,7 +763,10 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
 
     expect(await Filesystem.exists(path.join(tmp.extra, "package.json"))).toBe(true)
     expect(await Filesystem.exists(path.join(tmp.extra, ".gitignore"))).toBe(true)
+    expect(run).toHaveBeenCalled()
+    expect(run.mock.calls.some((call) => call[1]?.cwd === tmp.extra)).toBe(true)
   } finally {
+    run.mockRestore()
     if (prev === undefined) delete process.env.OPENCODE_CONFIG_DIR
     else process.env.OPENCODE_CONFIG_DIR = prev
   }
