@@ -46,3 +46,19 @@ test("smoke model selection updates prompt footer", async ({ page, gotoSession }
   await expect(dialogAgain).toBeVisible()
   await expect(dialogAgain.locator(`[data-slot="list-item"][data-key="${key}"][data-selected="true"]`)).toBeVisible()
 })
+
+test("recent models are shown first in the model picker", async ({ page, gotoSession }) => {
+  await gotoSession()
+
+  await page.locator(promptSelector).click()
+  await page.keyboard.type("/model")
+
+  const command = page.locator('[data-slash-id="model.choose"]')
+  await expect(command).toBeVisible()
+  await command.hover()
+  await page.keyboard.press("Enter")
+
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-slot="list-item"]').first()).toHaveAttribute("data-key", "opencode:big-pickle")
+})
