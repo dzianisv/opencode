@@ -31,15 +31,66 @@ import { Truncate } from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
-import { Effect, Layer, ServiceMap } from "effect"
-import { InstanceState } from "@/effect/instance-state"
-import { makeRuntime } from "@/effect/run-service"
+import { existsSync } from "fs"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
 
-  type State = {
-    custom: Tool.Info[]
+  export const state = Instance.state(async () => {
+    const custom = [] as Tool.Info[]
+
+    const files = await Config.directories().then((dirs) =>
+      dirs.flatMap((dir) =>
+        Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }).map((file) => ({
+          dir,
+          file,
+        })),
+      ),
+    )
+    const deps = files.some((item) => {
+      return existsSync(path.join(item.dir, "package.json")) || existsSync(path.join(item.dir, "node_modules"))
+    })
+    if (deps) await Config.waitForDependencies()
+    for (const item of files) {
+      const namespace = path.basename(item.file, path.extname(item.file))
+      const mod = await import(pathToFileURL(item.file).href)
+      for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
+        custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
+      }
+    }
+
+    const plugins = await Plugin.list()
+    for (const plugin of plugins) {
+      for (const [id, def] of Object.entries(plugin.tool ?? {})) {
+        custom.push(fromPlugin(id, def))
+      }
+    }
+
+    return { custom }
+  })
+
+  function fromPlugin(id: string, def: ToolDefinition): Tool.Info {
+    return {
+      id,
+      init: async (initCtx) => ({
+        parameters: z.object(def.args),
+        description: def.description,
+        execute: async (args, ctx) => {
+          const pluginCtx = {
+            ...ctx,
+            directory: Instance.directory,
+            worktree: Instance.worktree,
+          } as unknown as PluginToolContext
+          const result = await def.execute(args as any, pluginCtx)
+          const out = await Truncate.output(result, {}, initCtx?.agent)
+          return {
+            title: "",
+            output: out.truncated ? out.content : result,
+            metadata: { truncated: out.truncated, outputPath: out.truncated ? out.outputPath : undefined },
+          }
+        },
+      }),
+    }
   }
 
   export interface Interface {
