@@ -274,16 +274,26 @@ export namespace MCP {
     }
   }
 
-  async function release(name: string, force?: boolean) {
+  async function release(name: string, client?: MCPClient, force?: boolean) {
     const item = shared.get(name)
-    if (!item) return
+    if (!item) {
+      if (!client || !force) return
+      log.info("closing stale mcp client", { name, force: !!force })
+      await close(name, client)
+      return
+    }
+    if (client && item.client !== client) {
+      if (!force) return
+      log.info("closing stale mcp client", { name, force: !!force })
+      await close(name, client)
+      return
+    }
     item.refs = Math.max(0, item.refs - 1)
     item.used = Date.now()
-    if (force || item.refs <= 0) {
-      shared.delete(name)
-      log.info("closing shared mcp client", { name, force: !!force })
-      await close(name, item.client)
-    }
+    if (!force && item.refs > 0) return
+    shared.delete(name)
+    log.info("closing shared mcp client", { name, force: !!force })
+    await close(name, item.client)
   }
 
   async function acquire(name: string, mcp: Config.Mcp) {
@@ -374,7 +384,7 @@ export namespace MCP {
       }
     },
     async (state) => {
-      await Promise.all(Object.keys(state.clients).map((name) => release(name, true)))
+      await Promise.all(Object.entries(state.clients).map(([name, client]) => release(name, client)))
       pendingOAuthTransports.clear()
     },
   )
@@ -427,7 +437,7 @@ export namespace MCP {
   export async function add(name: string, mcp: Config.Mcp) {
     const s = await state()
     if (s.clients[name]) {
-      await release(name)
+      await release(name, s.clients[name])
       delete s.clients[name]
     }
     const result = await acquire(name, mcp)
@@ -597,11 +607,11 @@ export namespace MCP {
       })
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
+      const client = new Client({
+        name: "opencode",
+        version: Installation.VERSION,
+      })
       try {
-        const client = new Client({
-          name: "opencode",
-          version: Installation.VERSION,
-        })
         await withTimeout(client.connect(transport), connectTimeout)
         registerNotificationHandlers(client, key)
         mcpClient = client
@@ -609,6 +619,14 @@ export namespace MCP {
           status: "connected",
         }
       } catch (error) {
+        await close(key, client).catch((err) => {
+          log.error("failed to close timed out local mcp", {
+            key,
+            command: mcp.command,
+            cwd,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
         log.error("local mcp startup failed", {
           key,
           command: mcp.command,
@@ -697,7 +715,7 @@ export namespace MCP {
 
     const s = await state()
     if (s.clients[name]) {
-      await release(name)
+      await release(name, s.clients[name])
       delete s.clients[name]
     }
     const result = await acquire(name, { ...mcp, enabled: true })
@@ -720,7 +738,7 @@ export namespace MCP {
     const s = await state()
     const client = s.clients[name]
     if (client) {
-      await release(name)
+      await release(name, client)
       delete s.clients[name]
     }
     s.status[name] = { status: "disabled" }
@@ -747,7 +765,7 @@ export namespace MCP {
             error: e instanceof Error ? e.message : String(e),
           }
           s.status[clientName] = failedStatus
-          await release(clientName)
+          await release(clientName, client, true)
           delete s.clients[clientName]
           return undefined
         })
