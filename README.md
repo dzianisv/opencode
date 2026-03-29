@@ -127,6 +127,40 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
+### Memory Diagnostics
+
+This fork carries built-in memory profiling helpers intended for leak hunts, panic triage, and long-running session investigations.
+
+Useful commands:
+
+```bash
+bun run --cwd packages/opencode profile:memory
+bun run --cwd packages/opencode profile:memory:wait
+bun run --cwd packages/opencode profile:memory:workload
+```
+
+Artifacts are written under `~/.local/share/opencode/log`:
+
+- `memory-<label>-<timestamp>.ndjson`: rolling NDJSON samples from the memory monitor
+- `memory/<timestamp>/sample.json`: point-in-time process, heap, session, PTY, and instance-cache stats
+- `memory/<timestamp>/meta.json`: trigger reason, threshold, RSS summary, and active-session counts
+- `memory/<timestamp>/ps.txt`: process list captured at snapshot time
+- `memory/<timestamp>/vmmap.txt`: macOS virtual memory summary, when available
+- `memory/<timestamp>/sample.txt`: macOS stack sampling output, when available
+- `memory/<timestamp>/heap.heapsnapshot`: V8 heap snapshot for DevTools Memory analysis
+
+Heap snapshot notes:
+
+- Open `heap.heapsnapshot` in Chrome DevTools or another V8-compatible heap viewer.
+- Use `sample.json` and `meta.json` first to confirm whether the spike is heap, child-process RSS, PTY growth, or instance-cache pressure before drilling into the heap graph.
+- On macOS, `vmmap.txt` and `sample.txt` are often the fastest way to distinguish heap growth from mapped-file or native allocations.
+
+Retention and disk safety:
+
+- Top-level log files in `~/.local/share/opencode/log` are auto-trimmed to a total of `512 MiB`.
+- Heap snapshot directories in `~/.local/share/opencode/log/memory` are capped to the newest `2`.
+- The retention caps are automatic so repeated profiling does not silently exhaust disk space.
+
 ### Contributing
 
 If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
