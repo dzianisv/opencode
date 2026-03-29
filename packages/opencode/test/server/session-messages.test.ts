@@ -1,29 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import path from "path"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
+import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
+const root = path.join(__dirname, "../..")
 Log.init({ print: false })
-
-afterEach(async () => {
-  await Instance.disposeAll()
-})
-
-async function withoutWatcher<T>(fn: () => Promise<T>) {
-  if (process.platform !== "win32") return fn()
-  const prev = process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER
-  process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = "true"
-  try {
-    return await fn()
-  } finally {
-    if (prev === undefined) delete process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER
-    else process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = prev
-  }
-}
 
 async function fill(sessionID: SessionID, count: number, time = (i: number) => Date.now() + i) {
   const ids = [] as MessageID[]
@@ -53,108 +40,83 @@ async function fill(sessionID: SessionID, count: number, time = (i: number) => D
 
 describe("session messages endpoint", () => {
   test("returns cursor headers for older pages", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await withoutWatcher(() =>
-      Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const session = await Session.create({})
-          const ids = await fill(session.id, 5)
-          const app = Server.Default()
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        const ids = await fill(session.id, 5)
+        const app = Server.Default()
 
-          const a = await app.request(`/session/${session.id}/message?limit=2`)
-          expect(a.status).toBe(200)
-          const aBody = (await a.json()) as MessageV2.WithParts[]
-          expect(aBody.map((item) => item.info.id)).toEqual(ids.slice(-2))
-          const cursor = a.headers.get("x-next-cursor")
-          expect(cursor).toBeTruthy()
-          expect(a.headers.get("link")).toContain('rel="next"')
+        const a = await app.request(`/session/${session.id}/message?limit=2`)
+        expect(a.status).toBe(200)
+        const aBody = (await a.json()) as MessageV2.WithParts[]
+        expect(aBody.map((item) => item.info.id)).toEqual(ids.slice(-2))
+        const cursor = a.headers.get("x-next-cursor")
+        expect(cursor).toBeTruthy()
+        expect(a.headers.get("link")).toContain('rel="next"')
 
-          const b = await app.request(`/session/${session.id}/message?limit=2&before=${encodeURIComponent(cursor!)}`)
-          expect(b.status).toBe(200)
-          const bBody = (await b.json()) as MessageV2.WithParts[]
-          expect(bBody.map((item) => item.info.id)).toEqual(ids.slice(-4, -2))
+        const b = await app.request(`/session/${session.id}/message?limit=2&before=${encodeURIComponent(cursor!)}`)
+        expect(b.status).toBe(200)
+        const bBody = (await b.json()) as MessageV2.WithParts[]
+        expect(bBody.map((item) => item.info.id)).toEqual(ids.slice(-4, -2))
 
-          await Session.remove(session.id)
-        },
-      }),
-    )
+        await Session.remove(session.id)
+      },
+    })
   })
 
   test("keeps full-history responses when limit is omitted", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await withoutWatcher(() =>
-      Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const session = await Session.create({})
-          const ids = await fill(session.id, 3)
-          const app = Server.Default()
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        const ids = await fill(session.id, 3)
+        const app = Server.Default()
 
-          const res = await app.request(`/session/${session.id}/message`)
-          expect(res.status).toBe(200)
-          const body = (await res.json()) as MessageV2.WithParts[]
-          expect(body.map((item) => item.info.id)).toEqual(ids)
+        const res = await app.request(`/session/${session.id}/message`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as MessageV2.WithParts[]
+        expect(body.map((item) => item.info.id)).toEqual(ids)
 
-          await Session.remove(session.id)
-        },
-      }),
-    )
+        await Session.remove(session.id)
+      },
+    })
   })
 
   test("rejects invalid cursors and missing sessions", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await withoutWatcher(() =>
-      Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const session = await Session.create({})
-          const app = Server.Default()
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        const app = Server.Default()
 
-          const bad = await app.request(`/session/${session.id}/message?limit=2&before=bad`)
-          expect(bad.status).toBe(400)
+        const bad = await app.request(`/session/${session.id}/message?limit=2&before=bad`)
+        expect(bad.status).toBe(400)
 
-          const miss = await app.request(`/session/ses_missing/message?limit=2`)
-          expect(miss.status).toBe(404)
+        const miss = await app.request(`/session/ses_missing/message?limit=2`)
+        expect(miss.status).toBe(404)
 
-          await Session.remove(session.id)
-        },
-      }),
-    )
+        await Session.remove(session.id)
+      },
+    })
   })
 
   test("does not truncate large legacy limit requests", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await withoutWatcher(() =>
-      Instance.provide({
-        directory: tmp.path,
-        fn: async () => {
-          const session = await Session.create({})
-          await fill(session.id, 520)
-          const app = Server.Default()
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        await fill(session.id, 520)
+        const app = Server.Default()
 
-          const res = await app.request(`/session/${session.id}/message?limit=510`)
-          expect(res.status).toBe(200)
-          const body = (await res.json()) as MessageV2.WithParts[]
-          expect(body).toHaveLength(510)
+        const res = await app.request(`/session/${session.id}/message?limit=510`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as MessageV2.WithParts[]
+        expect(body).toHaveLength(510)
 
-          await Session.remove(session.id)
-        },
-      }),
-    )
-  })
-})
-
-describe("session.prompt_async error handling", () => {
-  test("prompt_async route has error handler for detached prompt call", async () => {
-    const src = await Bun.file(new URL("../../src/server/routes/session.ts", import.meta.url)).text()
-    const start = src.indexOf('"/:sessionID/prompt_async"')
-    const end = src.indexOf('"/:sessionID/command"', start)
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    const route = src.slice(start, end)
-    expect(route).toContain(".catch(")
-    expect(route).toContain("Bus.publish(Session.Event.Error")
+        await Session.remove(session.id)
+      },
+    })
   })
 })
 
@@ -168,5 +130,57 @@ describe("session.prompt_async error handling", () => {
     const route = src.slice(start, end)
     expect(route).toContain(".catch(")
     expect(route).toContain("Bus.publish(Session.Event.Error")
+  })
+
+  test("prompt_async keeps an instance ref until detached work finishes", async () => {
+    await using tmp = await tmpdir()
+    const app = Server.Default()
+    const hold = Promise.withResolvers<void>()
+    const seen = Promise.withResolvers<void>()
+    const prompt = spyOn(SessionPrompt as any, "prompt").mockImplementation(async () => {
+      seen.resolve()
+      await hold.promise
+      return {} as MessageV2.WithParts
+    })
+
+    try {
+      const session = await Instance.provide({
+        directory: tmp.path,
+        fn: () => Session.create({}),
+      })
+
+      const res = await app.request(`/session/${session.id}/prompt_async`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-opencode-directory": tmp.path,
+        },
+        body: JSON.stringify({
+          parts: [{ type: "text", text: "hi" }],
+        }),
+      })
+
+      expect(res.status).toBe(204)
+      await seen.promise
+      await Bun.sleep(25)
+
+      const busy = Instance.stats().entries.find((item) => item.directory === tmp.path)
+      expect(busy?.refs).toBe(1)
+
+      hold.resolve()
+      await Bun.sleep(25)
+
+      const idle = Instance.stats().entries.find((item) => item.directory === tmp.path)
+      expect(idle?.refs).toBe(0)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () => Session.remove(session.id),
+      })
+    } finally {
+      hold.resolve()
+      prompt.mockRestore()
+      await Instance.disposeAll()
+    }
   })
 })

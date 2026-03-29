@@ -17,6 +17,34 @@ permissions:
   contents: read
 
 jobs:
+  serve-regression:
+    name: serve regression
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run instance lifetime regression
+        working-directory: packages/opencode
+        run: bun test test/project/instance.test.ts -t 'holds refs until async work settles'
+
+      - name: Run detached prompt regression
+        working-directory: packages/opencode
+        run: bun test test/server/session-messages.test.ts -t 'prompt_async keeps an instance ref until detached work finishes'
+
   unit:
     name: unit (${{ matrix.settings.name }})
     strategy:

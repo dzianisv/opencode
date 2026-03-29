@@ -34,4 +34,30 @@ describe("instance cache", () => {
     expect(stats.entries.map((item) => item.directory)).toEqual([three.path, four.path])
     expect(stats.entries.every((item) => item.refs === 0)).toBe(true)
   })
+
+  test("holds refs until async work settles", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const hold = Promise.withResolvers<void>()
+    const seen = Promise.withResolvers<void>()
+
+    void Instance.provide({
+      directory: tmp.path,
+      fn() {
+        seen.resolve()
+        return hold.promise
+      },
+    })
+
+    await seen.promise
+    await Bun.sleep(25)
+
+    const busy = Instance.stats().entries.find((item) => item.directory === tmp.path)
+    expect(busy?.refs).toBe(1)
+
+    hold.resolve()
+    await Bun.sleep(25)
+
+    const idle = Instance.stats().entries.find((item) => item.directory === tmp.path)
+    expect(idle?.refs).toBe(0)
+  })
 })

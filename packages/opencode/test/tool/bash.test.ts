@@ -827,8 +827,8 @@ describe("tool.bash permissions", () => {
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         await bash.execute(
           {
-            command: "git log --oneline -5",
-            description: "Git log",
+            command: "ls -la",
+            description: "List files",
           },
           capture(requests),
         )
