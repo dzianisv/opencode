@@ -14,6 +14,7 @@ import { Process } from "@/util/process"
 const log = Log.create({ service: "memory" })
 
 const mib = 1024 * 1024
+const keep = 2
 
 const run = {
   busy: false,
@@ -143,6 +144,38 @@ function env() {
   }
 }
 
+type Entry = {
+  dir: string
+  time: number
+}
+
+async function prune(input?: {
+  dir?: string
+  keep?: number
+}) {
+  const root = input?.dir ?? path.join(Global.Path.log, "memory")
+  const max = input?.keep ?? keep
+  const list = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+  const rows = await Promise.all(
+    list
+      .filter((item) => item.isDirectory())
+      .map(async (item) => {
+        const dir = path.join(root, item.name)
+        const stat = await fs.stat(dir).catch(() => undefined)
+        if (!stat) return
+        return {
+          dir,
+          time: stat.mtimeMs,
+        } satisfies Entry
+      }),
+  )
+  const dirs = rows
+    .filter((item): item is Entry => Boolean(item))
+    .sort((a, b) => a.time - b.time)
+  if (dirs.length <= max) return
+  await Promise.all(dirs.slice(0, -max).map((item) => fs.rm(item.dir, { recursive: true, force: true }).catch(() => {})))
+}
+
 export namespace Memory {
   export const TreeProcess = z.object({
     pid: z.number(),
@@ -189,6 +222,8 @@ export namespace Memory {
   })
 
   export type Sample = z.infer<typeof Sample>
+
+  export const trim = prune
 
   export async function sample(input?: { children?: boolean }) {
     const mem = process.memoryUsage()
@@ -255,6 +290,8 @@ export namespace Memory {
           sessions_active: data.session.active,
         })
 
+        await Memory.trim()
+
         return dir
       })
       .finally(() => {
@@ -267,6 +304,10 @@ export namespace Memory {
 
     const cfg = env()
     if (!cfg) return
+
+    void Memory.trim().catch((error) => {
+      log.error("memory trim failed", { error })
+    })
 
     one.file =
       cfg.path || path.join(Global.Path.log, `memory-${label}-${new Date().toISOString().split(".")[0].replace(/:/g, "")}.ndjson`)
@@ -286,6 +327,7 @@ export namespace Memory {
         .then(async () => {
           const data = await sample({ children: cfg.children })
           await fs.appendFile(one.file, JSON.stringify(data) + "\n")
+          await Log.trim()
 
           if (cfg.threshold_mb === undefined) return
           const value = data.tree?.rss_bytes ?? data.rss_bytes
