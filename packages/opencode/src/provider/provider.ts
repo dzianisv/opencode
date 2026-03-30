@@ -868,7 +868,7 @@ export namespace Provider {
     })
   export type Info = z.infer<typeof Info>
 
-  const MODELS_DEV_BACKFILLS: Record<string, Record<string, ModelsDev.Model>> = {
+  const MODELS_DEV_BACKFILLS = {
     azure: {
       "gpt-5.3-codex": {
         id: "gpt-5.3-codex",
@@ -895,7 +895,7 @@ export namespace Provider {
         options: {},
       },
     },
-  }
+  } satisfies Record<string, Record<string, ModelsDev.Model>>
 
   function withModelsDevBackfills(provider: ModelsDev.Provider): ModelsDev.Provider {
     const backfills = MODELS_DEV_BACKFILLS[provider.id]
@@ -907,12 +907,6 @@ export namespace Provider {
         ...provider.models,
       },
     }
-  }
-
-  function normalizeFamily(model: ModelsDev.Model): string {
-    if (model.id.includes("codex")) return "gpt-codex"
-    if (model.family === "gpt-codex" && model.id.includes("-chat")) return "gpt-chat"
-    return model.family ?? ""
   }
 
   function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
