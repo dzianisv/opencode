@@ -34,6 +34,43 @@ test("provider loaded from env variable", async () => {
   })
 })
 
+test("azure/gpt-5.3-codex is backfilled when provider metadata is stale", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+        }),
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      Env.set("AZURE_RESOURCE_NAME", "test-resource")
+      Env.set("AZURE_API_KEY", "test-api-key")
+    },
+    fn: async () => {
+      const providers = await Provider.list()
+      const azure = providers[ProviderID.azure]
+      expect(azure).toBeDefined()
+      expect(azure.source).toBe("env")
+
+      const model = azure.models["gpt-5.3-codex"]
+      expect(model).toBeDefined()
+      expect(model.api.id).toBe("gpt-5.3-codex")
+      expect(model.api.npm).toBe("@ai-sdk/azure")
+      expect(model.limit.context).toBe(400000)
+      expect(model.variants?.xhigh).toEqual({
+        reasoningEffort: "xhigh",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
+    },
+  })
+})
+
 test("provider loaded from config with apiKey option", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

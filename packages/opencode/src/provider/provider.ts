@@ -868,28 +868,46 @@ export namespace Provider {
     })
   export type Info = z.infer<typeof Info>
 
-  export interface Interface {
-    readonly list: () => Effect.Effect<Record<ProviderID, Info>>
-    readonly getProvider: (providerID: ProviderID) => Effect.Effect<Info>
-    readonly getModel: (providerID: ProviderID, modelID: ModelID) => Effect.Effect<Model>
-    readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3>
-    readonly closest: (
-      providerID: ProviderID,
-      query: string[],
-    ) => Effect.Effect<{ providerID: ProviderID; modelID: string } | undefined>
-    readonly getSmallModel: (providerID: ProviderID) => Effect.Effect<Model | undefined>
-    readonly defaultModel: () => Effect.Effect<{ providerID: ProviderID; modelID: ModelID }>
+  const MODELS_DEV_BACKFILLS: Record<string, Record<string, ModelsDev.Model>> = {
+    azure: {
+      "gpt-5.3-codex": {
+        id: "gpt-5.3-codex",
+        name: "GPT-5.3 Codex",
+        family: "gpt-codex",
+        attachment: false,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        release_date: "2026-02-24",
+        modalities: {
+          input: ["text", "image"],
+          output: ["text"],
+        },
+        cost: {
+          input: 1.75,
+          output: 14,
+          cache_read: 0.175,
+        },
+        limit: {
+          context: 400000,
+          output: 128000,
+        },
+        options: {},
+      },
+    },
   }
 
-  interface State {
-    models: Map<string, LanguageModelV3>
-    providers: Record<ProviderID, Info>
-    sdk: Map<string, BundledSDK>
-    modelLoaders: Record<string, CustomModelLoader>
-    varsLoaders: Record<string, CustomVarsLoader>
+  function withModelsDevBackfills(provider: ModelsDev.Provider): ModelsDev.Provider {
+    const backfills = MODELS_DEV_BACKFILLS[provider.id]
+    if (!backfills) return provider
+    return {
+      ...provider,
+      models: {
+        ...backfills,
+        ...provider.models,
+      },
+    }
   }
-
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Provider") {}
 
   function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
     const m: Model = {
@@ -959,13 +977,14 @@ export namespace Provider {
   }
 
   export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
+    const normalized = withModelsDevBackfills(provider)
     return {
-      id: ProviderID.make(provider.id),
+      id: ProviderID.make(normalized.id),
       source: "custom",
-      name: provider.name,
-      env: provider.env ?? [],
+      name: normalized.name,
+      env: normalized.env ?? [],
       options: {},
-      models: mapValues(provider.models, (model) => fromModelsDevModel(provider, model)),
+      models: mapValues(normalized.models, (model) => fromModelsDevModel(normalized, model)),
     }
   }
 
