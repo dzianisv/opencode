@@ -404,10 +404,13 @@ async function addIssueReaction(
 // Event handlers
 // ---------------------------------------------------------------------------
 
-const AGENT_USERNAME = "opencode-agent[bot]"
+const AGENT_USERNAME =
+  process.env.GITHUB_AGENT_USERNAME || "opencode-agent[bot]"
 const COMMAND_PREFIXES = ["/oc ", "/opencode "]
 
 function isAgentUser(login: string): boolean {
+  // When GITHUB_AGENT_USERNAME is set to "*", accept any assignee
+  if (AGENT_USERNAME === "*") return true
   return login === AGENT_USERNAME || login.endsWith("[bot]")
 }
 
