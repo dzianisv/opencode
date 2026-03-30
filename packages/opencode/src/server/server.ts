@@ -13,6 +13,7 @@ import { websocket } from "hono/bun"
 import { errors } from "./error"
 import { GlobalRoutes } from "./routes/global"
 import { TtsRoutes } from "./routes/tts"
+import { GitHubWebhookRoutes } from "./routes/github"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 import { errorHandler } from "./middleware"
@@ -108,6 +109,7 @@ export namespace Server {
       })
       .route("/global", GlobalRoutes())
       .route("/tts", TtsRoutes())
+      .route("/github", GitHubWebhookRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
