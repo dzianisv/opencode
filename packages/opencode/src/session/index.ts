@@ -32,8 +32,8 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Permission } from "@/permission"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
-import { Effect, Layer, Scope, ServiceMap } from "effect"
-import { makeRuntime } from "@/effect/run-service"
+import { iife } from "@/util/iife"
+import { Filesystem } from "@/util/filesystem"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -778,12 +778,14 @@ export namespace Session {
   }) {
     const project = Instance.project
     const conditions = [eq(SessionTable.project_id, project.id)]
+    const workspace = WorkspaceContext.workspaceID
+    const directory = input?.directory ? Filesystem.resolve(input.directory) : undefined
 
-    if (input?.workspaceID) {
-      conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
+    if (workspace) {
+      conditions.push(or(eq(SessionTable.workspace_id, workspace), isNull(SessionTable.workspace_id))!)
     }
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+    if (directory) {
+      conditions.push(eq(SessionTable.directory, directory))
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
@@ -821,9 +823,10 @@ export namespace Session {
     archived?: boolean
   }) {
     const conditions: SQL[] = []
+    const directory = input?.directory ? Filesystem.resolve(input.directory) : undefined
 
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+    if (directory) {
+      conditions.push(eq(SessionTable.directory, directory))
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
