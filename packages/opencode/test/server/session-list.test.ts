@@ -3,6 +3,8 @@ import path from "path"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { Log } from "../../src/util/log"
+import { WorkspaceContext } from "../../src/control-plane/workspace-context"
+import { WorkspaceID } from "../../src/control-plane/schema"
 
 const projectRoot = path.join(__dirname, "../..")
 Log.init({ print: false })
@@ -25,6 +27,24 @@ describe("Session.list", () => {
 
         expect(ids).toContain(first.id)
         expect(ids).not.toContain(second.id)
+      },
+    })
+  })
+
+  test("normalizes directory filter aliases", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const session = await Session.create({ title: "alias-filter-session" })
+        const alias = `${projectRoot}${path.sep}..${path.sep}${path.basename(projectRoot)}`
+
+        const sessions = await Instance.provide({
+          directory: alias,
+          fn: async () => [...Session.list({ directory: alias })],
+        })
+        const ids = sessions.map((s) => s.id)
+
+        expect(ids).toContain(session.id)
       },
     })
   })
@@ -84,6 +104,28 @@ describe("Session.list", () => {
 
         const sessions = [...Session.list({ limit: 2 })]
         expect(sessions.length).toBe(2)
+      },
+    })
+  })
+
+  test("includes unscoped sessions inside workspace context", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const workspace = WorkspaceID.ascending()
+        const scoped = await Session.create({ title: "workspace-session", workspaceID: workspace })
+        const legacy = await Session.create({ title: "legacy-session" })
+        const other = await Session.create({ title: "other-workspace-session", workspaceID: WorkspaceID.ascending() })
+
+        const sessions = await WorkspaceContext.provide({
+          workspaceID: workspace,
+          fn: async () => [...Session.list({})],
+        })
+        const ids = sessions.map((s) => s.id)
+
+        expect(ids).toContain(scoped.id)
+        expect(ids).toContain(legacy.id)
+        expect(ids).not.toContain(other.id)
       },
     })
   })
