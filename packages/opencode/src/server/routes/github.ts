@@ -12,7 +12,9 @@ import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { bootstrap } from "../../cli/bootstrap"
 import { Session } from "../../session"
+import { MessageID, PartID } from "../../session/schema"
 import { SessionPrompt } from "../../session/prompt"
+import { Provider } from "../../provider/provider"
 import { buildIssuePrompt, extractResponseText } from "../../cli/cmd/github"
 
 const log = Log.create({ service: "github-webhook" })
@@ -21,7 +23,7 @@ const log = Log.create({ service: "github-webhook" })
 // Config — all from env vars
 // ---------------------------------------------------------------------------
 
-interface GitHubWebhookConfig {
+export interface GitHubWebhookConfig {
   appId: number
   privateKey: string
   /** Webhook secret — if empty, signature verification is skipped (useful for local dev) */
@@ -31,7 +33,7 @@ interface GitHubWebhookConfig {
   workspacesDir: string
 }
 
-function loadConfig(): GitHubWebhookConfig | null {
+export function loadConfig(): GitHubWebhookConfig | null {
   const appId = process.env["GITHUB_APP_ID"]
   const privateKey = process.env["GITHUB_APP_PRIVATE_KEY"]
   const installationId = process.env["GITHUB_APP_INSTALLATION_ID"]
@@ -55,7 +57,7 @@ function loadConfig(): GitHubWebhookConfig | null {
 // GitHub App JWT auth (manual RS256 — no @octokit/app dependency)
 // ---------------------------------------------------------------------------
 
-function formatPrivateKey(input: string): string {
+export function formatPrivateKey(input: string): string {
   if (input.includes("BEGIN RSA PRIVATE KEY") || input.includes("BEGIN PRIVATE KEY")) {
     return input.replace(/\\n/g, "\n")
   }
@@ -71,7 +73,7 @@ function base64url(data: Buffer | string): string {
   return buf.toString("base64url")
 }
 
-function createAppJwt(appId: number, privateKey: string): string {
+export function createAppJwt(appId: number, privateKey: string): string {
   const now = Math.floor(Date.now() / 1000)
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }))
   const payload = base64url(
@@ -130,7 +132,7 @@ function createOctokit(token: string): Octokit {
 // Webhook signature verification
 // ---------------------------------------------------------------------------
 
-function verifyWebhookSignature(secret: string, payload: string, signature: string | undefined): boolean {
+export function verifyWebhookSignature(secret: string, payload: string, signature: string | undefined): boolean {
   if (!signature) return false
   const expected = "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex")
   try {
@@ -269,6 +271,18 @@ function buildResponseContract(): string {
 // Agent execution
 // ---------------------------------------------------------------------------
 
+function resolveAgentModel(): { providerID: ReturnType<typeof Provider.parseModel>["providerID"]; modelID: ReturnType<typeof Provider.parseModel>["modelID"] } | undefined {
+  const modelStr = process.env["GITHUB_AGENT_MODEL"] || process.env["MODEL"]
+  if (!modelStr) return undefined
+  const { providerID, modelID } = Provider.parseModel(modelStr)
+  if (!providerID.length || !modelID.length) {
+    log.warn("invalid model format, ignoring", { model: modelStr })
+    return undefined
+  }
+  log.info("using explicit model", { providerID, modelID })
+  return { providerID, modelID }
+}
+
 async function runAgent(
   worktreeDir: string,
   prompt: string,
@@ -283,10 +297,14 @@ async function runAgent(
       title,
     })
 
+    const model = resolveAgentModel()
     const result = await SessionPrompt.prompt({
       sessionID: session.id,
+      messageID: MessageID.ascending(),
+      ...(model ? { model } : {}),
       parts: [
         {
+          id: PartID.ascending(),
           type: "text",
           text: prompt + buildResponseContract(),
         },
@@ -408,13 +426,13 @@ const AGENT_USERNAME =
   process.env.GITHUB_AGENT_USERNAME || "opencode-agent[bot]"
 const COMMAND_PREFIXES = ["/oc ", "/opencode "]
 
-function isAgentUser(login: string): boolean {
+export function isAgentUser(login: string): boolean {
   // When GITHUB_AGENT_USERNAME is set to "*", accept any assignee
   if (AGENT_USERNAME === "*") return true
   return login === AGENT_USERNAME || login.endsWith("[bot]")
 }
 
-function extractCommand(body: string): string | null {
+export function extractCommand(body: string): string | null {
   const trimmed = body.trim()
   for (const prefix of COMMAND_PREFIXES) {
     if (trimmed.startsWith(prefix)) {
