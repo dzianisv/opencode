@@ -15,6 +15,12 @@ import { DialogManageModels } from "./dialog-manage-models"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 
+type ModelItem = NonNullable<ReturnType<ModelState["current"]>>
+
+function itemKey(item: ModelItem) {
+  return `${item.provider.id}:${item.id}`
+}
+
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
@@ -29,6 +35,7 @@ const ModelList: Component<{
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
+  const recent = () => language.t("dialog.model.group.recent")
 
   const models = createMemo(() =>
     model
@@ -37,18 +44,34 @@ const ModelList: Component<{
       .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
 
+  const recents = createMemo(() =>
+    new Map(
+      model.recent().flatMap((item, index) => {
+        if (!item) return []
+        return [[itemKey(item), index] as const]
+      }),
+    ),
+  )
+
   return (
     <List
       class={`flex-1 min-h-0 [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:min-h-0 ${props.class ?? ""}`}
       search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true, action: props.action }}
       emptyMessage={language.t("dialog.model.empty")}
-      key={(x) => `${x.provider.id}:${x.id}`}
+      key={itemKey}
       items={models}
       current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
-      sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={(x) => x.provider.name}
+      sortBy={(a, b) => {
+        const ai = recents().get(itemKey(a))
+        const bi = recents().get(itemKey(b))
+        if (ai !== undefined && bi !== undefined) return ai - bi
+        return a.name.localeCompare(b.name)
+      }}
+      groupBy={(item) => (recents().has(itemKey(item)) ? recent() : item.provider.name)}
       sortGroupsBy={(a, b) => {
+        if (a.category === recent()) return -1
+        if (b.category === recent()) return 1
         const aProvider = a.items[0].provider.id
         const bProvider = b.items[0].provider.id
         if (popularProviders.includes(aProvider) && !popularProviders.includes(bProvider)) return -1
