@@ -1,6 +1,6 @@
 # Hacker News
 
-**Title:** Show HN: We fixed OpenCode's memory leaks to run 8+ AI coding sessions concurrently
+**Title:** Show HN: OpenCode fork for stable 8+ concurrent coding sessions
 
 **URL:** https://github.com/dzianisv/opencode
 
@@ -8,18 +8,39 @@
 
 **Comment (post as top-level after submission):**
 
-OpenCode (https://github.com/anomalyco/opencode) is an open-source AI coding agent with a client/server architecture. We run it on a persistent server and connect from phones, tablets, and laptops via the web UI.
+We run OpenCode (https://github.com/anomalyco/opencode) in server mode on a shared Mac Mini and connect from web clients on laptops and phones.
 
-With 8+ concurrent sessions across multiple projects, we hit three scaling problems:
+Under a workload of 8+ concurrent sessions across multiple projects, we saw three failure modes:
 
-1. **Memory:** Per-token DB writes during streaming caused ~400 writes/sec across sessions. We batch to 50ms flushes (~20x reduction). Project instances were never evicted -- we added LRU with a cap of 4. Idle GC reclaims 200-400 MB between sessions.
+1. **Memory pressure and churn**
 
-2. **Orchestration:** No global view of sessions across projects. We added a cross-project "Recently Active" dashboard with search, diff stats, and parent/child session tree.
+- Per-token `updatePartDelta` writes generated ~400 tiny DB writes/sec.
+- We now batch deltas and flush every 50ms (~20x fewer writes).
+- Project `Instance` objects are now LRU-bounded (default cap: 4) instead of unbounded.
+- Idle GC runs after 5 minutes with no active sessions and typically reclaims 200-400 MB.
+- Added `GET /global/memory` for RSS/heap/cache/process diagnostics.
 
-3. **Mobile UX:** The client/server split means you can code from a phone, but the UI had no voice support. We added server-backed Edge TTS and browser STT.
+2. **Missing cross-project orchestration**
 
-4. **Self-checking:** Auto-review mode queues a "review and reflect" follow-up after the model finishes a task.
+- Added a global "Recently Active" view backed by `Session.listGlobal()`.
+- Includes search, diff stats, and parent/child session tree.
+- Added a pinned "Recent" tab for fast context switching.
 
-The upstream issues that motivated the memory work: [#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645).
+3. **Mobile interaction bottlenecks**
 
-We stay close to upstream main and cherry-pick relevant PRs. Happy to contribute any of this back if there's interest.
+- Added server-backed Edge TTS (`POST /tts/edge`) for consistent playback.
+- Added browser STT via Web Speech API and per-message playback controls.
+
+4. **Quality control in autonomous runs**
+
+- Added optional auto-review that queues a follow-up "review and reflect" turn after task completion.
+
+Operational value:
+
+- Bounded memory behavior for long-lived `opencode serve` processes.
+- Better multi-project observability for session operators.
+- Lower manual QA cost in parallel autonomous sessions.
+
+Upstream issues that motivated the memory work: [#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645).
+
+Fork tracks upstream and cherry-picks selectively.

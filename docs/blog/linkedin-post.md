@@ -2,29 +2,36 @@
 
 ---
 
-**Running AI coding agents at scale requires engineering work most people skip.**
+**Running AI coding agents at concurrency requires production-style controls.**
 
-We use OpenCode -- an open-source AI coding agent with a client/server architecture -- as our primary development tool. The setup: a headless Mac Mini running `opencode serve`, accessed from laptops, tablets, and phones via the web UI.
+We run OpenCode (`opencode serve`) on a headless Mac Mini and connect from web clients on laptops, tablets, and phones.
 
-The promise is compelling: write code from anywhere, including your phone. The reality with 8+ concurrent sessions: the server would OOM within an hour.
+At 8+ concurrent sessions, the server crossed 2 GB RSS and eventually OOMed. We also lacked cross-project visibility in the web UI.
 
-We forked OpenCode and spent time on the unglamorous infrastructure work:
+We implemented four technical changes in our fork:
 
-- Batched streaming writes (50ms coalescing instead of per-token DB ops) cut I/O pressure ~20x
-- LRU eviction for project instances keeps the cache bounded at 4 (was unbounded)
-- Idle GC reclaims 200-400 MB between active sessions
-- A memory diagnostics endpoint for production monitoring
+1. Memory path
 
-Then we built the orchestration layer that multi-session workflows need:
+- Batched streaming writes (50ms coalescing) instead of per-token DB ops (~20x fewer writes).
+- Added LRU eviction for project instances (default cap: 4).
+- Added idle GC reclaim after 5 minutes without active sessions (typically 200-400 MB).
+- Added `GET /global/memory` diagnostics for RSS/heap/cache/process state.
 
-- A cross-project "Recently Active" dashboard with search and diff stats
-- Server-backed Edge TTS so you can hear responses on mobile
-- Browser STT for voice-driven prompts
-- Auto-review mode where the model self-checks after completing a task
+2. Session orchestration
 
-The lesson: client/server AI agents are powerful in theory. Making them reliable at scale requires the same kind of operational work as any other production service -- bounded caches, write batching, GC tuning, observability endpoints.
+- Added cross-project "Recently Active" dashboard with search and diff stats.
+- Added parent/child session tree and pinned "Recent" tab.
+
+3. Mobile interaction
+
+- Added server-backed Edge TTS (`POST /tts/edge`).
+- Added browser STT via Web Speech API.
+
+4. Autonomous quality control
+
+- Added optional auto-review follow-up ("review and reflect") after task completion.
+
+Result: bounded memory behavior, better multi-project visibility, and lower manual QA load for parallel autonomous sessions.
 
 Fork: github.com/dzianisv/opencode
 Upstream: github.com/anomalyco/opencode
-
-#OpenSource #AI #CodingAgent #DevTools #SoftwareEngineering
