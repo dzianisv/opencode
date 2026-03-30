@@ -13,16 +13,19 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 
-type ModelItem = NonNullable<ReturnType<ModelState["current"]>>
-
-function itemKey(item: ModelItem) {
-  return `${item.provider.id}:${item.id}`
-}
-
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+type RecentEntry = ReturnType<ModelState["recent"]>[number]
+type ModelEntry = ReturnType<ModelState["list"]>[number]
+type Item = {
+  mode: "recent" | "model"
+  group: string
+  rank: number
+  model: ModelEntry
+  variant?: RecentEntry["variant"]
+}
 
 const ModelList: Component<{
   provider?: string
@@ -33,73 +36,124 @@ const ModelList: Component<{
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
-  const recent = () => language.t("dialog.model.group.recent")
+  const recentGroup = () => language.t("dialog.model.group.recent")
+  const [store, setStore] = createStore({
+    filter: "",
+  })
 
   const models = createMemo(() =>
     model
       .list()
-      .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
+      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
+      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
   )
 
   const recents = createMemo(() =>
-    new Map(
-      model.recent().flatMap((item, index) => {
-        if (!item) return []
-        return [[itemKey(item), index] as const]
-      }),
-    ),
+    model
+      .recent()
+      .filter((item) => model.visible({ modelID: item.model.id, providerID: item.model.provider.id }))
+      .filter((item) => (props.provider ? item.model.provider.id === props.provider : true)),
   )
+
+  const items = createMemo<Item[]>(() => {
+    const showSections = store.filter.trim().length === 0
+    const recent: Item[] = showSections
+      ? recents().map((item, rank): Item => ({
+          mode: "recent",
+          group: recentGroup(),
+          rank,
+          model: item.model,
+          variant: item.variant,
+        }))
+      : []
+
+    const hidden = new Set(recent.map((item) => `${item.model.provider.id}:${item.model.id}`))
+    const available: Item[] = models().flatMap((item) => {
+      if (showSections && hidden.has(`${item.provider.id}:${item.id}`)) return []
+      return [{ mode: "model", group: item.provider.name, rank: 0, model: item }]
+    })
+
+    return [...recent, ...available]
+  })
+
+  const current = createMemo(() => {
+    const item = model.current()
+    if (!item) return undefined
+
+    const variant = model.variant.current() ?? undefined
+    return (
+      items().find(
+        (entry) =>
+          entry.model.provider.id === item.provider.id &&
+          entry.model.id === item.id &&
+          (entry.mode === "model" || (entry.variant ?? undefined) === variant),
+      ) ?? items().find((entry) => entry.model.provider.id === item.provider.id && entry.model.id === item.id)
+    )
+  })
 
   return (
     <List
       class={`flex-1 min-h-0 [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:min-h-0 ${props.class ?? ""}`}
+      filter={store.filter}
+      onFilter={(value) => setStore("filter", value)}
       search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true, action: props.action }}
       emptyMessage={language.t("dialog.model.empty")}
-      key={itemKey}
-      items={models}
-      current={model.current()}
-      filterKeys={["provider.name", "name", "id"]}
+      key={(item) => `${item.mode}:${item.model.provider.id}:${item.model.id}:${item.variant ?? ""}`}
+      items={items()}
+      current={current()}
+      filterKeys={["model.provider.name", "model.name", "model.id", "variant"]}
       sortBy={(a, b) => {
-        const ai = recents().get(itemKey(a))
-        const bi = recents().get(itemKey(b))
-        if (ai !== undefined && bi !== undefined) return ai - bi
-        return a.name.localeCompare(b.name)
+        if (a.mode === "recent" && b.mode === "recent") return a.rank - b.rank
+        return a.model.name.localeCompare(b.model.name)
       }}
-      groupBy={(item) => (recents().has(itemKey(item)) ? recent() : item.provider.name)}
+      groupBy={(item) => item.group}
       sortGroupsBy={(a, b) => {
-        if (a.category === recent()) return -1
-        if (b.category === recent()) return 1
-        const aProvider = a.items[0].provider.id
-        const bProvider = b.items[0].provider.id
+        if (a.category === recentGroup()) return -1
+        if (b.category === recentGroup()) return 1
+
+        const aProvider = a.items[0].model.provider.id
+        const bProvider = b.items[0].model.provider.id
         if (popularProviders.includes(aProvider) && !popularProviders.includes(bProvider)) return -1
         if (!popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) return 1
-        return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
+        if (popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) {
+          return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
+        }
+        return a.category.localeCompare(b.category)
       }}
       itemWrapper={(item, node) => (
         <Tooltip
           class="w-full"
           placement="right-start"
           gutter={12}
-          value={<ModelTooltip model={item} latest={item.latest} free={isFree(item.provider.id, item.cost)} />}
+          value={
+            <ModelTooltip
+              model={item.model}
+              latest={item.model.latest}
+              free={isFree(item.model.provider.id, item.model.cost)}
+            />
+          }
         >
           {node}
         </Tooltip>
       )}
-      onSelect={(x) => {
-        model.set(x ? { modelID: x.id, providerID: x.provider.id } : undefined, {
-          recent: true,
-        })
+      onSelect={(item) => {
+        model.set(
+          item ? { modelID: item.model.id, providerID: item.model.provider.id } : undefined,
+          item?.mode === "recent" ? { recent: true, variant: item.variant } : { recent: true },
+        )
         props.onSelect()
       }}
     >
-      {(i) => (
+      {(item) => (
         <div class="w-full flex items-center gap-x-2 text-13-regular">
-          <span class="truncate">{i.name}</span>
-          <Show when={isFree(i.provider.id, i.cost)}>
+          <span class="truncate">{item.model.name}</span>
+          <Show when={item.mode === "recent" && item.variant}>
+            {(value) => <Tag class="capitalize">{value()}</Tag>}
+          </Show>
+          <Show when={isFree(item.model.provider.id, item.model.cost)}>
             <Tag>{language.t("model.tag.free")}</Tag>
           </Show>
-          <Show when={i.latest}>
+          <Show when={item.model.latest}>
             <Tag>{language.t("model.tag.latest")}</Tag>
           </Show>
         </div>

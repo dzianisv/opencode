@@ -9,6 +9,7 @@ import { useProviders } from "@/hooks/use-providers"
 import { modelEnabled, modelProbe } from "@/testing/model-selection"
 import { Persist, persisted } from "@/utils/persist"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import type { RecentModel } from "./model-recent"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 
@@ -178,7 +179,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
     }
 
-    const fallback = createMemo<ModelKey | undefined>(() => configuredModel() ?? recentModel() ?? defaultModel())
+    const fallback = createMemo<ModelKey | undefined>(() => configuredModel() ?? recentModel() ?? preferredModel() ?? defaultModel())
+
+    const pushRecent = (item: ModelKey, variant = model.variant.current()) => {
+      models.recent.push({
+        ...item,
+        variant: variant ?? undefined,
+      })
+    }
 
     const agent = {
       list,
@@ -276,7 +284,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       setStore("draft", state)
     }
 
-    const recent = createMemo(() => models.recent.list().map(models.find).filter(Boolean))
+    const recent = createMemo(() =>
+      models.recent.list().flatMap((item) => {
+        const model = models.find(item)
+        if (!model) return []
+        return [{ ...item, model }] satisfies Array<RecentModel & { model: NonNullable<ReturnType<typeof models.find>> }>
+      }),
+    )
 
     const model = {
       ready: models.ready,
@@ -288,7 +302,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const item = current()
         if (!item) return
 
-        const index = items.findIndex((entry) => entry?.provider.id === item.provider.id && entry?.id === item.id)
+        const index = items.findIndex(
+          (entry) =>
+            entry.model.provider.id === item.provider.id &&
+            entry.model.id === item.id &&
+            (entry.variant ?? undefined) === (model.variant.current() ?? undefined),
+        )
         if (index === -1) return
 
         let next = index + direction
@@ -297,9 +316,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
         const entry = items[next]
         if (!entry) return
-        model.set({ providerID: entry.provider.id, modelID: entry.id })
+        model.set(
+          { providerID: entry.model.provider.id, modelID: entry.model.id },
+          { recent: true, variant: entry.variant },
+        )
       },
-      set(item: ModelKey | undefined, options?: { recent?: boolean }) {
+      set(item: ModelKey | undefined, options?: { recent?: boolean; variant?: string }) {
         batch(() => {
           setStore("last", {
             type: "model",
@@ -307,11 +329,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             model: item ?? null,
             variant: selected(),
           })
-          write({ model: item })
+          if (options && "variant" in options) write({ model: item, variant: options.variant ?? null })
+          else write({ model: item })
           if (!item) return
+          if (options && "variant" in options) models.variant.set(item, options.variant)
           models.setVisibility(item, true)
           if (!options?.recent) return
-          models.recent.push(item)
+          pushRecent(item, options?.variant)
         })
       },
       visible(item: ModelKey) {
@@ -337,14 +361,16 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         set(value: string | undefined) {
           batch(() => {
-            const model = current()
+            const item = current()
             setStore("last", {
               type: "variant",
               agent: agent.current()?.name,
-              model: model ? { providerID: model.provider.id, modelID: model.id } : null,
+              model: item ? { providerID: item.provider.id, modelID: item.id } : null,
               variant: value ?? null,
             })
             write({ variant: value ?? null })
+            if (!item) return
+            pushRecent({ providerID: item.provider.id, modelID: item.id }, value)
           })
         },
         cycle() {

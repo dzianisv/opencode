@@ -1,10 +1,11 @@
 import { createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DateTime } from "luxon"
-import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
+import { filter, firstBy, flat, groupBy, mapValues, pipe, values } from "remeda"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { migrateRecent, pushRecent, type RecentModel } from "./model-recent"
 
 export type ModelKey = { providerID: string; modelID: string }
 
@@ -12,7 +13,7 @@ type Visibility = "show" | "hide"
 type User = ModelKey & { visibility: Visibility; favorite?: boolean }
 type Store = {
   user: User[]
-  recent: ModelKey[]
+  recent: RecentModel[]
   variant?: Record<string, string | undefined>
 }
 
@@ -26,9 +27,17 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
   name: "Models",
   init: () => {
     const providers = useProviders()
+    const migrate = (value: unknown) => {
+      if (!value || typeof value !== "object") return value
+      const item = value as { recent?: unknown }
+      return {
+        ...item,
+        recent: migrateRecent(item.recent),
+      }
+    }
 
     const [store, setStore, _, ready] = persisted(
-      Persist.global("model", ["model.v1"]),
+      { ...Persist.global("model", ["model.v1"]), migrate },
       createStore<Store>({
         user: [],
         recent: [],
@@ -126,10 +135,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       update(model, state ? "show" : "hide")
     }
 
-    const push = (model: ModelKey) => {
-      const uniq = uniqueBy([model, ...store.recent], (x) => `${x.providerID}:${x.modelID}`)
-      if (uniq.length > RECENT_LIMIT) uniq.pop()
-      setStore("recent", uniq)
+    const push = (model: RecentModel) => {
+      setStore("recent", pushRecent(store.recent, model, RECENT_LIMIT))
     }
 
     const variantKey = (model: ModelKey) => `${model.providerID}/${model.modelID}`
