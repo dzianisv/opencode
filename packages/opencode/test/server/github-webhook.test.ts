@@ -6,6 +6,7 @@ import {
   formatPrivateKey,
   extractCommand,
   isAgentUser,
+  isBotComment,
   createAppJwt,
   loadConfig,
   GitHubWebhookRoutes,
@@ -149,6 +150,48 @@ describe("isAgentUser", () => {
       expect(isAgentUser("regularuser")).toBe(true) // * matches all
     } else {
       expect(isAgentUser("regularuser")).toBe(false)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isBotComment
+// ---------------------------------------------------------------------------
+
+describe("isBotComment", () => {
+  // AGENT_USERNAME is captured at module load time from GITHUB_AGENT_USERNAME.
+  // These tests validate behaviour for whatever value was captured.
+
+  test("returns true for bot usernames (ending with [bot])", () => {
+    expect(isBotComment("codexengineer[bot]")).toBe(true)
+    expect(isBotComment("some-app[bot]")).toBe(true)
+  })
+
+  test("returns false for regular human users", () => {
+    // Even when GITHUB_AGENT_USERNAME="*", isBotComment must NOT
+    // treat every user as a bot — only [bot]-suffixed logins.
+    expect(isBotComment("dzianisv")).toBe(false)
+    expect(isBotComment("regularuser")).toBe(false)
+    expect(isBotComment("admin")).toBe(false)
+  })
+
+  test("returns false for empty string", () => {
+    expect(isBotComment("")).toBe(false)
+  })
+
+  test("returns false for partial [bot] match", () => {
+    // "[bot]" must be a suffix, not a substring
+    expect(isBotComment("[bot]user")).toBe(false)
+    expect(isBotComment("user[bot")).toBe(false)
+  })
+
+  test("matches exact AGENT_USERNAME when it is not wildcard", () => {
+    // The module-level AGENT_USERNAME is read once. We can only verify
+    // the current value, but the logic is: if AGENT_USERNAME != "*",
+    // then isBotComment returns true for login === AGENT_USERNAME.
+    const agentUsername = process.env.GITHUB_AGENT_USERNAME || "opencode-agent[bot]"
+    if (agentUsername !== "*") {
+      expect(isBotComment(agentUsername)).toBe(true)
     }
   })
 })

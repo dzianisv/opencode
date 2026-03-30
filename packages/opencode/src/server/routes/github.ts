@@ -233,6 +233,23 @@ async function commitAll(cwd: string, message: string): Promise<boolean> {
   }
 }
 
+async function getHeadSha(cwd: string): Promise<string> {
+  return execGit(["rev-parse", "HEAD"], cwd)
+}
+
+async function branchHasNewCommits(cwd: string, baseSha: string): Promise<boolean> {
+  const headSha = await getHeadSha(cwd)
+  return headSha !== baseSha
+}
+
+async function getChangedFiles(cwd: string, baseSha: string): Promise<string[]> {
+  const output = await execGit(["diff", "--name-only", `${baseSha}..HEAD`], cwd)
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
 async function pushBranch(cwd: string, token: string, owner: string, repo: string, branch: string): Promise<void> {
   const remoteUrl = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`
   await execGit(["push", "--force", remoteUrl, `HEAD:${branch}`], cwd)
@@ -258,6 +275,7 @@ function buildResponseContract(): string {
     "Response contract:",
     "- Do NOT use gh CLI, GitHub MCP tools, or GitHub APIs to create/update issues or pull requests.",
     "- Do NOT run `git push` to publish branches to GitHub.",
+    "- Do NOT create git commits yourself. Make local file edits only; OpenCode will commit if needed.",
     "- Do NOT run `git init` or create nested git repositories.",
     "- OpenCode will handle branch publication, PR creation, and posting your response.",
     "- Write your final answer so it can be posted to GitHub as-is.",
@@ -295,6 +313,13 @@ async function runAgent(
   await bootstrap(worktreeDir, async () => {
     const session = await Session.create({
       title,
+      permission: [
+        {
+          permission: "question",
+          action: "deny",
+          pattern: "*",
+        },
+      ],
     })
 
     const model = resolveAgentModel()
@@ -302,6 +327,7 @@ async function runAgent(
       sessionID: session.id,
       messageID: MessageID.ascending(),
       ...(model ? { model } : {}),
+      agent: "build",
       parts: [
         {
           id: PartID.ascending(),
@@ -311,8 +337,14 @@ async function runAgent(
       ],
     })
 
-    responseText = extractResponseText(result.parts)
+    try {
+      responseText = extractResponseText(result.parts)
+    } catch {
+      // Agent may return no text parts (e.g. only tool calls)
+      responseText = null
+    }
     log.info("agent completed", {
+      partTypes: result.parts.map(p => p.type).join(","),
       sessionID: session.id,
       hasText: responseText !== null,
       partsCount: result.parts.length,
@@ -432,6 +464,16 @@ export function isAgentUser(login: string): boolean {
   return login === AGENT_USERNAME || login.endsWith("[bot]")
 }
 
+/** Check if a comment was posted by a bot (used to filter self-replies).
+ *  Unlike isAgentUser, this ignores the wildcard — we never want to
+ *  skip real human comments even when GITHUB_AGENT_USERNAME="*". */
+export function isBotComment(login: string): boolean {
+  if (AGENT_USERNAME !== "*") {
+    return login === AGENT_USERNAME || login.endsWith("[bot]")
+  }
+  return login.endsWith("[bot]")
+}
+
 export function extractCommand(body: string): string | null {
   const trimmed = body.trim()
   for (const prefix of COMMAND_PREFIXES) {
@@ -477,6 +519,8 @@ async function handleIssueAssigned(
   const worktreeDir = await createWorktree(repoDir, config.workspacesDir, owner, repo, branchName, baseBranch)
 
   try {
+    const baseSha = await getHeadSha(worktreeDir)
+
     // Run agent
     const { responseText } = await runAgent(
       worktreeDir,
@@ -485,9 +529,18 @@ async function handleIssueAssigned(
     )
 
     // Commit, push, create PR
-    const hasCommit = await commitAll(worktreeDir, `opencode: issue #${issue.number}`)
+    let hasCommit = await branchHasNewCommits(worktreeDir, baseSha)
+    if (!hasCommit) {
+      hasCommit = await commitAll(worktreeDir, `opencode: issue #${issue.number}`)
+    }
 
     if (hasCommit) {
+      const changedFiles = await getChangedFiles(worktreeDir, baseSha)
+      log.info("detected issue branch changes", {
+        issue: issue.number,
+        changedFiles: changedFiles.join(","),
+        changedFilesCount: changedFiles.length,
+      })
       await pushBranch(worktreeDir, token, owner, repo, branchName)
 
       const existing = await findExistingPR(octokit, owner, repo, branchName)
@@ -555,7 +608,7 @@ async function handleIssueComment(
   const repo = repository.name
 
   // Ignore bot's own comments
-  if (isAgentUser(comment.user.login)) return
+  if (isBotComment(comment.user.login)) return
 
   // Check for command prefix
   const command = extractCommand(comment.body)
@@ -593,15 +646,26 @@ async function handleIssueComment(
   const worktreeDir = await createWorktree(repoDir, config.workspacesDir, owner, repo, branchName, baseBranch)
 
   try {
+    const baseSha = await getHeadSha(worktreeDir)
+
     const { responseText } = await runAgent(
       worktreeDir,
       fullPrompt,
       `${owner}/${repo}#${issue.number} (comment)`,
     )
 
-    const hasCommit = await commitAll(worktreeDir, `opencode: issue #${issue.number}`)
+    let hasCommit = await branchHasNewCommits(worktreeDir, baseSha)
+    if (!hasCommit) {
+      hasCommit = await commitAll(worktreeDir, `opencode: issue #${issue.number}`)
+    }
 
     if (hasCommit) {
+      const changedFiles = await getChangedFiles(worktreeDir, baseSha)
+      log.info("detected comment branch changes", {
+        issue: issue.number,
+        changedFiles: changedFiles.join(","),
+        changedFilesCount: changedFiles.length,
+      })
       await pushBranch(worktreeDir, token, owner, repo, branchName)
 
       const existing = await findExistingPR(octokit, owner, repo, branchName)
