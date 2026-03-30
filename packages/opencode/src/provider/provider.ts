@@ -836,6 +836,47 @@ export namespace Provider {
     })
   export type Info = z.infer<typeof Info>
 
+  const MODELS_DEV_BACKFILLS: Record<string, Record<string, ModelsDev.Model>> = {
+    azure: {
+      "gpt-5.3-codex": {
+        id: "gpt-5.3-codex",
+        name: "GPT-5.3 Codex",
+        family: "gpt-codex",
+        attachment: false,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        release_date: "2026-02-24",
+        modalities: {
+          input: ["text", "image"],
+          output: ["text"],
+        },
+        cost: {
+          input: 1.75,
+          output: 14,
+          cache_read: 0.175,
+        },
+        limit: {
+          context: 400000,
+          output: 128000,
+        },
+        options: {},
+      },
+    },
+  }
+
+  function withModelsDevBackfills(provider: ModelsDev.Provider): ModelsDev.Provider {
+    const backfills = MODELS_DEV_BACKFILLS[provider.id]
+    if (!backfills) return provider
+    return {
+      ...provider,
+      models: {
+        ...backfills,
+        ...provider.models,
+      },
+    }
+  }
+
   function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
     const m: Model = {
       id: ModelID.make(model.id),
@@ -904,13 +945,14 @@ export namespace Provider {
   }
 
   export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
+    const normalized = withModelsDevBackfills(provider)
     return {
-      id: ProviderID.make(provider.id),
+      id: ProviderID.make(normalized.id),
       source: "custom",
-      name: provider.name,
-      env: provider.env ?? [],
+      name: normalized.name,
+      env: normalized.env ?? [],
       options: {},
-      models: mapValues(provider.models, (model) => fromModelsDevModel(provider, model)),
+      models: mapValues(normalized.models, (model) => fromModelsDevModel(normalized, model)),
     }
   }
 
