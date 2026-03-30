@@ -448,7 +448,7 @@ export const GithubRunCommand = cmd({
         describe: "GitHub personal access token (github_pat_********)",
       }),
   async handler(args) {
-    await bootstrap(process.cwd(), async () => {
+    await bootstrap(process.env.GITHUB_WORKSPACE || process.cwd(), async () => {
       const isMock = args.token || args.event
 
       const context = isMock ? (JSON.parse(args.event!) as Context) : github.context
