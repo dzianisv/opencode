@@ -53,6 +53,24 @@ describe("Session.list", () => {
   })
 
   test("filters root sessions", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const session = await Session.create({ title: "alias-filter-session" })
+        const alias = `${projectRoot}${path.sep}..${path.sep}${path.basename(projectRoot)}`
+
+        const sessions = await Instance.provide({
+          directory: alias,
+          fn: async () => [...Session.list({ directory: alias })],
+        })
+        const ids = sessions.map((s) => s.id)
+
+        expect(ids).toContain(session.id)
+      },
+    })
+  })
+
+  test("filters root sessions", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
