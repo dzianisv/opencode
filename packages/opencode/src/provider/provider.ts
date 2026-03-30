@@ -836,7 +836,7 @@ export namespace Provider {
     })
   export type Info = z.infer<typeof Info>
 
-  const MODELS_DEV_BACKFILLS = {
+  const MODELS_DEV_BACKFILLS: Record<string, Record<string, ModelsDev.Model>> = {
     azure: {
       "gpt-5.3-codex": {
         id: "gpt-5.3-codex",
@@ -863,7 +863,7 @@ export namespace Provider {
         options: {},
       },
     },
-  } satisfies Record<string, Record<string, ModelsDev.Model>>
+  }
 
   function withModelsDevBackfills(provider: ModelsDev.Provider): ModelsDev.Provider {
     const backfills = MODELS_DEV_BACKFILLS[provider.id]
