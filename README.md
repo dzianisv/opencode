@@ -127,6 +127,10 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
+### MCP Lifecycle
+
+Local MCP servers are cleaned up automatically in this fork. OpenCode can close a local MCP child process when the shared client is released, during shutdown, and it also reaps idle shared clients after `10` minutes by default. You can raise or lower that idle window with `OPENCODE_MCP_IDLE_MS` (milliseconds).
+
 ### Memory Diagnostics
 
 This fork carries built-in memory profiling helpers intended for leak hunts, panic triage, and long-running session investigations.
