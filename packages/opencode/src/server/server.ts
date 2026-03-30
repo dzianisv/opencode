@@ -42,6 +42,7 @@ import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { TtsRoutes } from "./routes/tts"
+import { GitHubWebhookRoutes } from "./routes/github"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
 
@@ -145,6 +146,7 @@ export namespace Server {
       )
       .route("/global", GlobalRoutes())
       .route("/tts", TtsRoutes())
+      .route("/github", GitHubWebhookRoutes())
       .put(
         "/auth/:providerID",
         describeRoute({
