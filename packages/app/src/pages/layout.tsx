@@ -1801,6 +1801,18 @@ export default function Layout(props: ParentProps) {
 
   createEffect(
     on(
+      () => [pageReady(), layoutReady(), currentDir()] as const,
+      ([ready, loaded, directory]) => {
+        if (!ready || !loaded) return
+        if (!directory) return
+        layout.projects.open(directory)
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
       () => {
         return [pageReady(), route().slug, params.id, currentProject()?.worktree, currentDir()] as const
       },
