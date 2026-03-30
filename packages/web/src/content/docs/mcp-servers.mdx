@@ -90,6 +90,10 @@ Add local MCP servers using `type` to `"local"` within the MCP object.
 
 The command is how the local MCP server is started. You can also pass in a list of environment variables as well.
 
+:::note
+Local MCP processes are not kept alive forever. OpenCode closes local MCP clients when they are released, during shutdown, and it reaps idle shared clients after `10` minutes by default. You can tune that idle timeout with `OPENCODE_MCP_IDLE_MS` (milliseconds).
+:::
+
 For example, here's how you can add the test [`@modelcontextprotocol/server-everything`](https://www.npmjs.com/package/@modelcontextprotocol/server-everything) MCP server.
 
 ```jsonc title="opencode.jsonc"
