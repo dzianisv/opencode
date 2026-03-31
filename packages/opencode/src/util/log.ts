@@ -52,7 +52,7 @@ export namespace Log {
   export function file() {
     return logpath
   }
-  const max = 512 * 1024 * 1024
+  export const MAX = 128 * 1024 * 1024
   const step = 1024 * 1024
   const wait = 5_000
   let size = 0
@@ -113,7 +113,7 @@ export namespace Log {
     file?: string
   }) {
     const dir = input?.dir ?? Global.Path.log
-    const keep = input?.max ?? max
+    const keep = input?.max ?? MAX
     const file = input?.file ?? logpath
     const rows = (await entries(dir)).sort((a, b) => a.time - b.time)
     let total = rows.reduce((sum, row) => sum + row.size, 0)
