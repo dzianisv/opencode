@@ -131,6 +131,13 @@ For more info on how to configure OpenCode, [**head over to our docs**](https://
 
 Local MCP servers are cleaned up automatically in this fork. OpenCode can close a local MCP child process when the shared client is released, during shutdown, and it also reaps idle shared clients after `10` minutes by default. You can raise or lower that idle window with `OPENCODE_MCP_IDLE_MS` (milliseconds).
 
+### PR Session Naming Tool
+
+This fork highlights a PR-focused session rename flow in the GitHub/`gh pr create` instructions:
+
+- After a PR is created (or detected as already open), the agent should rename the active session to exactly match the PR as `#<pr_number> <pr_title>`.
+- Example: `#524 fix: harden tenant bootstrap config seeding`.
+
 ### Memory Diagnostics
 
 This fork carries built-in memory profiling helpers intended for leak hunts, panic triage, and long-running session investigations.
