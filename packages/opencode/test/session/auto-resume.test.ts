@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { pickResume, ResumeError } from "../../src/session/auto-resume"
+import { pickResume, ResumeAbortError, ResumeError } from "../../src/session/auto-resume"
 
 const user = (input: { id: string; sessionID: string; at: number }) =>
   ({
@@ -15,7 +15,13 @@ const user = (input: { id: string; sessionID: string; at: number }) =>
     mode: "build",
   }) as unknown as MessageV2.User
 
-const assistant = (input: { id: string; sessionID: string; parentID: string; at: number }) =>
+const assistant = (input: {
+  id: string
+  sessionID: string
+  parentID: string
+  at: number
+  error?: MessageV2.Assistant["error"]
+}) =>
   ({
     id: MessageID.make(input.id),
     sessionID: SessionID.make(input.sessionID),
@@ -34,6 +40,7 @@ const assistant = (input: { id: string; sessionID: string; parentID: string; at:
       reasoning: 0,
       cache: { read: 0, write: 0 },
     },
+    ...(input.error ? { error: input.error } : {}),
   }) as unknown as MessageV2.Assistant
 
 const tool = (input: { sessionID: string; messageID: string; err?: string }) =>
@@ -53,6 +60,7 @@ const tool = (input: { sessionID: string; messageID: string; err?: string }) =>
   }) as unknown as MessageV2.ToolPart
 
 const row = (info: MessageV2.Info, parts: MessageV2.Part[] = []) => ({ info, parts }) as MessageV2.WithParts
+const aborted = () => new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
 
 describe("session auto resume", () => {
   test("picks interrupted assistant and previous user", () => {
@@ -77,5 +85,24 @@ describe("session auto resume", () => {
     const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2 })
     const out = pickResume([row(u1), row(a1, [tool({ sessionID: "ses_1", messageID: a1.id, err: "boom" })])])
     expect(out).toBeUndefined()
+  })
+
+  test("picks aborted assistant with no tool parts", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2, error: aborted() })
+    const out = pickResume([row(u1), row(a1)])
+    expect(out?.assistant.id).toBe(a1.id)
+    expect(out?.user.id).toBe(u1.id)
+  })
+
+  test("picks tool execution aborted errors", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2 })
+    const out = pickResume([
+      row(u1),
+      row(a1, [tool({ sessionID: "ses_1", messageID: a1.id, err: ResumeAbortError })]),
+    ])
+    expect(out?.assistant.id).toBe(a1.id)
+    expect(out?.user.id).toBe(u1.id)
   })
 })
