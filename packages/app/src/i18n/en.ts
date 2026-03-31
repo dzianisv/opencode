@@ -892,7 +892,7 @@ export const dict = {
   "settings.models.row.default.title": "Default model",
   "settings.models.row.default.description": "Preferred model for new sessions when no explicit model is selected",
   "settings.models.row.review.title": "Review model",
-  "settings.models.row.review.description": "Model used for automatic review follow-up prompts",
+  "settings.models.row.review.description": "Model used for automatic review follow-up prompts (saved to opencode.json)",
   "settings.models.row.autoReview.title": "Auto-review",
   "settings.models.row.autoReview.description":
     "Automatically queue a review follow-up when the assistant finishes a task",

@@ -127,7 +127,7 @@ test("showing a hidden model restores it to the model picker", async ({ page, go
   await expect(pickerAgain).toHaveCount(0)
 })
 
-test("model defaults and auto-review settings persist", async ({ page, gotoSession }) => {
+test("model defaults and auto-review settings persist", async ({ page, gotoSession, sdk }) => {
   await gotoSession()
 
   const settings = await openSettings(page)
@@ -155,16 +155,23 @@ test("model defaults and auto-review settings persist", async ({ page, gotoSessi
     await defaultItems.nth(1).click()
   }
 
+  const beforeCfg = (await sdk.global.config.get()).data?.auto_review?.model
   const currentReview = (await reviewValue.textContent())?.trim() ?? ""
   await reviewSelect.locator('[data-slot="select-select-trigger"]').click()
   const reviewItems = page.locator('[data-slot="select-select-item"]')
   await expect(reviewItems.first()).toBeVisible()
+  const reviewItem = currentReview ? reviewItems.filter({ hasNotText: currentReview }).first() : reviewItems.nth(1)
   if (currentReview) {
-    await reviewItems.filter({ hasNotText: currentReview }).first().click()
+    await reviewItem.click()
   }
   if (!currentReview) {
-    await reviewItems.nth(1).click()
+    await reviewItem.click()
   }
+  await expect
+    .poll(async () => {
+      return (await sdk.global.config.get()).data?.auto_review?.model
+    })
+    .not.toBe(beforeCfg)
 
   const autoReviewInput = autoReview.locator('[data-slot="switch-input"]')
   const before = await autoReviewInput.getAttribute("aria-checked")
