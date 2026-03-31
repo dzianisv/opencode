@@ -71,6 +71,44 @@ test("azure/gpt-5.3-codex is backfilled when provider metadata is stale", async 
   })
 })
 
+test("models.dev family normalization keeps chat and codex tracks separate", () => {
+  const info = Provider.fromModelsDevProvider({
+    id: "azure",
+    name: "Azure",
+    env: ["AZURE_API_KEY"],
+    npm: "@ai-sdk/azure",
+    models: {
+      "gpt-5.3-chat": {
+        id: "gpt-5.3-chat",
+        name: "GPT-5.3 Chat",
+        family: "gpt-codex",
+        release_date: "2026-03-03",
+        attachment: true,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        options: {},
+        limit: { context: 400000, output: 128000 },
+      },
+      "gpt-5.3-codex": {
+        id: "gpt-5.3-codex",
+        name: "GPT-5.3 Codex",
+        family: "gpt-codex",
+        release_date: "2026-02-24",
+        attachment: false,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        options: {},
+        limit: { context: 400000, output: 128000 },
+      },
+    },
+  })
+
+  expect(info.models["gpt-5.3-chat"].family).toBe("gpt-chat")
+  expect(info.models["gpt-5.3-codex"].family).toBe("gpt-codex")
+})
+
 test("provider loaded from config with apiKey option", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

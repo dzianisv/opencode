@@ -877,12 +877,18 @@ export namespace Provider {
     }
   }
 
+  function normalizeFamily(model: ModelsDev.Model): string {
+    if (model.id.includes("codex")) return "gpt-codex"
+    if (model.family === "gpt-codex" && model.id.includes("-chat")) return "gpt-chat"
+    return model.family ?? ""
+  }
+
   function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
     const m: Model = {
       id: ModelID.make(model.id),
       providerID: ProviderID.make(provider.id),
       name: model.name,
-      family: model.family,
+      family: normalizeFamily(model),
       api: {
         id: model.id,
         url: model.provider?.api ?? provider.api!,
