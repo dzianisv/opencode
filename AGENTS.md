@@ -5,6 +5,15 @@
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
 - App e2e note: `bun test:e2e` expects a backend at `127.0.0.1:4096`; use `bun test:e2e:local -- -- <spec>` when running tests in isolation.
 
+## Devx
+
+- If a task has an upstream issue (for example in `anomalyco/opencode`), keep that issue updated while working.
+- When any commit/PR/merge relates to an upstream issue, add an upstream issue comment with:
+  - what changed
+  - commit SHA and PR link
+  - current status (in progress, merged, or blocked)
+- Do not wait until the end of the task; post updates as soon as relevant commits or merges happen.
+
 ## Style Guide
 
 ### General Principles
