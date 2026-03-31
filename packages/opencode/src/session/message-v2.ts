@@ -970,12 +970,23 @@ export namespace MessageV2 {
         ).toObject()
       case e instanceof Error && (e as FetchDecompressionError).code === "ZlibError":
         if (ctx.aborted) {
-          return new MessageV2.AbortedError({ message: e.message }, { cause: e }).toObject()
+          return new MessageV2.AbortedError({ message: (e as Error).message }, { cause: e }).toObject()
         }
+        return new MessageV2.APIError(
+          {
+            message: "Response decompression failed",
+            isRetryable: true,
+            metadata: {
+              code: (e as FetchDecompressionError).code,
+              message: (e as Error).message,
+            },
+          },
+          { cause: e },
+        ).toObject()
       case e instanceof StreamIdleTimeoutError:
         return new MessageV2.APIError(
           {
-            message: e.message,
+            message: (e as StreamIdleTimeoutError).message,
             isRetryable: true,
             metadata: {
               timeoutMs: String((e as StreamIdleTimeoutError).timeoutMs),
@@ -995,17 +1006,6 @@ export namespace MessageV2 {
               code: (e as SystemError).code ?? "",
               syscall: (e as SystemError).syscall ?? "",
               message: (e as SystemError).message ?? "",
-            },
-          },
-          { cause: e },
-        ).toObject()
-        return new MessageV2.APIError(
-          {
-            message: "Response decompression failed",
-            isRetryable: true,
-            metadata: {
-              code: (e as FetchDecompressionError).code,
-              message: e.message,
             },
           },
           { cause: e },
