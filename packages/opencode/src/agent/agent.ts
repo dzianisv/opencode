@@ -45,6 +45,15 @@ export namespace Agent {
       prompt: z.string().optional(),
       options: z.record(z.string(), z.any()),
       steps: z.number().int().positive().optional(),
+      fallbackModels: z
+        .array(
+          z.object({
+            modelID: z.string(),
+            providerID: z.string(),
+          }),
+        )
+        .optional(),
+      maxRetriesBeforeFallback: z.number().int().positive().optional(),
     })
     .meta({
       ref: "Agent",
@@ -246,7 +255,17 @@ export namespace Agent {
                 options: {},
                 native: false,
               }
-            if (value.model) item.model = Provider.parseModel(value.model)
+            if (value.model) {
+              if (Array.isArray(value.model)) {
+                // Array shorthand: first element is primary model, rest are fallbacks
+                item.model = Provider.parseModel(value.model[0])
+                if (value.model.length > 1) {
+                  item.fallbackModels = value.model.slice(1).map((m: string) => Provider.parseModel(m))
+                }
+              } else {
+                item.model = Provider.parseModel(value.model)
+              }
+            }
             item.variant = value.variant ?? item.variant
             item.prompt = value.prompt ?? item.prompt
             item.description = value.description ?? item.description
@@ -258,6 +277,10 @@ export namespace Agent {
             item.name = value.name ?? item.name
             item.steps = value.steps ?? item.steps
             item.options = mergeDeep(item.options, value.options ?? {})
+            if (value.fallback_models?.length) {
+              item.fallbackModels = value.fallback_models.map((m: string) => Provider.parseModel(m))
+            }
+            item.maxRetriesBeforeFallback = value.max_retries_before_fallback ?? item.maxRetriesBeforeFallback
             item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
           }
 

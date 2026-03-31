@@ -23,14 +23,14 @@ function num(name: string, fallback: number) {
   return Math.max(0, Math.floor(raw))
 }
 
-async function autoresume() {
+export async function autoresume() {
   const scan = num("OPENCODE_SERVE_RESUME_SCAN_LIMIT", 30)
   const max = num("OPENCODE_SERVE_RESUME_MAX", 3)
   if (scan <= 0 || max <= 0) return
 
   await Session.recover()
 
-  const list = [...Session.listGlobal({ limit: scan })]
+  const list = [...Session.listResumable({ limit: scan })]
   let resumed = 0
 
   for (const session of list) {
