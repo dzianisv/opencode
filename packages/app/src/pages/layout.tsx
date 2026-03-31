@@ -96,6 +96,7 @@ export default function Layout(props: ParentProps) {
       activeProject: undefined as string | undefined,
       activeWorkspace: undefined as string | undefined,
       workspaceOrder: {} as Record<string, string[]>,
+      workspaceSession: {} as Record<string, string[]>,
       workspaceName: {} as Record<string, string>,
       workspaceBranchName: {} as Record<string, Record<string, string>>,
       workspaceExpanded: {} as Record<string, boolean>,
@@ -1314,9 +1315,7 @@ export default function Layout(props: ParentProps) {
     const root = projectRoot(directory)
     server.projects.touch(root)
     const project = layout.projects.list().find((item) => item.worktree === root)
-    let dirs = project
-      ? effectiveWorkspaceOrder(root, [root, ...(project.sandboxes ?? [])], store.workspaceOrder[root])
-      : [root]
+    let dirs = project ? effectiveWorkspaceOrder(root, spaces(project), store.workspaceOrder[root]) : [root]
     const canOpen = (value: string | undefined) => {
       if (!value) return false
       return dirs.some((item) => workspaceKey(item) === workspaceKey(value))
@@ -1327,7 +1326,11 @@ export default function Layout(props: ParentProps) {
         .list({ directory: root })
         .then((x) => x.data ?? [])
         .catch(() => [] as string[])
-      dirs = effectiveWorkspaceOrder(root, [root, ...listed], store.workspaceOrder[root])
+      dirs = effectiveWorkspaceOrder(
+        root,
+        [root, ...listed, ...(store.workspaceSession[root] ?? [])],
+        store.workspaceOrder[root],
+      )
       return canOpen(target)
     }
     const openSession = async (target: { directory: string; id: string }) => {
@@ -1569,9 +1572,7 @@ export default function Layout(props: ParentProps) {
     const nextCurrent = currentDir()
     const nextKey = workspaceKey(nextCurrent)
     const project = layout.projects.list().find((item) => item.worktree === root)
-    const dirs = project
-      ? effectiveWorkspaceOrder(root, [root, ...(project.sandboxes ?? [])], store.workspaceOrder[root])
-      : [root]
+    const dirs = project ? effectiveWorkspaceOrder(root, spaces(project), store.workspaceOrder[root]) : [root]
     const valid = dirs.some((item) => workspaceKey(item) === nextKey)
 
     if (params.dir && projectRoot(nextCurrent) === root && !valid) {
@@ -1864,6 +1865,94 @@ export default function Layout(props: ParentProps) {
   const panel = createMemo(() => Math.max(side() - 64, 0))
 
   const loadedSessionDirs = new Set<string>()
+  const loads = new Map<string, Promise<void>>()
+
+  function spaces(project: LocalProject | undefined) {
+    if (!project) return [] as string[]
+    const list = [project.worktree, ...(project.sandboxes ?? []), ...(store.workspaceSession[project.worktree] ?? [])]
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const item of list) {
+      const key = workspaceKey(item)
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(item)
+    }
+    return result
+  }
+
+  async function syncSpaces(project: LocalProject) {
+    const root = project.worktree
+    const pending = loads.get(root)
+    if (pending) return pending
+
+    const task = (async () => {
+      const list = new Set<string>()
+      let cursor: number | undefined
+      for (let i = 0; i < 20; i++) {
+        const result = await globalSDK.client.global.session
+          .list({
+            roots: true,
+            limit: 100,
+            cursor,
+          })
+          .catch(() => undefined)
+        if (!result) break
+
+        for (const item of result.data ?? []) {
+          if (item.time.archived) continue
+          if (item.project?.worktree !== root) continue
+          if (!item.directory) continue
+          list.add(item.directory)
+        }
+
+        const next = result.response.headers.get("x-next-cursor")
+        if (!next) break
+        const value = Number(next)
+        if (!Number.isFinite(value)) break
+        cursor = value
+      }
+
+      const dirs = [...list].filter((item) => workspaceKey(item) !== workspaceKey(root))
+      setStore("workspaceSession", root, dirs)
+      setStore(
+        "workspaceExpanded",
+        produce((draft) => {
+          for (const dir of dirs) {
+            if (draft[dir] !== undefined) continue
+            draft[dir] = true
+          }
+        }),
+      )
+    })().finally(() => {
+      loads.delete(root)
+    })
+
+    loads.set(root, task)
+    return task
+  }
+
+  createEffect(() => {
+    const projects = layout.projects.list()
+    const roots = new Set(projects.map((project) => workspaceKey(project.worktree)))
+    setStore(
+      "workspaceSession",
+      produce((draft) => {
+        for (const root of Object.keys(draft)) {
+          if (roots.has(workspaceKey(root))) continue
+          delete draft[root]
+        }
+      }),
+    )
+  })
+
+  createEffect(() => {
+    const project = currentProject()
+    if (!project) return
+    if (project.vcs !== "git") return
+    if (!layout.sidebar.workspaces(project.worktree, true)()) return
+    void syncSpaces(project)
+  })
 
   createEffect(
     on(
@@ -1915,7 +2004,7 @@ export default function Layout(props: ParentProps) {
   function workspaceIds(project: LocalProject | undefined) {
     if (!project) return []
     const local = project.worktree
-    const dirs = [local, ...(project.sandboxes ?? [])]
+    const dirs = spaces(project)
     const active = currentProject()
     const directory = workspaceKey(active?.worktree ?? "") === workspaceKey(project.worktree) ? currentDir() : undefined
     const extra =
