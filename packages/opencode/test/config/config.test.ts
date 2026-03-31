@@ -97,6 +97,9 @@ test("loads JSON config file", async () => {
       await writeConfig(dir, {
         $schema: "https://opencode.ai/config.json",
         model: "test/model",
+        auto_review: {
+          model: "test/review",
+        },
         username: "testuser",
       })
     },
@@ -106,6 +109,7 @@ test("loads JSON config file", async () => {
     fn: async () => {
       const config = await Config.get()
       expect(config.model).toBe("test/model")
+      expect(config.auto_review?.model).toBe("test/review")
       expect(config.username).toBe("testuser")
     },
   })
