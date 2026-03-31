@@ -16,6 +16,7 @@ import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
 import { MessageV2 } from "./message-v2"
+import { ResumeAbortError, ResumeError } from "./auto-resume"
 import { Instance } from "../project/instance"
 import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
@@ -666,6 +667,88 @@ export namespace Session {
     for (const row of rows) {
       const project = projects.get(row.project_id) ?? null
       yield { ...fromRow(row), project }
+    }
+  }
+
+  export function* listResumable(input?: {
+    limit?: number
+  }) {
+    const limit = input?.limit ?? 100
+    if (limit <= 0) return
+
+    const probe = Math.max(limit * 5, limit)
+
+    const tool = Database.use((db) =>
+      db
+        .select({
+          sessionID: MessageTable.session_id,
+          time: MessageTable.time_created,
+        })
+        .from(MessageTable)
+        .innerJoin(
+          PartTable,
+          and(eq(PartTable.message_id, MessageTable.id), eq(PartTable.session_id, MessageTable.session_id)),
+        )
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is not null`,
+            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'error'`,
+            sql`json_extract(${PartTable.data}, '$.state.error') in (${ResumeError}, ${ResumeAbortError})`,
+          ),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .limit(probe)
+        .all(),
+    )
+
+    const abort = Database.use((db) =>
+      db
+        .select({
+          sessionID: MessageTable.session_id,
+          time: MessageTable.time_created,
+        })
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is not null`,
+            sql`json_extract(${MessageTable.data}, '$.error.name') = ${MessageV2.AbortedError.name}`,
+          ),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .limit(probe)
+        .all(),
+    )
+
+    const seen = new Map<SessionID, number>()
+    for (const row of [...tool, ...abort]) {
+      const time = seen.get(row.sessionID)
+      if (time !== undefined && time >= row.time) continue
+      seen.set(row.sessionID, row.time)
+    }
+    if (seen.size === 0) return
+
+    const ids = [...seen.keys()]
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(SessionTable)
+        .where(and(inArray(SessionTable.id, ids), isNull(SessionTable.time_archived)))
+        .all(),
+    )
+
+    const sorted = rows
+      .map((row) => ({
+        info: fromRow(row),
+        time: seen.get(row.id) ?? 0,
+      }))
+      .sort((a, b) => b.time - a.time)
+      .slice(0, limit)
+
+    for (const row of sorted) {
+      yield row.info
     }
   }
 

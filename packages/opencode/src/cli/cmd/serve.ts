@@ -30,7 +30,7 @@ async function autoresume() {
 
   await Session.recover()
 
-  const list = [...Session.listGlobal({ limit: scan })]
+  const list = [...Session.listResumable({ limit: scan })]
   let resumed = 0
 
   for (const session of list) {
