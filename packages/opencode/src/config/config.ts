@@ -709,6 +709,16 @@ export namespace Config {
   })
   export type Skills = z.infer<typeof Skills>
 
+  export const AutoReview = z
+    .object({
+      model: ModelId.describe("Model to use for auto-review follow-ups in the format provider/model").optional(),
+    })
+    .strict()
+    .meta({
+      ref: "AutoReviewConfig",
+    })
+  export type AutoReview = z.infer<typeof AutoReview>
+
   export const Agent = z
     .object({
       model: ModelId.optional(),
@@ -1083,6 +1093,7 @@ export namespace Config {
       small_model: ModelId.describe(
         "Small model to use for tasks like title generation in the format of provider/model",
       ).optional(),
+      auto_review: AutoReview.optional().describe("Auto-review configuration"),
       default_agent: z
         .string()
         .optional()

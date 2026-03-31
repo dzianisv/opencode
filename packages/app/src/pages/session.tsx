@@ -42,6 +42,12 @@ import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import {
+  reviewDone,
+  reviewPick,
+  reviewPrompt,
+  reviewPromptCheck,
+} from "@/pages/session/auto-review"
+import {
   createOpenReviewFile,
   createSessionTabs,
   createSizing,
@@ -1454,9 +1460,13 @@ export default function Page() {
     setFollowup("paused", draft.sessionID, undefined)
   }
 
-  const autoReviewPrompt = "Codex, review and reflect"
+  const isAutoReviewPrompt = (id: string) => reviewPromptCheck(line(id))
 
-  const isAutoReviewPrompt = (id: string) => line(id).toLowerCase().startsWith(autoReviewPrompt.toLowerCase())
+  const response = (id: string) =>
+    (sync.data.part[id] ?? [])
+      .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
+      .join("")
+      .trim()
 
   const doneAssistant = createMemo(() => {
     const id = params.id
@@ -1467,61 +1477,48 @@ export default function Page() {
     )
   })
 
-  const resolveReview = () => {
-    const picked = settings.models.reviewModel()
-    if (picked) {
-      const item = local.model
-        .list()
-        .find((item) => item.provider.id === picked.providerID && item.id === picked.modelID)
-      if (item) {
-        return {
-          model: picked,
-          variant: item.variants && Object.hasOwn(item.variants, "xhigh") ? "xhigh" : undefined,
-        }
-      }
-    }
-
+  const resolveReview = (assistant: AssistantMessage) => {
     const current = local.model.current()
-    if (current) {
+    const configured = (() => {
+      const model = sync.data.config.auto_review?.model
+      if (!model) return
+      const cut = model.indexOf("/")
+      if (cut <= 0 || cut >= model.length - 1) return
       return {
-        model: {
-          providerID: current.provider.id,
-          modelID: current.id,
-        },
-        variant: current.variants && Object.hasOwn(current.variants, "xhigh") ? "xhigh" : undefined,
+        providerID: model.slice(0, cut),
+        modelID: model.slice(cut + 1),
       }
-    }
+    })()
+    return reviewPick({
+      list: local.model.list(),
+      used: {
+        providerID: assistant.providerID,
+        modelID: assistant.modelID,
+      },
+      review: configured ?? settings.models.reviewModel(),
+      base: settings.models.defaultModel(),
+      now: current
+        ? {
+            providerID: current.provider.id,
+            modelID: current.id,
+          }
+        : undefined,
+    })
   }
 
-  createEffect(() => {
-    const sessionID = params.id
-    if (!sessionID) return
-    if (!settings.models.autoReview()) return
-    if (composer.blocked()) return
-
-    const assistant = doneAssistant()
-    if (!assistant) return
-    if (followup.autoReview[sessionID] === assistant.id) return
-
-    const user = visibleUserMessages().at(-1)
-    if (!user) return
-    if (isAutoReviewPrompt(user.id)) {
-      setFollowup("autoReview", sessionID, assistant.id)
-      return
-    }
-
-    const review = resolveReview()
-    const agent = assistant.agent ?? local.agent.current()?.name
-    if (!review || !agent) return
-
-    const previous = `${assistant.providerID}/${assistant.modelID}`
-    const text = `${autoReviewPrompt} ${previous} work.`
-
+  const queueAutoReview = (sessionID: string, assistant: AssistantMessage) => {
     const queued = followup.items[sessionID] ?? []
     if (queued.some((item) => item.autoReviewSource === assistant.id)) {
       setFollowup("autoReview", sessionID, assistant.id)
       return
     }
+
+    const review = resolveReview(assistant)
+    const agent = assistant.agent ?? local.agent.current()?.name
+    if (!review || !agent) return
+
+    const previous = `${assistant.providerID}/${assistant.modelID}`
+    const text = reviewPrompt(previous)
 
     setFollowup("items", sessionID, (items) => [
       ...(items ?? []),
@@ -1540,6 +1537,31 @@ export default function Page() {
     setFollowup("autoReview", sessionID, assistant.id)
     setFollowup("failed", sessionID, undefined)
     setFollowup("paused", sessionID, undefined)
+  }
+
+  createEffect(() => {
+    const sessionID = params.id
+    if (!sessionID) return
+    if (!settings.models.autoReview()) return
+    if (composer.blocked()) return
+
+    const assistant = doneAssistant()
+    if (!assistant) return
+    if (followup.autoReview[sessionID] === assistant.id) return
+
+    const user = visibleUserMessages().at(-1)
+    if (!user) return
+    if (isAutoReviewPrompt(user.id)) {
+      if (reviewDone(response(assistant.id))) {
+        setFollowup("autoReview", sessionID, assistant.id)
+        return
+      }
+
+      queueAutoReview(sessionID, assistant)
+      return
+    }
+
+    queueAutoReview(sessionID, assistant)
   })
 
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))

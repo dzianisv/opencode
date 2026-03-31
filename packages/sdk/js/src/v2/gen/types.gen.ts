@@ -1040,6 +1040,16 @@ export type ServerConfig = {
   cors?: Array<string>
 }
 
+/**
+ * Auto-review configuration
+ */
+export type AutoReviewConfig = {
+  /**
+   * Model to use for auto-review follow-ups in the format provider/model
+   */
+  model?: string
+}
+
 export type PermissionActionConfig = "ask" | "allow" | "deny"
 
 export type PermissionObjectConfig = {
@@ -1375,6 +1385,7 @@ export type Config = {
    * Small model to use for tasks like title generation in the format of provider/model
    */
   small_model?: string
+  auto_review?: AutoReviewConfig
   /**
    * Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.
    */
@@ -1458,6 +1469,45 @@ export type Config = {
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
+  /**
+   * Voice playback configuration
+   */
+  voice?: {
+    edge?: {
+      /**
+       * Enable server-backed Edge TTS playback
+       */
+      enabled?: boolean
+      /**
+       * Edge neural voice name
+       */
+      voice?: string
+      /**
+       * Edge TTS language code
+       */
+      lang?: string
+      /**
+       * Edge TTS output format
+       */
+      output_format?: string
+      /**
+       * Edge TTS pitch percent string
+       */
+      pitch?: string
+      /**
+       * Edge TTS rate percent string
+       */
+      rate?: string
+      /**
+       * Edge TTS volume percent string
+       */
+      volume?: string
+      /**
+       * Edge TTS timeout in milliseconds
+       */
+      timeout_ms?: number
+    }
+  }
   tools?: {
     [key: string]: boolean
   }
@@ -2030,6 +2080,60 @@ export type GlobalDisposeResponses = {
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
 
+export type GlobalMemoryData = {
+  body?: never
+  path?: never
+  query?: {
+    children?: boolean
+  }
+  url: "/global/memory"
+}
+
+export type GlobalMemoryResponses = {
+  /**
+   * Memory diagnostics
+   */
+  200: {
+    time: string
+    pid: number
+    uptime_sec: number
+    rss_bytes: number
+    heap_total_bytes: number
+    heap_used_bytes: number
+    external_bytes: number
+    array_buffer_bytes: number
+    session: {
+      total: number
+      active: number
+    }
+    pty: {
+      active: number
+    }
+    instance: {
+      size: number
+      max: number
+      idle_ms: number
+      entries: Array<{
+        directory: string
+        refs: number
+        idle_ms: number
+      }>
+    }
+    tree?: {
+      pid: number
+      process_count: number
+      rss_bytes: number
+      top: Array<{
+        pid: number
+        rss_bytes: number
+        name: string
+      }>
+    }
+  }
+}
+
+export type GlobalMemoryResponse = GlobalMemoryResponses[keyof GlobalMemoryResponses]
+
 export type GlobalSessionListData = {
   body?: never
   path?: never
@@ -2051,6 +2155,33 @@ export type GlobalSessionListResponses = {
 }
 
 export type GlobalSessionListResponse = GlobalSessionListResponses[keyof GlobalSessionListResponses]
+
+export type TtsEdgeData = {
+  body?: {
+    text: string
+  }
+  path?: never
+  query?: never
+  url: "/tts/edge"
+}
+
+export type TtsEdgeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type TtsEdgeError = TtsEdgeErrors[keyof TtsEdgeErrors]
+
+export type TtsEdgeResponses = {
+  /**
+   * MP3 audio
+   */
+  200: Blob | File
+}
+
+export type TtsEdgeResponse = TtsEdgeResponses[keyof TtsEdgeResponses]
 
 export type AuthRemoveData = {
   body?: never
