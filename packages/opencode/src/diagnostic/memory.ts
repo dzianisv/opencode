@@ -302,12 +302,12 @@ export namespace Memory {
   export function start(label: string) {
     if (one.timer) return
 
-    const cfg = env()
-    if (!cfg) return
-
     void Memory.trim().catch((error) => {
       log.error("memory trim failed", { error })
     })
+
+    const cfg = env()
+    if (!cfg) return
 
     one.file =
       cfg.path || path.join(Global.Path.log, `memory-${label}-${new Date().toISOString().split(".")[0].replace(/:/g, "")}.ndjson`)
