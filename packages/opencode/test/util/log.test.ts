@@ -5,6 +5,10 @@ import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
 describe("util.log", () => {
+  test("defaults log cap to 128MB", () => {
+    expect(Log.MAX).toBe(128 * 1024 * 1024)
+  })
+
   test("deletes old logs and trims the active log to stay within the cap", async () => {
     await using tmp = await tmpdir()
     const old = path.join(tmp.path, "old.log")
