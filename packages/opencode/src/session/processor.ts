@@ -443,7 +443,7 @@ export namespace SessionProcessor {
                       fallbackIndex: fallbackIndex - 1,
                     })
                     try {
-                      const resolved = await Provider.getModel(next.providerID, next.modelID)
+                      const resolved = await Provider.getModel(next.providerID as any, next.modelID as any)
                       streamInput.model = resolved
                       input.model = resolved
                       input.assistantMessage.modelID = resolved.id

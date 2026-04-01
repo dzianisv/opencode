@@ -255,7 +255,17 @@ export namespace Agent {
                 options: {},
                 native: false,
               }
-            if (value.model) item.model = Provider.parseModel(value.model)
+            if (value.model) {
+              if (Array.isArray(value.model)) {
+                // Array shorthand: first element is primary model, rest are fallbacks
+                item.model = Provider.parseModel(value.model[0])
+                if (value.model.length > 1) {
+                  item.fallbackModels = value.model.slice(1).map((m: string) => Provider.parseModel(m))
+                }
+              } else {
+                item.model = Provider.parseModel(value.model)
+              }
+            }
             item.variant = value.variant ?? item.variant
             item.prompt = value.prompt ?? item.prompt
             item.description = value.description ?? item.description
