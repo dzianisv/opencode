@@ -277,6 +277,13 @@ export namespace SessionPrompt {
       await SessionStatus.set(sessionID, { type: "idle" })
       return
     }
+
+    const error = new Error(`Session ${sessionID} prompt cancelled`)
+    for (const callback of match.callbacks) {
+      callback.reject(error)
+    }
+    match.callbacks.length = 0
+
     match.abort.abort()
     delete s[sessionID]
     await SessionStatus.set(sessionID, { type: "idle" })
