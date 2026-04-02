@@ -708,6 +708,10 @@ function App() {
   ])
 
   sdk.event.on(TuiEvent.CommandExecute.type, (evt) => {
+    if (evt.properties.command === "prompt.submit") {
+      promptRef.current?.submit()
+      return
+    }
     command.trigger(evt.properties.command)
   })
 
