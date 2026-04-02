@@ -1,21 +1,20 @@
-import type { Hooks, PluginInput, Plugin as PluginInstance, PluginModule } from "@opencode-ai/plugin"
+import type { Hooks, PluginInput, Plugin as PluginInstance } from "@opencode-ai/plugin"
 import { Config } from "../config/config"
 import { Bus } from "../bus"
 import { Log } from "../util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
+import { Server } from "../server/server"
+import { BunProc } from "../bun"
 import { Flag } from "../flag/flag"
 import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
-import { CopilotAuthPlugin } from "./github-copilot/copilot"
+import { CopilotAuthPlugin } from "./copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
 import { PoeAuthPlugin } from "opencode-poe-auth"
-import { Effect, Layer, ServiceMap, Stream } from "effect"
+import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
-import { makeRuntime } from "@/effect/run-service"
-import { errorMessage } from "@/util/error"
-import { PluginLoader } from "./loader"
-import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { makeRunPromise } from "@/effect/run-service"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -94,69 +93,65 @@ export namespace Plugin {
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
-      const bus = yield* Bus.Service
-      const config = yield* Config.Service
-
-      const state = yield* InstanceState.make<State>(
+      const cache = yield* InstanceState.make<State>(
         Effect.fn("Plugin.state")(function* (ctx) {
           const hooks: Hooks[] = []
 
-          const { Server } = yield* Effect.promise(() => import("../server/server"))
-
-          const client = createOpencodeClient({
-            baseUrl: "http://localhost:4096",
-            directory: ctx.directory,
-            headers: Flag.OPENCODE_SERVER_PASSWORD
-              ? {
-                  Authorization: `Basic ${Buffer.from(`${Flag.OPENCODE_SERVER_USERNAME ?? "opencode"}:${Flag.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`,
-                }
-              : undefined,
-            fetch: async (...args) => Server.Default().fetch(...args),
-          })
-          const cfg = yield* config.get()
-          const input: PluginInput = {
-            client,
-            project: ctx.project,
-            worktree: ctx.worktree,
-            directory: ctx.directory,
-            get serverUrl(): URL {
-              return Server.url ?? new URL("http://localhost:4096")
-            },
-            $: Bun.$,
-          }
-
-          for (const plugin of INTERNAL_PLUGINS) {
-            log.info("loading internal plugin", { name: plugin.name })
-            const init = yield* Effect.tryPromise({
-              try: () => plugin(input),
-              catch: (err) => {
-                log.error("failed to load internal plugin", { name: plugin.name, error: err })
+          yield* Effect.promise(async () => {
+            const client = createOpencodeClient({
+              baseUrl: "http://localhost:4096",
+              directory: ctx.directory,
+              headers: Flag.OPENCODE_SERVER_PASSWORD
+                ? {
+                    Authorization: `Basic ${Buffer.from(`${Flag.OPENCODE_SERVER_USERNAME ?? "opencode"}:${Flag.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`,
+                  }
+                : undefined,
+              fetch: async (...args) => Server.Default().fetch(...args),
+            })
+            const cfg = await Config.get()
+            const input: PluginInput = {
+              client,
+              project: ctx.project,
+              worktree: ctx.worktree,
+              directory: ctx.directory,
+              get serverUrl(): URL {
+                return Server.url ?? new URL("http://localhost:4096")
               },
-            }).pipe(Effect.option)
-            if (init._tag === "Some") hooks.push(init.value)
-          }
+              $: Bun.$,
+            }
 
-          const plugins = Flag.OPENCODE_PURE ? [] : (cfg.plugin_origins ?? [])
-          if (Flag.OPENCODE_PURE && cfg.plugin_origins?.length) {
-            log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
-          }
-          if (plugins.length) yield* config.waitForDependencies()
+            for (const plugin of INTERNAL_PLUGINS) {
+              log.info("loading internal plugin", { name: plugin.name })
+              const init = await plugin(input).catch((err) => {
+                log.error("failed to load internal plugin", { name: plugin.name, error: err })
+              })
+              if (init) hooks.push(init)
+            }
 
-          const loaded = yield* Effect.promise(() =>
-            PluginLoader.loadExternal({
-              items: plugins,
-              kind: "server",
-              report: {
-                start(candidate) {
-                  log.info("loading plugin", { path: candidate.plan.spec })
-                },
-                missing(candidate, _retry, message) {
-                  log.warn("plugin has no server entrypoint", { path: candidate.plan.spec, message })
-                },
-                error(candidate, _retry, stage, error, resolved) {
-                  const spec = candidate.plan.spec
-                  const cause = error instanceof Error ? (error.cause ?? error) : error
-                  const message = stage === "load" ? errorMessage(error) : errorMessage(cause)
+            let plugins = cfg.plugin ?? []
+            if (plugins.length) await Config.waitForDependencies()
+
+            for (const pluginEntry of plugins) {
+              let plugin = typeof pluginEntry === "string" ? pluginEntry : pluginEntry[0]
+              if (DEPRECATED_PLUGIN_PACKAGES.some((pkg) => plugin.includes(pkg))) continue
+              log.info("loading plugin", { path: plugin })
+              if (!plugin.startsWith("file://")) {
+                const idx = plugin.lastIndexOf("@")
+                const pkg = idx > 0 ? plugin.substring(0, idx) : plugin
+                const version = idx > 0 ? plugin.substring(idx + 1) : "latest"
+                plugin = await BunProc.install(pkg, version).catch((err) => {
+                  const cause = err instanceof Error ? err.cause : err
+                  const detail = cause instanceof Error ? cause.message : String(cause ?? err)
+                  log.error("failed to install plugin", { pkg, version, error: detail })
+                  Bus.publish(Session.Event.Error, {
+                    error: new NamedError.Unknown({
+                      message: `Failed to install plugin ${pkg}@${version}: ${detail}`,
+                    }).toObject(),
+                  })
+                  return ""
+                })
+                if (!plugin) continue
+              }
 
                   if (stage === "install") {
                     const parsed = parsePluginSpecifier(spec)
@@ -164,6 +159,17 @@ export namespace Plugin {
                     publishPluginError(bus, `Failed to install plugin ${parsed.pkg}@${parsed.version}: ${message}`)
                     return
                   }
+                })
+                .catch((err) => {
+                  const message = err instanceof Error ? err.message : String(err)
+                  log.error("failed to load plugin", { path: plugin, error: message })
+                  Bus.publish(Session.Event.Error, {
+                    error: new NamedError.Unknown({
+                      message: `Failed to load plugin ${plugin}: ${message}`,
+                    }).toObject(),
+                  })
+                })
+            }
 
                   if (stage === "compatibility") {
                     log.warn("plugin incompatible", { path: spec, error: message })
@@ -212,20 +218,20 @@ export namespace Plugin {
               try: () => Promise.resolve((hook as any).config?.(cfg)),
               catch: (err) => {
                 log.error("plugin config hook failed", { error: err })
-              },
-            }).pipe(Effect.ignore)
-          }
+              }
+            }
+          })
 
-          // Subscribe to bus events, fiber interrupted when scope closes
-          yield* bus.subscribeAll().pipe(
-            Stream.runForEach((input) =>
-              Effect.sync(() => {
+          // Subscribe to bus events, clean up when scope is closed
+          yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              Bus.subscribeAll(async (input) => {
                 for (const hook of hooks) {
-                  hook["event"]?.({ event: input as any })
+                  hook["event"]?.({ event: input })
                 }
               }),
             ),
-            Effect.forkScoped,
+            (unsub) => Effect.sync(unsub),
           )
 
           return { hooks }
@@ -238,30 +244,34 @@ export namespace Plugin {
         Output = Parameters<Required<Hooks>[Name]>[1],
       >(name: Name, input: Input, output: Output) {
         if (!name) return output
-        const s = yield* InstanceState.get(state)
-        for (const hook of s.hooks) {
-          const fn = hook[name] as any
-          if (!fn) continue
-          yield* Effect.promise(async () => fn(input, output))
-        }
+        const state = yield* InstanceState.get(cache)
+        yield* Effect.promise(async () => {
+          for (const hook of state.hooks) {
+            const fn = hook[name] as any
+            if (!fn) continue
+            await fn(input, output)
+          }
+        })
         return output
       })
 
       const list = Effect.fn("Plugin.list")(function* () {
-        const s = yield* InstanceState.get(state)
-        return s.hooks
+        const state = yield* InstanceState.get(cache)
+        return state.hooks
       })
 
       const init = Effect.fn("Plugin.init")(function* () {
-        yield* InstanceState.get(state)
+        yield* InstanceState.get(cache)
       })
 
       return Service.of({ trigger, list, init })
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Config.defaultLayer))
-  const { runPromise } = makeRuntime(Service, defaultLayer)
+  const runPromise = makeRunPromise(Service, layer)
+
+  /** Alias of `layer` — provided for consistency with other modules. */
+  export const defaultLayer = layer
 
   export async function trigger<
     Name extends TriggerName,
