@@ -396,11 +396,12 @@ export function createTuiApi(input: Input): TuiHostPluginApi {
       get selected() {
         return input.theme.selected
       },
-      has(name) {
-        return input.theme.has(name)
+      has: (name: string): boolean => {
+        return Boolean(name in (input.theme.all() as object))
       },
-      set(name) {
-        return input.theme.set(name)
+      set: (name: string): boolean => {
+        input.theme.set(name)
+        return true
       },
       async install(_jsonPath) {
         throw new Error("theme.install is only available in plugin context")
