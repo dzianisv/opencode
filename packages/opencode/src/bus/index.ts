@@ -1,4 +1,5 @@
 import z from "zod"
+import { Effect, Layer, PubSub, ServiceMap, Stream } from "effect"
 import { Log } from "../util/log"
 import { Instance } from "../project/instance"
 import { BusEvent } from "./bus-event"
@@ -104,4 +105,59 @@ export namespace Bus {
       match.splice(index, 1)
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-native service (layer-based, subscriptions as Streams)
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    publish<Def extends BusEvent.Definition>(
+      def: Def,
+      props: z.output<Def["properties"]>,
+    ): Effect.Effect<void>
+    subscribe<Def extends BusEvent.Definition>(
+      def: Def,
+    ): Stream.Stream<{ type: Def["type"]; properties: z.infer<Def["properties"]> }>
+    subscribeAll(): Stream.Stream<{ type: string; properties: unknown }>
+    subscribeCallback<Def extends BusEvent.Definition>(
+      def: Def,
+      callback: (event: { type: Def["type"]; properties: z.infer<Def["properties"]> }) => void,
+    ): Effect.Effect<() => void>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/Bus") {}
+
+  export const layer: Layer.Layer<Service> = Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      // Broadcast hub for all events
+      const hub = yield* PubSub.unbounded<{ type: string; properties: unknown }>()
+
+      // Bridge the existing callback-based Bus into the hub
+      const unsub = subscribeAll((event: any) => {
+        Effect.runFork(PubSub.publish(hub, event))
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(unsub))
+
+      return {
+        publish: <Def extends BusEvent.Definition>(def: Def, props: z.output<Def["properties"]>) =>
+          Effect.promise(() => publish(def, props)),
+        subscribe: <Def extends BusEvent.Definition>(def: Def) => {
+          const s = Stream.fromPubSub(hub).pipe(Stream.filter((evt) => evt.type === def.type))
+          return s as unknown as Stream.Stream<{
+            type: Def["type"]
+            properties: z.infer<Def["properties"]>
+          }>
+        },
+        subscribeAll: () => Stream.fromPubSub(hub),
+        subscribeCallback: <Def extends BusEvent.Definition>(
+          def: Def,
+          callback: (event: { type: Def["type"]; properties: z.infer<Def["properties"]> }) => void,
+        ) =>
+          Effect.sync(() =>
+            subscribe(def, (evt) => callback(evt as { type: Def["type"]; properties: z.infer<Def["properties"]> })),
+          ),
+      }
+    }),
+  )
 }

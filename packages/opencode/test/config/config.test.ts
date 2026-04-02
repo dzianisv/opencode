@@ -1821,7 +1821,7 @@ describe("deduplicatePlugins", () => {
 
         const myPlugins = plugins.filter((p) => Config.getPluginName(p) === "my-plugin")
         expect(myPlugins.length).toBe(1)
-        expect(myPlugins[0].startsWith("file://")).toBe(true)
+        expect(Config.pluginSpecifier(myPlugins[0]).startsWith("file://")).toBe(true)
       },
     })
   })

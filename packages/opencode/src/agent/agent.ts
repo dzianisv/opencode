@@ -415,7 +415,7 @@ export namespace Agent {
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(Auth.layer))
+  export const defaultLayer = layer.pipe(Layer.provide(Auth.defaultLayer))
 
   const runPromise = makeRunPromise(Service, defaultLayer)
 

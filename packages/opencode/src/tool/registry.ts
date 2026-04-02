@@ -33,6 +33,7 @@ import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
 import { existsSync } from "fs"
+import { Effect, Layer, ServiceMap } from "effect"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -180,4 +181,23 @@ export namespace ToolRegistry {
     )
     return result
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-based service
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    all(): Effect.Effect<Awaited<ReturnType<typeof all>>>
+    ids(): Effect.Effect<string[]>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/ToolRegistry") {}
+
+  export const layer: Layer.Layer<Service> = Layer.effect(
+    Service,
+    Effect.sync((): EffectInterface => ({
+      all: () => Effect.promise(() => all()),
+      ids: () => Effect.promise(() => ids()),
+    })),
+  )
 }

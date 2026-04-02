@@ -1,5 +1,6 @@
 import { Slug } from "@opencode-ai/util/slug"
 import path from "path"
+import { Effect, Layer, ServiceMap } from "effect"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Decimal } from "decimal.js"
@@ -801,6 +802,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.Updated, {
+          sessionID: msg.sessionID,
           info: msg,
         }),
       )
@@ -871,7 +873,9 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
+          sessionID: part.sessionID,
           part: structuredClone(part),
+          time,
         }),
       )
     })
@@ -1044,4 +1048,29 @@ export namespace Session {
       })
     },
   )
+
+  // ---------------------------------------------------------------------------
+  // Effect-native service
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    create(opts?: Parameters<typeof create>[0]): Effect.Effect<Info>
+    updateMessage(msg: MessageV2.Info): Effect.Effect<MessageV2.Info>
+    updatePart(part: Parameters<typeof updatePart>[0]): Effect.Effect<any>
+    messages(input: Parameters<typeof messages>[0]): Effect.Effect<Awaited<ReturnType<typeof messages>>>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/Session") {}
+
+  export const layer = Layer.effect(
+    Service,
+    Effect.sync(() => ({
+      create: (opts?: Parameters<typeof create>[0]) => Effect.promise(() => create(opts)),
+      updateMessage: (msg: MessageV2.Info) => Effect.promise(() => updateMessage(msg)),
+      updatePart: (part: Parameters<typeof updatePart>[0]) => Effect.promise(() => updatePart(part)),
+      messages: (input: Parameters<typeof messages>[0]) => Effect.promise(() => messages(input)),
+    })),
+  )
+
+  export const defaultLayer: Layer.Layer<Service> = layer
 }

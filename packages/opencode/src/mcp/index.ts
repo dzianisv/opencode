@@ -24,6 +24,7 @@ import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
+import { Effect, ServiceMap } from "effect"
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
@@ -1116,4 +1117,31 @@ export namespace MCP {
     const expired = await McpAuth.isTokenExpired(mcpName)
     return expired ? "expired" : "authenticated"
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-based service
+  // ---------------------------------------------------------------------------
+  // Import lazily to avoid circular dependency issues at module level
+
+  export interface EffectInterface {
+    status(): Effect.Effect<any>
+    clients(): Effect.Effect<any>
+    tools(): Effect.Effect<any>
+    prompts(): Effect.Effect<any>
+    resources(): Effect.Effect<any>
+    add(name: string, mcp: Config.Mcp): Effect.Effect<any>
+    connect(name: string): Effect.Effect<void>
+    disconnect(name: string): Effect.Effect<void>
+    getPrompt(clientName: string, name: string, args?: Record<string, string>): Effect.Effect<any>
+    readResource(clientName: string, resourceUri: string): Effect.Effect<any>
+    startAuth(mcpName: string): Effect.Effect<any>
+    authenticate(mcpName: string): Effect.Effect<any>
+    finishAuth(mcpName: string, authorizationCode: string): Effect.Effect<any>
+    removeAuth(mcpName: string): Effect.Effect<void>
+    supportsOAuth(mcpName: string): Effect.Effect<boolean>
+    hasStoredTokens(mcpName: string): Effect.Effect<boolean>
+    getAuthStatus(mcpName: string): Effect.Effect<AuthStatus>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/MCP") {}
 }

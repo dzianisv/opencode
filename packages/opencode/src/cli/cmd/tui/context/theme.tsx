@@ -128,7 +128,7 @@ type Variant = {
   light: HexColor | RefName
 }
 type ColorValue = HexColor | RefName | Variant | RGBA
-type ThemeJson = {
+export type ThemeJson = {
   $schema?: string
   defs?: Record<string, HexColor | RefName>
   theme: Omit<Record<keyof ThemeColors, ColorValue>, "selectedListItemText" | "backgroundMenu"> & {
@@ -174,7 +174,7 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   carbonfox,
 }
 
-function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
+export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
   const defs = theme.defs ?? {}
   function resolveColor(c: ColorValue): RGBA {
     if (c instanceof RGBA) return c
@@ -1190,4 +1190,37 @@ function getSyntaxRules(theme: Theme) {
       },
     },
   ]
+}
+
+// Module-level registry for plugin-installed themes (accessible outside component context)
+const _pluginThemes = new Map<string, ThemeJson>()
+
+export function hasTheme(name: string): boolean {
+  return name in DEFAULT_THEMES || _pluginThemes.has(name)
+}
+
+export function upsertTheme(name: string, data: ThemeJson): void {
+  _pluginThemes.set(name, data)
+}
+
+/**
+ * Add a theme to the plugin registry. Returns true if the theme was added,
+ * false if it already exists or the data is invalid (missing theme object).
+ */
+export function addTheme(name: string, data: unknown): boolean {
+  if (!data || typeof data !== "object" || !("theme" in data)) return false
+  if (_pluginThemes.has(name) || name in DEFAULT_THEMES) return false
+  _pluginThemes.set(name, data as ThemeJson)
+  return true
+}
+
+/**
+ * Returns all registered themes (built-in + plugin).
+ */
+export function allThemes(): Record<string, ThemeJson> {
+  const result: Record<string, ThemeJson> = { ...DEFAULT_THEMES }
+  for (const [name, theme] of _pluginThemes) {
+    result[name] = theme
+  }
+  return result
 }

@@ -1,5 +1,5 @@
 import type * as Arr from "effect/Array"
-import { NodeSink, NodeStream } from "@effect/platform-node"
+import { NodeFileSystem, NodePath, NodeSink, NodeStream } from "@effect/platform-node"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -335,7 +335,7 @@ export const make = Effect.gen(function* () {
       if (Predicate.isUndefined(opts?.forceKillAfter)) return f(command, proc, signal)
       return Effect.timeoutOrElse(f(command, proc, signal), {
         duration: opts.forceKillAfter,
-        onTimeout: () => f(command, proc, "SIGKILL"),
+        orElse: () => f(command, proc, "SIGKILL"),
       })
     }
 
@@ -355,10 +355,9 @@ export const make = Effect.gen(function* () {
     }
   }
 
-  const spawnCommand: (
-    command: ChildProcess.Command,
-  ) => Effect.Effect<ChildProcessHandle, PlatformError.PlatformError, Scope.Scope> = Effect.fnUntraced(
-    function* (command) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spawnCommand: (command: ChildProcess.Command) => Effect.Effect<ChildProcessHandle, PlatformError.PlatformError, Scope.Scope> = Effect.fnUntraced(
+    function* (command: ChildProcess.Command) {
       switch (command._tag) {
         case "StandardCommand": {
           const sin = stdin(command.options)
@@ -419,7 +418,7 @@ export const make = Effect.gen(function* () {
                 opts,
               )((command, proc, signal) =>
                 Effect.catch(killGroup(command, proc, signal), () => killOne(command, proc, signal)),
-              ).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid),
+              ).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid) as Effect.Effect<void, PlatformError.PlatformError, never>,
           })
         }
         case "PipedCommand": {
@@ -470,7 +469,12 @@ export const make = Effect.gen(function* () {
   return makeSpawner(spawnCommand)
 })
 
+// Import node platform for defaultLayer
 export const layer: Layer.Layer<ChildProcessSpawner, never, FileSystem.FileSystem | Path.Path> = Layer.effect(
   ChildProcessSpawner,
   make,
+)
+
+export const defaultLayer: Layer.Layer<ChildProcessSpawner> = layer.pipe(
+  Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)),
 )

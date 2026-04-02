@@ -18,7 +18,7 @@ import {
   parse as parseJsonc,
   printParseErrorCode,
 } from "jsonc-parser"
-import { Instance, type InstanceContext } from "../project/instance"
+import { Instance, type Shape as InstanceContext } from "../project/instance"
 import { LSPServer } from "../lsp/server"
 import { Installation } from "@/installation"
 import { ConfigMarkdown } from "./markdown"
@@ -1462,15 +1462,15 @@ export namespace Config {
           yield* InstanceState.useEffect(state, (s) => Effect.promise(() => Promise.all(s.deps).then(() => undefined)))
         })
 
-        const update = Effect.fn("Config.update")(function* (config: Info) {
-          const dir = yield* InstanceState.directory
+        const update: (config: Info) => Effect.Effect<void> = Effect.fn("Config.update")(function* (config: Info) {
+          const dir = Instance.directory
           const file = path.join(dir, "config.json")
           const existing = yield* loadFile(file)
           yield* fs
             .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
             .pipe(Effect.orDie)
           yield* Effect.promise(() => Instance.dispose())
-        })
+        }) as unknown as (config: Info) => Effect.Effect<void>
 
         const invalidate = Effect.fn("Config.invalidate")(function* (wait?: boolean) {
           yield* invalidateGlobal
@@ -1556,5 +1556,44 @@ export namespace Config {
 
   export async function waitForDependencies() {
     return runPromise((svc) => svc.waitForDependencies())
+  }
+
+  /**
+   * Extract the canonical name from a plugin specifier.
+   * - file:// URLs → basename without extension
+   * - npm packages → package name without version (e.g. "pkg@1.0.0" → "pkg")
+   */
+  export function getPluginName(spec: PluginSpec): string {
+    const s = pluginSpecifier(spec)
+    if (s.startsWith("file://")) {
+      const p = new URL(s).pathname
+      const base = p.split("/").pop() ?? p
+      return base.replace(/\.[^.]+$/, "")
+    }
+    return parsePluginSpecifier(s).pkg
+  }
+
+  /**
+   * Deduplicate a flat list of plugin specifiers (strings), keeping the
+   * last (highest priority) occurrence of each canonical name.
+   */
+  export function deduplicatePlugins(plugins: string[]): string[] {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const spec of [...plugins].reverse()) {
+      const name = getPluginName(spec)
+      if (seen.has(name)) continue
+      seen.add(name)
+      result.unshift(spec)
+    }
+    return result
+  }
+
+  /** Global config singleton helpers (used by tests to reset cached state). */
+  export const global = {
+    reset() {
+      // No-op in the Effect-based implementation; the global config is loaded
+      // lazily inside the Effect layer and re-evaluated on each invalidation.
+    },
   }
 }

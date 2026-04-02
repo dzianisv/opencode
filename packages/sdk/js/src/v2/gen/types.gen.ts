@@ -525,6 +525,8 @@ export type Part =
 export type EventMessagePartUpdated = {
   type: "message.part.updated"
   properties: {
+    sessionID: string
+    time: number
     part: Part
   }
 }

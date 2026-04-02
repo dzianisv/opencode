@@ -1,5 +1,6 @@
 import { MessageV2 } from "./message-v2"
 import { Log } from "@/util/log"
+import { Effect, Layer, ServiceMap } from "effect"
 import { Session } from "."
 import { Agent } from "@/agent/agent"
 import { Snapshot } from "@/snapshot"
@@ -47,7 +48,7 @@ export namespace SessionProcessor {
       partFromToolCall(toolCallID: string) {
         return toolcalls[toolCallID]
       },
-      async process(streamInput: LLM.StreamInput) {
+      async process(streamInput: LLM.StreamRequest) {
         log.info("process")
         needsCompaction = false
         const shouldBreak = (await Config.get()).experimental?.continue_loop_on_deny !== true
@@ -527,4 +528,43 @@ export namespace SessionProcessor {
     }
     return result
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-native service
+  // ---------------------------------------------------------------------------
+
+  /** The shape returned by `SessionProcessor.create()` — used as a satisfies target in tests. */
+  export interface Handle {
+    readonly message: MessageV2.Assistant
+    partFromToolCall(toolCallID: string): MessageV2.ToolPart | undefined
+    process(streamInput: LLM.StreamInput): Effect.Effect<Result>
+    abort(): Effect.Effect<void>
+  }
+
+  /** Service interface for the Effect-based SessionProcessor. */
+  export interface Interface {
+    create(input: Omit<Parameters<typeof create>[0], "abort">): Effect.Effect<Handle>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionProcessor") {}
+
+  export const layer = Layer.effect(
+    Service,
+    Effect.sync((): Interface => ({
+      create: (input) =>
+        Effect.promise(async () => {
+          const controller = new AbortController()
+          const info = create({ ...input, abort: controller.signal })
+          return {
+            get message() {
+              return info.message
+            },
+            partFromToolCall: (toolCallID: string) => info.partFromToolCall(toolCallID),
+            process: (streamInput: LLM.StreamInput) =>
+              Effect.promise(() => info.process({ ...streamInput, abort: controller.signal })),
+            abort: () => Effect.sync(() => controller.abort()),
+          }
+        }),
+    })),
+  )
 }

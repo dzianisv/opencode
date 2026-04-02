@@ -361,7 +361,7 @@ export namespace Worktree {
     }
   }
 
-  export const create = fn(CreateInput.optional(), async (input) => {
+  const _createFn = fn(CreateInput.optional(), async (input) => {
     const info = await makeWorktreeInfo(input?.name)
     const bootstrap = await createFromInfo(info, input?.startCommand)
     // This is needed due to how worktrees currently work in the
@@ -371,6 +371,12 @@ export namespace Worktree {
     }, 0)
     return info
   })
+
+  export function create(input?: CreateInput): Promise<Info> {
+    return _createFn(input)
+  }
+  ;(create as any).force = _createFn.force
+  ;(create as any).schema = _createFn.schema
 
   export const remove = fn(RemoveInput, async (input) => {
     if (Instance.project.vcs !== "git") {

@@ -49,6 +49,7 @@ import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
+import { Effect, Layer, ServiceMap } from "effect"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -99,7 +100,7 @@ export namespace SessionPrompt {
     },
   )
 
-  export function assertNotBusy(sessionID: SessionID) {
+  export async function assertNotBusy(sessionID: SessionID) {
     const match = state()[sessionID]
     if (match) throw new Session.BusyError(sessionID)
   }
@@ -704,7 +705,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...(await MessageV2.toModelMessages(msgs, model)),
           ...(isLastStep
             ? [
                 {
@@ -873,7 +874,8 @@ export namespace SessionPrompt {
       const execute = item.execute
       if (!execute) continue
 
-      const transformed = ProviderTransform.schema(input.model, asSchema(item.inputSchema).jsonSchema)
+      const schemaJson = await Promise.resolve(asSchema(item.inputSchema).jsonSchema)
+      const transformed = await Promise.resolve(ProviderTransform.schema(input.model, schemaJson))
       item.inputSchema = jsonSchema(transformed)
       // Wrap execute to add plugin hooks and format output
       item.execute = async (args, opts) => {
@@ -2080,10 +2082,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
         ...(hasOnlySubtaskParts
           ? [{ role: "user" as const, content: subtaskParts.map((p) => p.prompt).join("\n") }]
-          : MessageV2.toModelMessages(contextMessages, model)),
+          : await MessageV2.toModelMessages(contextMessages, model)),
       ],
     })
-    const text = await result.text.catch((err) => log.error("failed to generate title", { error: err }))
+    const text = await Promise.resolve(result.text).catch((err: unknown) => log.error("failed to generate title", { error: err }))
     if (text) {
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
@@ -2099,4 +2101,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       })
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-based service
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    prompt(input: PromptInput): Effect.Effect<void>
+    loop(input: z.infer<typeof LoopInput>): Effect.Effect<MessageV2.WithParts>
+    cancel(sessionID: SessionID): Effect.Effect<void>
+    assertNotBusy(sessionID: SessionID): Effect.Effect<void>
+    shell(input: ShellInput): Effect.Effect<Awaited<ReturnType<typeof shell>>>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/SessionPrompt") {}
+
+  export const layer: Layer.Layer<Service> = Layer.effect(
+    Service,
+    Effect.sync((): EffectInterface => ({
+      prompt: (input) => Effect.promise(() => prompt(input)),
+      loop: (input) => Effect.promise(() => loop(input)),
+      cancel: (sessionID) => Effect.promise(() => cancel(sessionID)),
+      assertNotBusy: (sessionID) => Effect.promise(() => assertNotBusy(sessionID)),
+      shell: (input) => Effect.promise(() => shell(input)),
+    })),
+  )
 }

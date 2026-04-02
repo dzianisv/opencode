@@ -91,7 +91,8 @@ export namespace Plugin {
             let plugins = cfg.plugin ?? []
             if (plugins.length) await Config.waitForDependencies()
 
-            for (let plugin of plugins) {
+            for (const pluginEntry of plugins) {
+              let plugin = typeof pluginEntry === "string" ? pluginEntry : pluginEntry[0]
               if (DEPRECATED_PLUGIN_PACKAGES.some((pkg) => plugin.includes(pkg))) continue
               log.info("loading plugin", { path: plugin })
               if (!plugin.startsWith("file://")) {
@@ -192,6 +193,9 @@ export namespace Plugin {
   )
 
   const runPromise = makeRunPromise(Service, layer)
+
+  /** Alias of `layer` — provided for consistency with other modules. */
+  export const defaultLayer = layer
 
   export async function trigger<
     Name extends TriggerName,
