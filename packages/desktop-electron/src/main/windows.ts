@@ -43,6 +43,29 @@ function overlay(theme: Partial<TitlebarTheme> = {}) {
   }
 }
 
+function wirePermissions(win: BrowserWindow) {
+  const ses = win.webContents.session
+
+  ses.setPermissionCheckHandler((_view, permission) => {
+    return permission === "media" || permission === "notifications"
+  })
+
+  ses.setPermissionRequestHandler((_view, permission, callback, details) => {
+    if (permission === "notifications") {
+      callback(true)
+      return
+    }
+
+    if (permission === "media") {
+      const list = "mediaTypes" in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : []
+      callback(list.includes("audio"))
+      return
+    }
+
+    callback(false)
+  })
+}
+
 export function setTitlebar(win: BrowserWindow, theme: Partial<TitlebarTheme> = {}) {
   if (process.platform !== "win32") return
   win.setTitleBarOverlay(overlay(theme))
@@ -89,6 +112,7 @@ export function createMainWindow(globals: Globals) {
     },
   })
 
+  wirePermissions(win)
   state.manage(win)
   loadWindow(win, "index.html")
   wireZoom(win)
@@ -121,6 +145,7 @@ export function createLoadingWindow(globals: Globals) {
     },
   })
 
+  wirePermissions(win)
   loadWindow(win, "loading.html")
   injectGlobals(win, globals)
 
