@@ -44,6 +44,81 @@ test("provider loaded from env variable", async () => {
   })
 })
 
+test("azure/gpt-5.3-codex is backfilled when provider metadata is stale", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+        }),
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      Env.set("AZURE_RESOURCE_NAME", "test-resource")
+      Env.set("AZURE_API_KEY", "test-api-key")
+    },
+    fn: async () => {
+      const providers = await Provider.list()
+      const azure = providers[ProviderID.azure]
+      expect(azure).toBeDefined()
+      expect(azure.source).toBe("env")
+
+      const model = azure.models["gpt-5.3-codex"]
+      expect(model).toBeDefined()
+      expect(model.api.id).toBe("gpt-5.3-codex")
+      expect(model.api.npm).toBe("@ai-sdk/azure")
+      expect(model.limit.context).toBe(400000)
+      expect(model.variants?.xhigh).toEqual({
+        reasoningEffort: "xhigh",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
+    },
+  })
+})
+
+test("models.dev family normalization keeps chat and codex tracks separate", () => {
+  const info = Provider.fromModelsDevProvider({
+    id: "azure",
+    name: "Azure",
+    env: ["AZURE_API_KEY"],
+    npm: "@ai-sdk/azure",
+    models: {
+      "gpt-5.3-chat": {
+        id: "gpt-5.3-chat",
+        name: "GPT-5.3 Chat",
+        family: "gpt-codex",
+        release_date: "2026-03-03",
+        attachment: true,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        options: {},
+        limit: { context: 400000, output: 128000 },
+      },
+      "gpt-5.3-codex": {
+        id: "gpt-5.3-codex",
+        name: "GPT-5.3 Codex",
+        family: "gpt-codex",
+        release_date: "2026-02-24",
+        attachment: false,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        options: {},
+        limit: { context: 400000, output: 128000 },
+      },
+    },
+  })
+
+  expect(info.models["gpt-5.3-chat"].family).toBe("gpt-chat")
+  expect(info.models["gpt-5.3-codex"].family).toBe("gpt-codex")
+})
+
 test("provider loaded from config with apiKey option", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
