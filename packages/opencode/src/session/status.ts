@@ -1,10 +1,11 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { InstanceState } from "@/effect/instance-state"
-import { makeRuntime } from "@/effect/run-service"
+import { makeRunPromise } from "@/effect/run-service"
 import { SessionID } from "./schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
+import { GC } from "@/util/gc"
 
 export namespace SessionStatus {
   export const Info = z
@@ -20,6 +21,11 @@ export namespace SessionStatus {
       }),
       z.object({
         type: z.literal("busy"),
+      }),
+      z.object({
+        type: z.literal("fallback"),
+        from: z.string(),
+        to: z.string(),
       }),
     ])
     .meta({
@@ -55,10 +61,12 @@ export namespace SessionStatus {
   export const layer = Layer.effect(
     Service,
     Effect.gen(function* () {
-      const bus = yield* Bus.Service
-
       const state = yield* InstanceState.make(
-        Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
+        Effect.fn("SessionStatus.state")(function* () {
+          const data = new Map<SessionID, Info>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => GC.clear(data.keys())))
+          return data
+        }),
       )
 
       const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
@@ -72,11 +80,19 @@ export namespace SessionStatus {
 
       const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
         const data = yield* InstanceState.get(state)
-        yield* bus.publish(Event.Status, { sessionID, status })
+        yield* Effect.promise(() => Bus.publish(Event.Status, { sessionID, status }))
         if (status.type === "idle") {
-          yield* bus.publish(Event.Idle, { sessionID })
+          GC.set(sessionID, false)
+          yield* Effect.promise(() => Bus.publish(Event.Idle, { sessionID }))
           data.delete(sessionID)
           return
+        }
+        if (status.type === "busy") {
+          GC.set(sessionID, true)
+          GC.touch()
+        } else {
+          GC.set(sessionID, false)
+          GC.touch()
         }
         data.set(sessionID, status)
       })
@@ -85,8 +101,7 @@ export namespace SessionStatus {
     }),
   )
 
-  const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
-  const { runPromise } = makeRuntime(Service, defaultLayer)
+  const runPromise = makeRunPromise(Service, layer)
 
   export async function get(sessionID: SessionID) {
     return runPromise((svc) => svc.get(sessionID))
