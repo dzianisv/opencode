@@ -18,7 +18,7 @@ import {
   parse as parseJsonc,
   printParseErrorCode,
 } from "jsonc-parser"
-import { Instance, type InstanceContext } from "../project/instance"
+import { Instance, type Shape as InstanceContext } from "../project/instance"
 import { LSPServer } from "../lsp/server"
 import { Installation } from "@/installation"
 import { ConfigMarkdown } from "./markdown"
@@ -463,9 +463,19 @@ export namespace Config {
   })
   export type Skills = z.infer<typeof Skills>
 
+  export const AutoReview = z
+    .object({
+      model: ModelId.describe("Model to use for auto-review follow-ups in the format provider/model").optional(),
+    })
+    .strict()
+    .meta({
+      ref: "AutoReviewConfig",
+    })
+  export type AutoReview = z.infer<typeof AutoReview>
+
   export const Agent = z
     .object({
-      model: ModelId.optional(),
+      model: z.union([ModelId, z.array(ModelId)]).optional(),
       variant: z
         .string()
         .optional()
@@ -496,6 +506,18 @@ export namespace Config {
         .optional()
         .describe("Maximum number of agentic iterations before forcing text-only response"),
       maxSteps: z.number().int().positive().optional().describe("@deprecated Use 'steps' field instead."),
+      fallback_models: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Ordered list of fallback models (provider/model format) to try when the primary model exhausts retries",
+        ),
+      max_retries_before_fallback: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Number of retry attempts on the current model before falling back to the next one (default: 3)"),
       permission: Permission.optional(),
     })
     .catchall(z.any())
@@ -517,6 +539,8 @@ export namespace Config {
         "permission",
         "disable",
         "tools",
+        "fallback_models",
+        "max_retries_before_fallback",
       ])
 
       // Extract unknown properties into options
@@ -838,6 +862,7 @@ export namespace Config {
       small_model: ModelId.describe(
         "Small model to use for tasks like title generation in the format of provider/model",
       ).optional(),
+      auto_review: AutoReview.optional().describe("Auto-review configuration"),
       default_agent: z
         .string()
         .optional()
@@ -943,6 +968,23 @@ export namespace Config {
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
+      voice: z
+        .object({
+          edge: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable server-backed Edge TTS playback"),
+              voice: z.string().optional().describe("Edge neural voice name"),
+              lang: z.string().optional().describe("Edge TTS language code"),
+              output_format: z.string().optional().describe("Edge TTS output format"),
+              pitch: z.string().optional().describe("Edge TTS pitch percent string"),
+              rate: z.string().optional().describe("Edge TTS rate percent string"),
+              volume: z.string().optional().describe("Edge TTS volume percent string"),
+              timeout_ms: z.number().int().positive().optional().describe("Edge TTS timeout in milliseconds"),
+            })
+            .optional(),
+        })
+        .optional()
+        .describe("Voice playback configuration"),
       tools: z.record(z.string(), z.boolean()).optional(),
       enterprise: z
         .object({
@@ -1420,15 +1462,15 @@ export namespace Config {
           yield* InstanceState.useEffect(state, (s) => Effect.promise(() => Promise.all(s.deps).then(() => undefined)))
         })
 
-        const update = Effect.fn("Config.update")(function* (config: Info) {
-          const dir = yield* InstanceState.directory
+        const update: (config: Info) => Effect.Effect<void> = Effect.fn("Config.update")(function* (config: Info) {
+          const dir = Instance.directory
           const file = path.join(dir, "config.json")
           const existing = yield* loadFile(file)
           yield* fs
             .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
             .pipe(Effect.orDie)
           yield* Effect.promise(() => Instance.dispose())
-        })
+        }) as unknown as (config: Info) => Effect.Effect<void>
 
         const invalidate = Effect.fn("Config.invalidate")(function* (wait?: boolean) {
           yield* invalidateGlobal
@@ -1514,5 +1556,44 @@ export namespace Config {
 
   export async function waitForDependencies() {
     return runPromise((svc) => svc.waitForDependencies())
+  }
+
+  /**
+   * Extract the canonical name from a plugin specifier.
+   * - file:// URLs → basename without extension
+   * - npm packages → package name without version (e.g. "pkg@1.0.0" → "pkg")
+   */
+  export function getPluginName(spec: PluginSpec): string {
+    const s = pluginSpecifier(spec)
+    if (s.startsWith("file://")) {
+      const p = new URL(s).pathname
+      const base = p.split("/").pop() ?? p
+      return base.replace(/\.[^.]+$/, "")
+    }
+    return parsePluginSpecifier(s).pkg
+  }
+
+  /**
+   * Deduplicate a flat list of plugin specifiers (strings), keeping the
+   * last (highest priority) occurrence of each canonical name.
+   */
+  export function deduplicatePlugins(plugins: string[]): string[] {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const spec of [...plugins].reverse()) {
+      const name = getPluginName(spec)
+      if (seen.has(name)) continue
+      seen.add(name)
+      result.unshift(spec)
+    }
+    return result
+  }
+
+  /** Global config singleton helpers (used by tests to reset cached state). */
+  export const global = {
+    reset() {
+      // No-op in the Effect-based implementation; the global config is loaded
+      // lazily inside the Effect layer and re-evaluated on each invalidation.
+    },
   }
 }
