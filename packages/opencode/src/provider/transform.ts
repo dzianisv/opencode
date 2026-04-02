@@ -25,9 +25,8 @@ export namespace ProviderTransform {
     switch (npm) {
       case "@ai-sdk/github-copilot":
         return "copilot"
-      case "@ai-sdk/azure":
-        return "azure"
       case "@ai-sdk/openai":
+      case "@ai-sdk/azure":
         return "openai"
       case "@ai-sdk/amazon-bedrock":
         return "bedrock"
@@ -35,7 +34,6 @@ export namespace ProviderTransform {
       case "@ai-sdk/google-vertex/anthropic":
         return "anthropic"
       case "@ai-sdk/google-vertex":
-        return "vertex"
       case "@ai-sdk/google":
         return "google"
       case "@ai-sdk/gateway":
@@ -74,29 +72,17 @@ export namespace ProviderTransform {
     }
 
     if (model.api.id.includes("claude")) {
-      const scrub = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_")
       return msgs.map((msg) => {
-        if (msg.role === "assistant" && Array.isArray(msg.content)) {
-          return {
-            ...msg,
-            content: msg.content.map((part) => {
-              if (part.type === "tool-call" || part.type === "tool-result") {
-                return { ...part, toolCallId: scrub(part.toolCallId) }
+        if ((msg.role === "assistant" || msg.role === "tool") && Array.isArray(msg.content)) {
+          msg.content = msg.content.map((part) => {
+            if ((part.type === "tool-call" || part.type === "tool-result") && "toolCallId" in part) {
+              return {
+                ...part,
+                toolCallId: (part as any).toolCallId.replace(/[^a-zA-Z0-9_-]/g, "_"),
               }
-              return part
-            }),
-          }
-        }
-        if (msg.role === "tool" && Array.isArray(msg.content)) {
-          return {
-            ...msg,
-            content: msg.content.map((part) => {
-              if (part.type === "tool-result") {
-                return { ...part, toolCallId: scrub(part.toolCallId) }
-              }
-              return part
-            }),
-          }
+            }
+            return part
+          }) as typeof msg.content
         }
         return msg
       })
@@ -106,33 +92,29 @@ export namespace ProviderTransform {
       model.api.id.toLowerCase().includes("mistral") ||
       model.api.id.toLocaleLowerCase().includes("devstral")
     ) {
-      const scrub = (id: string) => {
-        return id
-          .replace(/[^a-zA-Z0-9]/g, "") // Remove non-alphanumeric characters
-          .substring(0, 9) // Take first 9 characters
-          .padEnd(9, "0") // Pad with zeros if less than 9 characters
-      }
       const result: ModelMessage[] = []
       for (let i = 0; i < msgs.length; i++) {
         const msg = msgs[i]
         const nextMsg = msgs[i + 1]
 
-        if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        if ((msg.role === "assistant" || msg.role === "tool") && Array.isArray(msg.content)) {
           msg.content = msg.content.map((part) => {
-            if (part.type === "tool-call" || part.type === "tool-result") {
-              return { ...part, toolCallId: scrub(part.toolCallId) }
+            if ((part.type === "tool-call" || part.type === "tool-result") && "toolCallId" in part) {
+              // Mistral requires alphanumeric tool call IDs with exactly 9 characters
+              const normalizedId = (part as any).toolCallId
+                .replace(/[^a-zA-Z0-9]/g, "") // Remove non-alphanumeric characters
+                .substring(0, 9) // Take first 9 characters
+                .padEnd(9, "0") // Pad with zeros if less than 9 characters
+
+              return {
+                ...part,
+                toolCallId: normalizedId,
+              }
             }
             return part
-          })
+          }) as typeof msg.content
         }
-        if (msg.role === "tool" && Array.isArray(msg.content)) {
-          msg.content = msg.content.map((part) => {
-            if (part.type === "tool-result") {
-              return { ...part, toolCallId: scrub(part.toolCallId) }
-            }
-            return part
-          })
-        }
+
         result.push(msg)
 
         // Fix message sequence: tool messages cannot be followed by user messages
@@ -219,13 +201,8 @@ export namespace ProviderTransform {
       const shouldUseContentOptions = !useMessageLevelOptions && Array.isArray(msg.content) && msg.content.length > 0
 
       if (shouldUseContentOptions) {
-        const lastContent = msg.content[msg.content.length - 1]
-        if (
-          lastContent &&
-          typeof lastContent === "object" &&
-          lastContent.type !== "tool-approval-request" &&
-          lastContent.type !== "tool-approval-response"
-        ) {
+        const lastContent = msg.content[msg.content.length - 1] as any
+        if (lastContent && typeof lastContent === "object") {
           lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
           continue
         }
@@ -280,7 +257,6 @@ export namespace ProviderTransform {
     msgs = normalizeMessages(msgs, model, options)
     if (
       (model.providerID === "anthropic" ||
-        model.providerID === "google-vertex-anthropic" ||
         model.api.id.includes("anthropic") ||
         model.api.id.includes("claude") ||
         model.id.includes("anthropic") ||
@@ -293,7 +269,7 @@ export namespace ProviderTransform {
 
     // Remap providerOptions keys from stored providerID to expected SDK key
     const key = sdkKey(model.api.npm)
-    if (key && key !== model.providerID) {
+    if (key && key !== model.providerID && model.api.npm !== "@ai-sdk/azure") {
       const remap = (opts: Record<string, any> | undefined) => {
         if (!opts) return opts
         if (!(model.providerID in opts)) return opts
@@ -308,12 +284,7 @@ export namespace ProviderTransform {
         return {
           ...msg,
           providerOptions: remap(msg.providerOptions),
-          content: msg.content.map((part) => {
-            if (part.type === "tool-approval-request" || part.type === "tool-approval-response") {
-              return { ...part }
-            }
-            return { ...part, providerOptions: remap(part.providerOptions) }
-          }),
+          content: msg.content.map((part) => ({ ...part, providerOptions: remap((part as any).providerOptions) })),
         } as typeof msg
       })
     }
@@ -365,6 +336,8 @@ export namespace ProviderTransform {
     if (!model.capabilities.reasoning) return {}
 
     const id = model.id.toLowerCase()
+    const gpt5 = /(^|\/)gpt-5(?:[.-]|$)/.test(id)
+    const xhigh = /(^|\/)gpt-5\.(2|3|4)(?:[.-]|$)/.test(id) || (gpt5 && model.release_date >= "2025-12-04")
     const isAnthropicAdaptive = ["opus-4-6", "opus-4.6", "sonnet-4-6", "sonnet-4.6"].some((v) =>
       model.api.id.includes(v),
     )
@@ -504,8 +477,11 @@ export namespace ProviderTransform {
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
         if (id === "o1-mini") return {}
         const azureEfforts = ["low", "medium", "high"]
-        if (id.includes("gpt-5-") || id === "gpt-5") {
+        if (gpt5) {
           azureEfforts.unshift("minimal")
+        }
+        if (xhigh) {
+          azureEfforts.push("xhigh")
         }
         return Object.fromEntries(
           azureEfforts.map((effort) => [
@@ -522,17 +498,17 @@ export namespace ProviderTransform {
         if (id === "gpt-5-pro") return {}
         const openaiEfforts = iife(() => {
           if (id.includes("codex")) {
-            if (id.includes("5.2") || id.includes("5.3")) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
+            if (xhigh) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
             return WIDELY_SUPPORTED_EFFORTS
           }
           const arr = [...WIDELY_SUPPORTED_EFFORTS]
-          if (id.includes("gpt-5-") || id === "gpt-5") {
+          if (gpt5) {
             arr.unshift("minimal")
           }
           if (model.release_date >= "2025-11-13") {
             arr.unshift("none")
           }
-          if (model.release_date >= "2025-12-04") {
+          if (xhigh) {
             arr.push("xhigh")
           }
           return arr
