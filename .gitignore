@@ -1,27 +1,19 @@
-.DS_Store
+# Ignore all hidden files/dirs except .github/
+.*
+!.github/
+
 node_modules
-.worktrees
-.sst
-.env
-.idea
-.vscode
-.codex
 *~
 playground
 tmp
 dist
 ts-dist
-.turbo
-**/.serena
-.serena/
 /result
 refs
 Session.vim
 /opencode.json
 a.out
 target
-.scripts
-.direnv/
 
 # Local dev files
 opencode-dev
