@@ -1,7 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { InstanceState } from "@/effect/instance-state"
-import { makeRuntime } from "@/effect/run-service"
+import { makeRunPromise } from "@/effect/run-service"
 import { Instance } from "@/project/instance"
 import { type IPty } from "bun-pty"
 import z from "zod"
@@ -29,7 +29,8 @@ export namespace Pty {
   type Active = {
     info: Info
     process: IPty
-    buffer: string
+    chunks: string[]
+    bufferSize: number
     bufferCursor: number
     cursor: number
     subscribers: Map<unknown, Socket>
@@ -98,6 +99,8 @@ export namespace Pty {
     Deleted: BusEvent.define("pty.deleted", z.object({ id: PtyID.zod })),
   }
 
+  let total = 0
+
   export interface Interface {
     readonly list: () => Effect.Effect<Info[]>
     readonly get: (id: PtyID) => Effect.Effect<Info | undefined>
@@ -132,7 +135,7 @@ export namespace Pty {
         session.subscribers.clear()
       }
 
-      const state = yield* InstanceState.make<State>(
+      const cache = yield* InstanceState.make<State>(
         Effect.fn("Pty.state")(function* (ctx) {
           const state = {
             dir: ctx.directory,
@@ -141,6 +144,7 @@ export namespace Pty {
 
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
+              total = Math.max(0, total - state.sessions.size)
               for (const session of state.sessions.values()) {
                 teardown(session)
               }
@@ -153,23 +157,24 @@ export namespace Pty {
       )
 
       const remove = Effect.fn("Pty.remove")(function* (id: PtyID) {
-        const s = yield* InstanceState.get(state)
-        const session = s.sessions.get(id)
+        const state = yield* InstanceState.get(cache)
+        const session = state.sessions.get(id)
         if (!session) return
-        s.sessions.delete(id)
+        state.sessions.delete(id)
+        total = Math.max(0, total - 1)
         log.info("removing session", { id })
         teardown(session)
         yield* bus.publish(Event.Deleted, { id: session.info.id })
       })
 
       const list = Effect.fn("Pty.list")(function* () {
-        const s = yield* InstanceState.get(state)
-        return Array.from(s.sessions.values()).map((session) => session.info)
+        const state = yield* InstanceState.get(cache)
+        return Array.from(state.sessions.values()).map((session) => session.info)
       })
 
       const get = Effect.fn("Pty.get")(function* (id: PtyID) {
-        const s = yield* InstanceState.get(state)
-        return s.sessions.get(id)?.info
+        const state = yield* InstanceState.get(cache)
+        return state.sessions.get(id)?.info
       })
 
       const create = Effect.fn("Pty.create")(function* (input: CreateInput) {
@@ -266,8 +271,8 @@ export namespace Pty {
       })
 
       const update = Effect.fn("Pty.update")(function* (id: PtyID, input: UpdateInput) {
-        const s = yield* InstanceState.get(state)
-        const session = s.sessions.get(id)
+        const state = yield* InstanceState.get(cache)
+        const session = state.sessions.get(id)
         if (!session) return
         if (input.title) {
           session.info.title = input.title
@@ -280,24 +285,24 @@ export namespace Pty {
       })
 
       const resize = Effect.fn("Pty.resize")(function* (id: PtyID, cols: number, rows: number) {
-        const s = yield* InstanceState.get(state)
-        const session = s.sessions.get(id)
+        const state = yield* InstanceState.get(cache)
+        const session = state.sessions.get(id)
         if (session && session.info.status === "running") {
           session.process.resize(cols, rows)
         }
       })
 
       const write = Effect.fn("Pty.write")(function* (id: PtyID, data: string) {
-        const s = yield* InstanceState.get(state)
-        const session = s.sessions.get(id)
+        const state = yield* InstanceState.get(cache)
+        const session = state.sessions.get(id)
         if (session && session.info.status === "running") {
           session.process.write(data)
         }
       })
 
       const connect = Effect.fn("Pty.connect")(function* (id: PtyID, ws: Socket, cursor?: number) {
-        const s = yield* InstanceState.get(state)
-        const session = s.sessions.get(id)
+        const state = yield* InstanceState.get(cache)
+        const session = state.sessions.get(id)
         if (!session) {
           ws.close()
           return
@@ -321,11 +326,11 @@ export namespace Pty {
           cursor === -1 ? end : typeof cursor === "number" && Number.isSafeInteger(cursor) ? Math.max(0, cursor) : 0
 
         const data = (() => {
-          if (!session.buffer) return ""
+          if (session.bufferSize === 0) return ""
           if (from >= end) return ""
           const offset = Math.max(0, from - start)
-          if (offset >= session.buffer.length) return ""
-          return session.buffer.slice(offset)
+          if (offset >= session.bufferSize) return ""
+          return session.chunks.join("").slice(offset)
         })()
 
         if (data) {
@@ -373,6 +378,10 @@ export namespace Pty {
 
   export async function get(id: PtyID) {
     return runPromise((svc) => svc.get(id))
+  }
+
+  export function count() {
+    return total
   }
 
   export async function resize(id: PtyID, cols: number, rows: number) {
