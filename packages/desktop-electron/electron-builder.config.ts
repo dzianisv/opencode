@@ -52,6 +52,9 @@ const getBase = (): Configuration => ({
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
     entitlementsInherit: "resources/entitlements.plist",
+    extendInfo: {
+      NSMicrophoneUsageDescription: "OpenCode needs microphone access for voice input.",
+    },
     notarize: true,
     target: ["dmg", "zip"],
   },
