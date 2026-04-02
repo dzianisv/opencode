@@ -21,6 +21,9 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
+import { Instance } from "@/project/instance"
+import { InstanceBootstrap } from "@/project/bootstrap"
+import { WorkspaceContext } from "@/control-plane/workspace-context"
 
 const log = Log.create({ service: "server" })
 
@@ -579,6 +582,7 @@ export const SessionRoutes = lazy(() =>
               .min(0)
               .optional()
               .meta({ description: "Maximum number of messages to return" }),
+            preview: z.coerce.boolean().optional().meta({ description: "Hint that the response is for sidebar preview" }),
             before: z
               .string()
               .optional()
@@ -848,9 +852,22 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async () => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          SessionPrompt.prompt({ ...body, sessionID }).catch((err) => {
+          const directory = Instance.directory
+          const workspaceID = WorkspaceContext.workspaceID
+          void WorkspaceContext.provide({
+            workspaceID,
+            fn() {
+              return Instance.provide({
+                directory,
+                init: InstanceBootstrap,
+                fn() {
+                  return SessionPrompt.prompt({ ...body, sessionID })
+                },
+              })
+            },
+          }).catch((err) => {
             log.error("prompt_async failed", { sessionID, error: err })
-            Bus.publish(Session.Event.Error, {
+            return Bus.publish(Session.Event.Error, {
               sessionID,
               error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
             })

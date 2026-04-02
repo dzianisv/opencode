@@ -27,8 +27,8 @@ import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { Button } from "@opencode-ai/ui/button"
 import { showToast } from "@opencode-ai/ui/toast"
-import { checksum } from "@opencode-ai/util/encode"
-import { useSearchParams } from "@solidjs/router"
+import { base64Encode, checksum } from "@opencode-ai/util/encode"
+import { useNavigate, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
@@ -42,6 +42,12 @@ import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
+import {
+  reviewDone,
+  reviewPick,
+  reviewPrompt,
+  reviewPromptCheck,
+} from "@/pages/session/auto-review"
 import {
   createOpenReviewFile,
   createSessionTabs,
@@ -58,15 +64,13 @@ import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { Identifier } from "@/utils/id"
-import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
 import { formatServerError } from "@/utils/server-errors"
 
 const emptyUserMessages: UserMessage[] = []
-type FollowupItem = FollowupDraft & { id: string }
-type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
-const emptyFollowups: FollowupItem[] = []
+type QueuedFollowup = FollowupDraft & { id: string; autoReviewSource?: string }
+const emptyFollowups: QueuedFollowup[] = []
 
 type ChangeMode = "git" | "branch" | "session" | "turn"
 type VcsMode = "git" | "branch"
@@ -324,6 +328,7 @@ export default function Page() {
   const sync = useSync()
   const dialog = useDialog()
   const language = useLanguage()
+  const navigate = useNavigate()
   const sdk = useSDK()
   const settings = useSettings()
   const prompt = usePrompt()
@@ -566,8 +571,6 @@ export default function Page() {
   let reviewFrame: number | undefined
   let refreshFrame: number | undefined
   let refreshTimer: number | undefined
-  let todoFrame: number | undefined
-  let todoTimer: number | undefined
   let diffFrame: number | undefined
   let diffTimer: number | undefined
   const vcsTask = new Map<VcsMode, Promise<void>>()
@@ -833,6 +836,8 @@ export default function Page() {
             if (!info) return true
             return Date.now() - info.at > SESSION_PREFETCH_TTL
           })()
+      const todos = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
+
       untrack(() => {
         void sync.session.sync(id)
       })
@@ -844,45 +849,11 @@ export default function Page() {
           if (params.id !== id) return
           untrack(() => {
             if (stale) void sync.session.sync(id, { force: true })
+            void sync.session.todo(id, todos ? { force: true } : undefined)
           })
         }, 0)
       })
     }),
-  )
-
-  createEffect(
-    on(
-      () => {
-        const id = params.id
-        return [
-          sdk.directory,
-          id,
-          id ? (sync.data.session_status[id]?.type ?? "idle") : "idle",
-          id ? composer.blocked() : false,
-        ] as const
-      },
-      ([dir, id, status, blocked]) => {
-        if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
-        if (todoTimer !== undefined) window.clearTimeout(todoTimer)
-        todoFrame = undefined
-        todoTimer = undefined
-        if (!id) return
-        if (status === "idle" && !blocked) return
-        const cached = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
-
-        todoFrame = requestAnimationFrame(() => {
-          todoFrame = undefined
-          todoTimer = window.setTimeout(() => {
-            todoTimer = undefined
-            if (sdk.directory !== dir || params.id !== id) return
-            untrack(() => {
-              void sync.session.todo(id, cached ? { force: true } : undefined)
-            })
-          }, 0)
-        })
-      },
-      { defer: true },
-    ),
   )
 
   createEffect(
@@ -1242,9 +1213,6 @@ export default function Page() {
         onLineCommentUpdate={updateCommentInContext}
         onLineCommentDelete={removeCommentFromContext}
         lineCommentActions={reviewCommentActions()}
-        commentMentions={{
-          items: file.searchFilesAndDirectories,
-        }}
         comments={comments.all()}
         focusedComment={comments.focus()}
         onFocusedCommentChange={comments.setFocus}
@@ -1687,6 +1655,110 @@ export default function Page() {
     setFollowup("paused", draft.sessionID, undefined)
   }
 
+  const isAutoReviewPrompt = (id: string) => reviewPromptCheck(line(id))
+
+  const response = (id: string) =>
+    (sync.data.part[id] ?? [])
+      .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
+      .join("")
+      .trim()
+
+  const doneAssistant = createMemo(() => {
+    const id = params.id
+    if (!id) return
+    const list = sync.data.message[id] ?? []
+    return list.findLast(
+      (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed === "number",
+    )
+  })
+
+  const resolveReview = (assistant: AssistantMessage) => {
+    const current = local.model.current()
+    const configured = (() => {
+      const model = sync.data.config.auto_review?.model
+      if (!model) return
+      const cut = model.indexOf("/")
+      if (cut <= 0 || cut >= model.length - 1) return
+      return {
+        providerID: model.slice(0, cut),
+        modelID: model.slice(cut + 1),
+      }
+    })()
+    return reviewPick({
+      list: local.model.list(),
+      used: {
+        providerID: assistant.providerID,
+        modelID: assistant.modelID,
+      },
+      review: configured ?? settings.models.reviewModel(),
+      base: settings.models.defaultModel(),
+      now: current
+        ? {
+            providerID: current.provider.id,
+            modelID: current.id,
+          }
+        : undefined,
+    })
+  }
+
+  const queueAutoReview = (sessionID: string, assistant: AssistantMessage) => {
+    const queued = followup.items[sessionID] ?? []
+    if (queued.some((item) => item.autoReviewSource === assistant.id)) {
+      setFollowup("autoReview", sessionID, assistant.id)
+      return
+    }
+
+    const review = resolveReview(assistant)
+    const agent = assistant.agent ?? local.agent.current()?.name
+    if (!review || !agent) return
+
+    const previous = `${assistant.providerID}/${assistant.modelID}`
+    const text = reviewPrompt(previous)
+
+    setFollowup("items", sessionID, (items) => [
+      ...(items ?? []),
+      {
+        id: Identifier.ascending("message"),
+        autoReviewSource: assistant.id,
+        sessionID,
+        sessionDirectory: sdk.directory,
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+        context: [],
+        agent,
+        model: review.model,
+        variant: review.variant,
+      },
+    ])
+    setFollowup("autoReview", sessionID, assistant.id)
+    setFollowup("failed", sessionID, undefined)
+    setFollowup("paused", sessionID, undefined)
+  }
+
+  createEffect(() => {
+    const sessionID = params.id
+    if (!sessionID) return
+    if (!settings.models.autoReview()) return
+    if (composer.blocked()) return
+
+    const assistant = doneAssistant()
+    if (!assistant) return
+    if (followup.autoReview[sessionID] === assistant.id) return
+
+    const user = visibleUserMessages().at(-1)
+    if (!user) return
+    if (isAutoReviewPrompt(user.id)) {
+      if (reviewDone(response(assistant.id))) {
+        setFollowup("autoReview", sessionID, assistant.id)
+        return
+      }
+
+      queueAutoReview(sessionID, assistant)
+      return
+    }
+
+    queueAutoReview(sessionID, assistant)
+  })
+
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
 
   const sendFollowup = (sessionID: string, id: string, opts?: { manual?: boolean }) => {
@@ -1791,6 +1863,26 @@ export default function Page() {
   const reverting = createMemo(() => revertMutation.isPending || restoreMutation.isPending)
   const restoring = createMemo(() => (restoreMutation.isPending ? restoreMutation.variables : undefined))
 
+  const fork = (input: { sessionID: string; messageID: string }) => {
+    const value = draft(input.messageID)
+    const dir = base64Encode(sdk.directory)
+    return sdk.client.session
+      .fork(input)
+      .then((result) => {
+        const next = result.data
+        if (!next) {
+          showToast({
+            variant: "error",
+            title: language.t("common.requestFailed"),
+          })
+          return
+        }
+        prompt.set(value, undefined, { dir, id: next.id })
+        navigate(`/${dir}/session/${next.id}`)
+      })
+      .catch(fail)
+  }
+
   const revert = (input: { sessionID: string; messageID: string }) => {
     if (reverting()) return
     return revertMutation.mutateAsync(input)
@@ -1809,7 +1901,7 @@ export default function Page() {
       .map((item) => ({ id: item.id, text: line(item.id) }))
   })
 
-  const actions = { revert }
+  const actions = { fork, revert }
 
   createEffect(() => {
     const sessionID = params.id
@@ -1869,15 +1961,6 @@ export default function Page() {
     consumePendingMessage: layout.pendingMessage.consume,
   })
 
-  createEffect(
-    on(
-      () => params.id,
-      (id) => {
-        if (!id) requestAnimationFrame(() => inputRef?.focus())
-      },
-    ),
-  )
-
   onMount(() => {
     makeEventListener(document, "keydown", handleKeyDown)
   })
@@ -1886,8 +1969,6 @@ export default function Page() {
     if (reviewFrame !== undefined) cancelAnimationFrame(reviewFrame)
     if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
     if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
-    if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
-    if (todoTimer !== undefined) window.clearTimeout(todoTimer)
     if (diffFrame !== undefined) cancelAnimationFrame(diffFrame)
     if (diffTimer !== undefined) window.clearTimeout(diffTimer)
     if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame)

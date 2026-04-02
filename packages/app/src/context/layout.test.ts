@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout"
+import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys, workspaceState } from "./layout"
 
 describe("layout session-key helpers", () => {
   test("couples touch and scroll seed in order", () => {
@@ -65,5 +65,20 @@ describe("pruneSessionKeys", () => {
     })
 
     expect(drop).toEqual([])
+  })
+})
+
+describe("workspaceState", () => {
+  test("prefers stored values over git fallbacks", () => {
+    expect(workspaceState(false, true, true)).toBe(false)
+  })
+
+  test("uses git fallback when no per-project value exists", () => {
+    expect(workspaceState(undefined, true, false)).toBe(true)
+  })
+
+  test("falls back to sidebar default when project and git values are unset", () => {
+    expect(workspaceState(undefined, undefined, false)).toBe(false)
+    expect(workspaceState(undefined, undefined, true)).toBe(true)
   })
 })
