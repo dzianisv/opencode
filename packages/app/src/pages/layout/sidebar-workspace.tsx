@@ -40,7 +40,7 @@ export type WorkspaceSidebarContext = {
   setHoverSession: (id: string | undefined) => void
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
-  archiveSession: (session: Session) => Promise<void>
+  archiveSession: (session: Session) => Promise<boolean>
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
   editorOpen: (id: string) => boolean
@@ -308,6 +308,7 @@ export const SortableWorkspace = (props: {
   sortNow: Accessor<number>
   mobile?: boolean
   popover?: boolean
+  depth?: number
 }): JSX.Element => {
   const navigate = useNavigate()
   const params = useParams()
@@ -373,6 +374,8 @@ export const SortableWorkspace = (props: {
     globalSync.child(props.directory, { bootstrap: true })
   })
 
+  const depth = () => props.depth ?? 0
+
   return (
     <div
       // @ts-ignore
@@ -381,6 +384,7 @@ export const SortableWorkspace = (props: {
         "opacity-30": sortable.isActiveDraggable,
         "opacity-50 pointer-events-none": busy(),
       }}
+      style={{ "padding-left": depth() > 0 ? `${depth() * 12}px` : undefined }}
     >
       <Collapsible variant="ghost" open={open()} class="shrink-0" onOpenChange={openWrapper}>
         <div class="py-1">
@@ -465,11 +469,12 @@ export const LocalWorkspace = (props: {
 }): JSX.Element => {
   const globalSync = useGlobalSync()
   const language = useLanguage()
+  const dir = createMemo(() => props.ctx.currentDir() || props.project.worktree)
   const workspace = createMemo(() => {
-    const [store, setStore] = globalSync.child(props.project.worktree)
+    const [store, setStore] = globalSync.child(dir())
     return { store, setStore }
   })
-  const slug = createMemo(() => base64Encode(props.project.worktree))
+  const slug = createMemo(() => base64Encode(dir()))
   const sessions = createMemo(() => sortedRootSessions(workspace().store, props.sortNow()))
   const children = createMemo(() => childMapByParent(workspace().store.session))
   const booted = createMemo((prev) => prev || workspace().store.status === "complete", false)
@@ -478,8 +483,13 @@ export const LocalWorkspace = (props: {
   const hasMore = createMemo(() => workspace().store.sessionTotal > count())
   const loadMore = async () => {
     workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
-    await globalSync.project.loadSessions(props.project.worktree)
+    await globalSync.project.loadSessions(dir())
   }
+
+  createEffect(() => {
+    globalSync.child(dir(), { bootstrap: true })
+    void globalSync.project.loadSessions(dir())
+  })
 
   return (
     <div

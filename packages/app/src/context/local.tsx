@@ -4,6 +4,7 @@ import { useParams } from "@solidjs/router"
 import { batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
+import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
 import { modelEnabled, modelProbe } from "@/testing/model-selection"
 import { Persist, persisted } from "@/utils/persist"
@@ -58,6 +59,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const params = useParams()
     const sdk = useSDK()
     const sync = useSync()
+    const settings = useSettings()
     const providers = useProviders()
     const models = useModels()
 
@@ -154,6 +156,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
     }
 
+    const preferredModel = () => {
+      const model = settings.models.defaultModel()
+      if (!model) return
+      if (validModel(model)) return model
+    }
+
     const defaultModel = () => {
       const defaults = providers.default()
       for (const provider of providers.connected()) {
@@ -226,6 +234,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const item = firstModel(
         () => scope()?.model,
         () => agent.current()?.model,
+        preferredModel,
         fallback,
       )
       if (!item) return undefined

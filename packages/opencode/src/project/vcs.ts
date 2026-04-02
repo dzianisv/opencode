@@ -174,7 +174,7 @@ export namespace Vcs {
                   }
                 }),
               ),
-              Effect.forkScoped,
+              (unsubscribe) => Effect.sync(unsubscribe),
             )
 
             return value

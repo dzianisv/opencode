@@ -13,8 +13,7 @@ export const promptVariantSelector = '[data-component="prompt-variant-control"]'
 export const settingsLanguageSelectSelector = '[data-action="settings-language"]'
 export const settingsColorSchemeSelector = '[data-action="settings-color-scheme"]'
 export const settingsThemeSelector = '[data-action="settings-theme"]'
-export const settingsCodeFontSelector = '[data-action="settings-code-font"]'
-export const settingsUIFontSelector = '[data-action="settings-ui-font"]'
+export const settingsFontSelector = '[data-action="settings-font"]'
 export const settingsNotificationsAgentSelector = '[data-action="settings-notifications-agent"]'
 export const settingsNotificationsPermissionsSelector = '[data-action="settings-notifications-permissions"]'
 export const settingsNotificationsErrorsSelector = '[data-action="settings-notifications-errors"]'
@@ -23,6 +22,7 @@ export const settingsSoundsPermissionsSelector = '[data-action="settings-sounds-
 export const settingsSoundsErrorsSelector = '[data-action="settings-sounds-errors"]'
 export const settingsUpdatesStartupSelector = '[data-action="settings-updates-startup"]'
 export const settingsReleaseNotesSelector = '[data-action="settings-release-notes"]'
+export const settingsVoiceAutoSpeakSelector = '[data-action="settings-voice-autospeak"]'
 
 const sidebarNavSelector = '[data-component="sidebar-nav-desktop"]'
 

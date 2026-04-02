@@ -70,11 +70,15 @@ export type SessionItemProps = {
   session: Session
   list: Session[]
   navList?: Accessor<Session[]>
+  lookup?: ReadonlyMap<string, Session>
+  prefixes?: ReadonlyMap<string, string>
+  prefix?: string
   slug: string
   mobile?: boolean
   dense?: boolean
   popover?: boolean
-  children: Map<string, string[]>
+  children: ReadonlyMap<string, string[]>
+  depth?: number
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   nav: Accessor<HTMLElement | undefined>
@@ -82,14 +86,16 @@ export type SessionItemProps = {
   setHoverSession: (id: string | undefined) => void
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
-  archiveSession: (session: Session) => Promise<void>
+  archiveSession: (session: Session) => Promise<boolean>
 }
 
 const SessionRow = (props: {
   session: Session
+  prefix?: string
   slug: string
   mobile?: boolean
   dense?: boolean
+  depth?: number
   tint: Accessor<string | undefined>
   isWorking: Accessor<boolean>
   hasPermissions: Accessor<boolean>
@@ -168,11 +174,7 @@ const SessionHoverPreview = (props: {
       placement="right-start"
       gutter={16}
       shift={-2}
-      trigger={
-        <div ref={ref} class="min-w-0 w-full">
-          {props.trigger}
-        </div>
-      }
+      trigger={<div ref={ref}>{props.trigger}</div>}
       open={props.hoverSession() === props.session.id}
       onOpenChange={(open) => {
         if (!open) {
@@ -290,12 +292,15 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
     const text = parts.find((part): part is TextPart => part?.type === "text" && !part.synthetic && !part.ignored)
     return text?.text
   }
+  const prefix = createMemo(() => props.prefix ?? props.prefixes?.get(props.session.id))
   const item = (
     <SessionRow
       session={props.session}
+      prefix={prefix()}
       slug={props.slug}
       mobile={props.mobile}
       dense={props.dense}
+      depth={props.depth}
       tint={tint}
       isWorking={isWorking}
       hasPermissions={hasPermissions}
@@ -349,20 +354,56 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
                 if (!isActive())
                   layout.pendingMessage.set(`${base64Encode(props.session.directory)}/${props.session.id}`, message.id)
 
-                navigate(`${props.slug}/session/${props.session.id}#message-${message.id}`)
-              }}
-              trigger={item}
-            />
-          </Show>
-        </div>
+  return (
+    <>
+      <div
+        data-session-id={props.session.id}
+        class="group/session relative w-full rounded-md cursor-default pr-3 transition-colors
+               hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active"
+        style={{ "padding-left": pad() }}
+      >
+        <Show
+          when={hoverEnabled()}
+          fallback={
+            <Tooltip
+              placement={props.mobile ? "bottom" : "right"}
+              value={prefix() ? `${prefix()} · ${props.session.title}` : props.session.title}
+              gutter={10}
+            >
+              {item}
+            </Tooltip>
+          }
+        >
+          <SessionHoverPreview
+            mobile={props.mobile}
+            nav={props.nav}
+            hoverSession={props.hoverSession}
+            session={props.session}
+            sidebarHovering={props.sidebarHovering}
+            hoverReady={hoverReady}
+            hoverMessages={hoverMessages}
+            language={language}
+            isActive={isActive}
+            slug={props.slug}
+            setHoverSession={props.setHoverSession}
+            messageLabel={messageLabel}
+            onMessageSelect={(message) => {
+              if (!isActive())
+                layout.pendingMessage.set(`${base64Encode(props.session.directory)}/${props.session.id}`, message.id)
+
+              navigate(`${props.slug}/session/${props.session.id}#message-${message.id}`)
+            }}
+            trigger={item}
+          />
+        </Show>
 
         <div
-          class="shrink-0 overflow-hidden transition-[width,opacity]"
+          class={`absolute ${props.dense ? "top-0.5 right-0.5" : "top-1 right-1"} flex items-center gap-0.5 transition-opacity`}
           classList={{
-            "w-6 opacity-100 pointer-events-auto": !!props.mobile,
-            "w-0 opacity-0 pointer-events-none": !props.mobile,
-            "group-hover/session:w-6 group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
-            "group-focus-within/session:w-6 group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
+            "opacity-100 pointer-events-auto": !!props.mobile,
+            "opacity-0 pointer-events-none": !props.mobile,
+            "group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
+            "group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
           }}
         >
           <Tooltip value={language.t("common.archive")} placement="top">
@@ -380,7 +421,32 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
           </Tooltip>
         </div>
       </div>
-    </div>
+      <For each={childSessions()}>
+        {(child) => (
+          <SessionItem
+            session={child}
+            list={props.list}
+            navList={props.navList}
+            lookup={props.lookup}
+            prefixes={props.prefixes}
+            slug={props.slug}
+            mobile={props.mobile}
+            dense={props.dense}
+            popover={props.popover}
+            children={props.children}
+            depth={depth() + 1}
+            sidebarExpanded={props.sidebarExpanded}
+            sidebarHovering={props.sidebarHovering}
+            nav={props.nav}
+            hoverSession={props.hoverSession}
+            setHoverSession={props.setHoverSession}
+            clearHoverProjectSoon={props.clearHoverProjectSoon}
+            prefetchSession={props.prefetchSession}
+            archiveSession={props.archiveSession}
+          />
+        )}
+      </For>
+    </>
   )
 }
 
@@ -400,26 +466,30 @@ export const NewSessionItem = (props: {
     <A
       href={`/${props.slug}/session`}
       end
-      class={`flex items-center gap-1 min-w-0 w-full text-left focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
+      class={`flex items-center justify-between gap-3 min-w-0 text-left w-full focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
       onClick={() => {
         props.setHoverSession(undefined)
         if (layout.sidebar.opened()) return
         props.clearHoverProjectSoon()
       }}
     >
-      <div class="shrink-0 size-6 flex items-center justify-center">
-        <Icon name="new-session" size="small" class="text-icon-weak" />
+      <div class="flex items-center gap-1 w-full">
+        <div class="shrink-0 size-6 flex items-center justify-center">
+          <Icon name="new-session" size="small" class="text-icon-weak" />
+        </div>
+        <span class="text-14-regular text-text-strong grow-1 min-w-0 overflow-hidden text-ellipsis truncate">
+          {label}
+        </span>
       </div>
-      <span class="text-14-regular text-text-strong min-w-0 flex-1 truncate">{label}</span>
     </A>
   )
 
   return (
-    <div class="group/session relative w-full min-w-0 rounded-md cursor-default transition-colors pl-2 pr-3 hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active">
+    <div class="group/session relative w-full rounded-md cursor-default transition-colors pl-2 pr-3 hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active">
       <Show
         when={!tooltip()}
         fallback={
-          <Tooltip placement={props.mobile ? "bottom" : "right"} value={label} gutter={10} class="min-w-0 w-full">
+          <Tooltip placement={props.mobile ? "bottom" : "right"} value={label} gutter={10}>
             {item}
           </Tooltip>
         }

@@ -17,6 +17,7 @@ import {
   setWorkspacesEnabled,
   slugFromUrl,
   waitDir,
+  waitSession,
   waitSlug,
 } from "../actions"
 import { inlineInputSelector, workspaceItemSelector } from "../selectors"
@@ -34,21 +35,7 @@ async function setupWorkspaceTest(page: Page, project: { slug: string; trackDire
   project.trackDirectory(next.directory)
 
   await openSidebar(page)
-
-  await expect
-    .poll(
-      async () => {
-        const item = page.locator(workspaceItemSelector(next.slug)).first()
-        try {
-          await item.hover({ timeout: 500 })
-          return true
-        } catch {
-          return false
-        }
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true)
+  await waitWorkspaceItem(page, next.slug)
 
   return { rootSlug, slug: next.slug, directory: next.directory }
 }
