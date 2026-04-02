@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test"
-import { extractResponseText, formatPromptTooLargeError } from "../../src/cli/cmd/github"
+import { extractResponseText, formatPromptTooLargeError, buildIssuePrompt } from "../../src/cli/cmd/github"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 
@@ -194,5 +194,114 @@ describe("formatPromptTooLargeError", () => {
     expect(result).toInclude("img1.png (3 KB)")
     expect(result).toInclude("img2.jpg (6 KB)")
     expect(result).toInclude("img3.gif (9 KB)")
+  })
+})
+
+describe("buildIssuePrompt", () => {
+  test("builds prompt with title and body", () => {
+    const result = buildIssuePrompt({
+      number: 42,
+      title: "Fix login bug",
+      body: "Users cannot log in with SSO.",
+    })
+    expect(result).toBe("Issue #42: Fix login bug\n\nUsers cannot log in with SSO.")
+  })
+
+  test("uses fallback when body is null", () => {
+    const result = buildIssuePrompt({
+      number: 1,
+      title: "No body issue",
+      body: null,
+    })
+    expect(result).toInclude("No description provided.")
+    expect(result).toStartWith("Issue #1: No body issue")
+  })
+
+  test("uses fallback when body is undefined", () => {
+    const result = buildIssuePrompt({
+      number: 1,
+      title: "No body issue",
+    })
+    expect(result).toInclude("No description provided.")
+  })
+
+  test("uses fallback when body is empty string", () => {
+    const result = buildIssuePrompt({
+      number: 5,
+      title: "Empty body",
+      body: "",
+    })
+    expect(result).toInclude("No description provided.")
+  })
+
+  test("includes labels from string array", () => {
+    const result = buildIssuePrompt({
+      number: 10,
+      title: "Labeled issue",
+      body: "Some body",
+      labels: ["bug", "priority"],
+    })
+    expect(result).toInclude("Labels: bug, priority")
+  })
+
+  test("includes labels from object array", () => {
+    const result = buildIssuePrompt({
+      number: 10,
+      title: "Labeled issue",
+      body: "Some body",
+      labels: [{ name: "enhancement" }, { name: "help wanted" }],
+    })
+    expect(result).toInclude("Labels: enhancement, help wanted")
+  })
+
+  test("handles mixed label types (string and object)", () => {
+    const result = buildIssuePrompt({
+      number: 10,
+      title: "Mixed labels",
+      body: "Body",
+      labels: ["bug", { name: "urgent" }],
+    })
+    expect(result).toInclude("Labels: bug, urgent")
+  })
+
+  test("omits labels line when labels array is empty", () => {
+    const result = buildIssuePrompt({
+      number: 3,
+      title: "No labels",
+      body: "Body text",
+      labels: [],
+    })
+    expect(result).not.toInclude("Labels:")
+    expect(result).toBe("Issue #3: No labels\n\nBody text")
+  })
+
+  test("omits labels line when labels is undefined", () => {
+    const result = buildIssuePrompt({
+      number: 3,
+      title: "No labels",
+      body: "Body text",
+    })
+    expect(result).not.toInclude("Labels:")
+  })
+
+  test("filters out labels with missing name", () => {
+    const result = buildIssuePrompt({
+      number: 7,
+      title: "Partial labels",
+      body: "Body",
+      labels: [{ name: "valid" }, { name: undefined } as any, { name: "" }],
+    })
+    expect(result).toInclude("Labels: valid")
+  })
+
+  test("preserves markdown formatting in body", () => {
+    const body = "## Steps to reproduce\n\n1. Open the app\n2. Click login\n\n```js\nconsole.log('test')\n```"
+    const result = buildIssuePrompt({
+      number: 99,
+      title: "Markdown body",
+      body,
+    })
+    expect(result).toInclude("## Steps to reproduce")
+    expect(result).toInclude("```js")
   })
 })
