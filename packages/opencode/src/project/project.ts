@@ -11,7 +11,7 @@ import { ProjectID } from "./schema"
 import { Effect, Layer, Path, Scope, ServiceMap, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { makeRuntime } from "@/effect/run-service"
+import { makeRunPromise } from "@/effect/run-service"
 import { AppFileSystem } from "@/filesystem"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 
@@ -111,7 +111,7 @@ export namespace Project {
   > = Layer.effect(
     Service,
     Effect.gen(function* () {
-      const fs = yield* AppFileSystem.Service
+      const fsys = yield* AppFileSystem.Service
       const pathSvc = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
@@ -152,10 +152,47 @@ export namespace Project {
         return pathSvc.resolve(cwd, name)
       }
 
+      const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item, index) => item === b[index])
+
+      const existingDirectories = Effect.fnUntraced(function* (dirs: string[]) {
+        const unique = [...new Set(dirs.map((dir) => AppFileSystem.resolve(dir)))]
+        return yield* Effect.forEach(
+          unique,
+          (dir) =>
+            fsys.exists(dir).pipe(
+              Effect.orDie,
+              Effect.map((exists) => (exists ? dir : undefined)),
+            ),
+          { concurrency: "unbounded" },
+        ).pipe(Effect.map((items) => items.filter((item): item is string => item !== undefined)))
+      })
+
+      const gitWorktrees = Effect.fnUntraced(function* (root: string) {
+        const list = yield* git(["worktree", "list", "--porcelain"], { cwd: root })
+        if (list.code !== 0) {
+          log.warn("failed to enumerate git worktrees", {
+            directory: root,
+            stderr: list.stderr.trim(),
+            stdout: list.text.trim(),
+          })
+          return undefined
+        }
+
+        const primary = AppFileSystem.resolve(root)
+        const dirs = list.text
+          .split("\n")
+          .map((line) => line.trim())
+          .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length).trim()] : []))
+          .map((dir) => AppFileSystem.resolve(resolveGitPath(root, dir)))
+          .filter((dir) => dir !== primary)
+
+        return yield* existingDirectories(dirs)
+      })
+
       const scope = yield* Scope.Scope
 
       const readCachedProjectId = Effect.fnUntraced(function* (dir: string) {
-        return yield* fs.readFileString(pathSvc.join(dir, "opencode")).pipe(
+        return yield* fsys.readFileString(pathSvc.join(dir, "opencode")).pipe(
           Effect.map((x) => x.trim()),
           Effect.map(ProjectID.make),
           Effect.catch(() => Effect.succeed(undefined)),
@@ -169,7 +206,7 @@ export namespace Project {
         type DiscoveryResult = { id: ProjectID; worktree: string; sandbox: string; vcs: Info["vcs"] }
 
         const data: DiscoveryResult = yield* Effect.gen(function* () {
-          const dotgitMatches = yield* fs.up({ targets: [".git"], start: directory }).pipe(Effect.orDie)
+          const dotgitMatches = yield* fsys.up({ targets: [".git"], start: directory }).pipe(Effect.orDie)
           const dotgit = dotgitMatches[0]
 
           if (!dotgit) {
@@ -222,7 +259,7 @@ export namespace Project {
 
             id = roots[0] ? ProjectID.make(roots[0]) : undefined
             if (id) {
-              yield* fs.writeFileString(pathSvc.join(worktree, ".git", "opencode"), id).pipe(Effect.ignore)
+              yield* fsys.writeFileString(pathSvc.join(worktree, ".git", "opencode"), id).pipe(Effect.ignore)
             }
           }
 
@@ -265,17 +302,12 @@ export namespace Project {
           vcs: data.vcs,
           time: { ...existing.time, updated: Date.now() },
         }
-        if (data.sandbox !== result.worktree && !result.sandboxes.includes(data.sandbox))
-          result.sandboxes.push(data.sandbox)
-        result.sandboxes = yield* Effect.forEach(
-          result.sandboxes,
-          (s) =>
-            fs.exists(s).pipe(
-              Effect.orDie,
-              Effect.map((exists) => (exists ? s : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
+        const discovered =
+          data.vcs === "git" && data.id !== ProjectID.global ? yield* gitWorktrees(result.worktree) : undefined
+        result.sandboxes = discovered ?? (yield* existingDirectories(result.sandboxes))
+        const sandbox = AppFileSystem.resolve(data.sandbox)
+        const worktree = AppFileSystem.resolve(result.worktree)
+        if (sandbox !== worktree && !result.sandboxes.includes(sandbox)) result.sandboxes.push(sandbox)
 
         yield* db((d) =>
           d
@@ -329,7 +361,7 @@ export namespace Project {
         if (input.icon?.override) return
         if (input.icon?.url) return
 
-        const matches = yield* fs
+        const matches = yield* fsys
           .glob("**/favicon.{ico,png,svg,jpg,jpeg,webp}", {
             cwd: input.worktree,
             absolute: true,
@@ -339,7 +371,7 @@ export namespace Project {
         const shortest = matches.sort((a, b) => a.length - b.length)[0]
         if (!shortest) return
 
-        const buffer = yield* fs.readFile(shortest).pipe(Effect.orDie)
+        const buffer = yield* fsys.readFile(shortest).pipe(Effect.orDie)
         const base64 = Buffer.from(buffer).toString("base64")
         const mime = AppFileSystem.mimeType(shortest)
         const url = `data:${mime};base64,${base64}`
@@ -397,15 +429,18 @@ export namespace Project {
         const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
         if (!row) return []
         const data = fromRow(row)
-        return yield* Effect.forEach(
-          data.sandboxes,
-          (dir) =>
-            fs.isDir(dir).pipe(
-              Effect.orDie,
-              Effect.map((ok) => (ok ? dir : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
+        const next = (data.vcs === "git" ? yield* gitWorktrees(data.worktree) : undefined) ?? (yield* existingDirectories(data.sandboxes))
+        if (sameList(data.sandboxes, next)) return next
+        const result = yield* db((d) =>
+          d
+            .update(ProjectTable)
+            .set({ sandboxes: next, time_updated: Date.now() })
+            .where(eq(ProjectTable.id, id))
+            .returning()
+            .get(),
+        )
+        if (result) yield* emitUpdated(fromRow(result))
+        return next
       })
 
       const addSandbox = Effect.fn("Project.addSandbox")(function* (id: ProjectID, directory: string) {
@@ -457,11 +492,12 @@ export namespace Project {
   )
 
   export const defaultLayer = layer.pipe(
-    Layer.provide(CrossSpawnSpawner.defaultLayer),
+    Layer.provide(CrossSpawnSpawner.layer),
     Layer.provide(AppFileSystem.defaultLayer),
+    Layer.provide(NodeFileSystem.layer),
     Layer.provide(NodePath.layer),
   )
-  const { runPromise } = makeRuntime(Service, defaultLayer)
+  const runPromise = makeRunPromise(Service, defaultLayer)
 
   // ---------------------------------------------------------------------------
   // Promise-based API (delegates to Effect service via runPromise)
