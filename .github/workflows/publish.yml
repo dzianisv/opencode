@@ -33,7 +33,7 @@ permissions:
 jobs:
   version:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.repository == 'anomalyco/opencode'
+    if: contains(fromJSON('["anomalyco/opencode","VibeTechnologies/opencode","vibetechnologies/opencode","dzianisv/opencode"]'), github.repository)
     steps:
       - uses: actions/checkout@v3
         with:
@@ -50,7 +50,7 @@ jobs:
 
       - name: Install OpenCode
         if: inputs.bump || inputs.version
-        run: bun i -g opencode-ai
+        run: bun i -g @vibetechnologies/opencode || bun i -g opencode-ai
 
       - id: version
         run: |
@@ -70,7 +70,7 @@ jobs:
   build-cli:
     needs: version
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.repository == 'anomalyco/opencode'
+    if: contains(fromJSON('["anomalyco/opencode","VibeTechnologies/opencode","vibetechnologies/opencode","dzianisv/opencode"]'), github.repository)
     steps:
       - uses: actions/checkout@v3
         with:
@@ -625,5 +625,6 @@ jobs:
           AUR_KEY: ${{ secrets.AUR_KEY }}
           GITHUB_TOKEN: ${{ steps.committer.outputs.token }}
           GH_REPO: ${{ needs.version.outputs.repo }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.NODE_AUTH_TOKEN }}
           NPM_CONFIG_PROVENANCE: false
           LATEST_YML_DIR: /tmp/latest-yml
