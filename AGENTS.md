@@ -3,6 +3,16 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - Prefer automation: execute requested actions without confirmation unless blocked by missing info or safety/irreversibility.
+- App e2e note: `bun test:e2e` expects a backend at `127.0.0.1:4096`; use `bun test:e2e:local -- -- <spec>` when running tests in isolation.
+
+## Devx
+
+- If a task has an upstream issue (for example in `anomalyco/opencode`), keep that issue updated while working.
+- When any commit/PR/merge relates to an upstream issue, add an upstream issue comment with:
+  - what changed
+  - commit SHA and PR link
+  - current status (in progress, merged, or blocked)
+- Do not wait until the end of the task; post updates as soon as relevant commits or merges happen.
 
 ## Style Guide
 
@@ -122,6 +132,28 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+
+## Memory Panic Triage
+
+If the user reports a panic, OOM, runaway RSS, or unexplained restarts, analyze memory artifacts before guessing.
+
+1. Capture the current state.
+   Run the relevant package-scoped checks first, such as `bun run --cwd packages/opencode profile:memory:wait` for a waiting server or `bun run --cwd packages/opencode profile:memory:workload` for a synthetic reproduction.
+2. Inspect the durable artifacts under `~/.local/share/opencode/log`.
+   Start with `dev.log`, the newest `memory-*.ndjson`, and the newest directories in `~/.local/share/opencode/log/memory/`.
+3. Read the snapshot files in order.
+   `sample.json` shows RSS, heap, PTY count, session counts, and instance-cache pressure.
+   `meta.json` shows why the snapshot was taken and the threshold or trigger state.
+   `ps.txt` shows child-process footprint.
+   On macOS, also inspect `vmmap.txt` and `sample.txt`.
+4. Open `heap.heapsnapshot` only after you know the spike is heap-related.
+   Use Chrome DevTools Memory tooling to inspect retained objects and dominators.
+5. Check disk pressure alongside memory pressure.
+   Inspect `~/.local/share/opencode/worktree`, `~/.local/share/opencode/tool-output`, and `~/.local/share/opencode/log` so you do not misdiagnose a disk-exhaustion crash as a heap leak.
+6. Preserve evidence in the issue or PR.
+   Record exact sizes, timestamps, active session counts, and the snapshot trigger reason.
+
+Do not generate repeated snapshots blindly. Retention keeps only the newest `2` heap snapshot directories, so if an older capture matters, attach or summarize it before reproducing again.
 
 ## Type Checking
 

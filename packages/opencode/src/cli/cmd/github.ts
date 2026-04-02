@@ -189,6 +189,21 @@ export function formatPromptTooLargeError(files: { filename: string; content: st
   return `PROMPT_TOO_LARGE: The prompt exceeds the model's context limit.${fileDetails}`
 }
 
+/**
+ * Builds a prompt string from a GitHub issue payload.
+ * Used when an issue is assigned or opened to auto-extract the issue context.
+ */
+export function buildIssuePrompt(issue: {
+  number: number
+  title: string
+  body?: string | null
+  labels?: (string | { name?: string })[]
+}): string {
+  const labels = issue.labels?.map((l) => (typeof l === "string" ? l : l.name)).filter(Boolean)
+  const labelText = labels?.length ? `\nLabels: ${labels.join(", ")}` : ""
+  return `Issue #${issue.number}: ${issue.title}${labelText}\n\n${issue.body || "No description provided."}`
+}
+
 export const GithubCommand = cmd({
   command: "github",
   describe: "manage GitHub agent",
@@ -433,7 +448,7 @@ export const GithubRunCommand = cmd({
         describe: "GitHub personal access token (github_pat_********)",
       }),
   async handler(args) {
-    await bootstrap(process.cwd(), async () => {
+    await bootstrap(process.env.GITHUB_WORKSPACE || process.cwd(), async () => {
       const isMock = args.token || args.event
 
       const context = isMock ? (JSON.parse(args.event!) as Context) : github.context
@@ -770,13 +785,26 @@ export const GithubRunCommand = cmd({
 
       async function getUserPrompt() {
         const customPrompt = process.env["PROMPT"]
-        // For repo events and issues events, PROMPT is required since there's no comment to extract from
-        if (isRepoEvent || isIssuesEvent) {
+        // For repo events, PROMPT is required since there's no comment/issue to extract from
+        if (isRepoEvent) {
           if (!customPrompt) {
-            const eventType = isRepoEvent ? "scheduled and workflow_dispatch" : "issues"
-            throw new Error(`PROMPT input is required for ${eventType} events`)
+            throw new Error(`PROMPT input is required for scheduled and workflow_dispatch events`)
           }
           return { userPrompt: customPrompt, promptFiles: [] }
+        }
+        // For issues events: auto-extract issue title+body when assigned or opened, otherwise require PROMPT
+        if (isIssuesEvent) {
+          if (customPrompt) {
+            return { userPrompt: customPrompt, promptFiles: [] }
+          }
+          const issuesPayload = payload as IssuesEvent
+          if (issuesPayload.action === "assigned" || issuesPayload.action === "opened") {
+            return {
+              userPrompt: buildIssuePrompt(issuesPayload.issue),
+              promptFiles: [],
+            }
+          }
+          throw new Error(`PROMPT input is required for issues events with action "${issuesPayload.action}"`)
         }
 
         if (customPrompt) {
