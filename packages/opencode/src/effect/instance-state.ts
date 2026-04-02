@@ -1,7 +1,5 @@
-import { Effect, Fiber, ScopedCache, Scope, ServiceMap } from "effect"
-import { Instance, type InstanceContext } from "@/project/instance"
-import { Context } from "@/util/context"
-import { InstanceRef } from "./instance-ref"
+import { Effect, ScopedCache, Scope } from "effect"
+import { Instance, type Shape } from "@/project/instance"
 import { registerDisposer } from "./instance-registry"
 
 const TypeId = "~opencode/InstanceState"
@@ -12,34 +10,13 @@ export interface InstanceState<A, E = never, R = never> {
 }
 
 export namespace InstanceState {
-  export const bind = <F extends (...args: any[]) => any>(fn: F): F => {
-    try {
-      return Instance.bind(fn)
-    } catch (err) {
-      if (!(err instanceof Context.NotFound)) throw err
-    }
-    const fiber = Fiber.getCurrent()
-    const ctx = fiber ? ServiceMap.getReferenceUnsafe(fiber.services, InstanceRef) : undefined
-    if (!ctx) return fn
-    return ((...args: any[]) => Instance.restore(ctx, () => fn(...args))) as F
-  }
-
-  export const context = Effect.gen(function* () {
-    return (yield* InstanceRef) ?? Instance.current
-  })
-
-  export const directory = Effect.map(context, (ctx) => ctx.directory)
-
   export const make = <A, E = never, R = never>(
-    init: (ctx: InstanceContext) => Effect.Effect<A, E, R | Scope.Scope>,
+    init: (ctx: Shape) => Effect.Effect<A, E, R | Scope.Scope>,
   ): Effect.Effect<InstanceState<A, E, Exclude<R, Scope.Scope>>, never, R | Scope.Scope> =>
     Effect.gen(function* () {
       const cache = yield* ScopedCache.make<string, A, E, R>({
         capacity: Number.POSITIVE_INFINITY,
-        lookup: () =>
-          Effect.gen(function* () {
-            return yield* init(yield* context)
-          }),
+        lookup: () => init(Instance.current),
       })
 
       const off = registerDisposer((directory) => Effect.runPromise(ScopedCache.invalidate(cache, directory)))
@@ -52,9 +29,7 @@ export namespace InstanceState {
     })
 
   export const get = <A, E, R>(self: InstanceState<A, E, R>) =>
-    Effect.gen(function* () {
-      return yield* ScopedCache.get(self.cache, yield* directory)
-    })
+    Effect.suspend(() => ScopedCache.get(self.cache, Instance.directory))
 
   export const use = <A, E, R, B>(self: InstanceState<A, E, R>, select: (value: A) => B) =>
     Effect.map(get(self), select)
@@ -65,18 +40,8 @@ export namespace InstanceState {
   ) => Effect.flatMap(get(self), select)
 
   export const has = <A, E, R>(self: InstanceState<A, E, R>) =>
-    Effect.gen(function* () {
-      return yield* ScopedCache.has(self.cache, yield* directory)
-    })
+    Effect.suspend(() => ScopedCache.has(self.cache, Instance.directory))
 
   export const invalidate = <A, E, R>(self: InstanceState<A, E, R>) =>
-    Effect.gen(function* () {
-      return yield* ScopedCache.invalidate(self.cache, yield* directory)
-    })
-
-  /**
-   * Effect finalizers run on the fiber scheduler after the original async
-   * boundary, so ALS reads like Instance.directory can be gone by then.
-   */
-  export const withALS = <T>(fn: () => T) => Effect.map(context, (ctx) => Instance.restore(ctx, fn))
+    Effect.suspend(() => ScopedCache.invalidate(self.cache, Instance.directory))
 }
