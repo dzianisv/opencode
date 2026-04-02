@@ -17,6 +17,15 @@ async function rejectAll() {
   }
 }
 
+async function waitForPending(count: number) {
+  for (let i = 0; i < 20; i++) {
+    const list = await Question.list()
+    if (list.length === count) return list
+    await Bun.sleep(0)
+  }
+  return Question.list()
+}
+
 test("ask - returns pending promise", async () => {
   await using tmp = await tmpdir({ git: true })
   await Instance.provide({
@@ -36,6 +45,7 @@ test("ask - returns pending promise", async () => {
         ],
       })
       expect(promise).toBeInstanceOf(Promise)
+      await waitForPending(1)
       await rejectAll()
       await promise.catch(() => {})
     },
@@ -63,7 +73,7 @@ test("ask - adds to pending list", async () => {
         questions,
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       expect(pending.length).toBe(1)
       expect(pending[0].questions).toEqual(questions)
       await rejectAll()
@@ -95,7 +105,7 @@ test("reply - resolves the pending ask with answers", async () => {
         questions,
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       const requestID = pending[0].id
 
       await Question.reply({
@@ -128,7 +138,7 @@ test("reply - removes from pending list", async () => {
         ],
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       expect(pending.length).toBe(1)
 
       await Question.reply({
@@ -178,7 +188,7 @@ test("reject - throws RejectedError", async () => {
         ],
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       await Question.reject(pending[0].id)
 
       await expect(askPromise).rejects.toBeInstanceOf(Question.RejectedError)
@@ -205,7 +215,7 @@ test("reject - removes from pending list", async () => {
         ],
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       expect(pending.length).toBe(1)
 
       await Question.reject(pending[0].id)
@@ -259,7 +269,7 @@ test("ask - handles multiple questions", async () => {
         questions,
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
 
       await Question.reply({
         requestID: pending[0].id,
@@ -301,7 +311,7 @@ test("list - returns all pending requests", async () => {
         ],
       })
 
-      const pending = await Question.list()
+      const pending = await waitForPending(2)
       expect(pending.length).toBe(2)
       await rejectAll()
       p1.catch(() => {})
@@ -357,11 +367,11 @@ test("questions stay isolated by directory", async () => {
 
   const onePending = await Instance.provide({
     directory: one.path,
-    fn: () => Question.list(),
+    fn: () => waitForPending(1),
   })
   const twoPending = await Instance.provide({
     directory: two.path,
-    fn: () => Question.list(),
+    fn: () => waitForPending(1),
   })
 
   expect(onePending.length).toBe(1)
@@ -408,7 +418,7 @@ test("pending question rejects on instance dispose", async () => {
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       expect(pending).toHaveLength(1)
       await Instance.dispose()
     },
@@ -443,7 +453,7 @@ test("pending question rejects on instance reload", async () => {
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
-      const pending = await Question.list()
+      const pending = await waitForPending(1)
       expect(pending).toHaveLength(1)
       await Instance.reload({ directory: tmp.path })
     },
