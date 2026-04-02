@@ -25,12 +25,14 @@ import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { makeTimer } from "@solid-primitives/timer"
+import { getSpeechSynthesis, getSpeechSynthesisUtteranceCtor } from "@/utils/runtime-adapters"
 
 type MessageComment = {
   path: string
@@ -43,6 +45,16 @@ type MessageComment = {
 
 const emptyMessages: MessageType[] = []
 const idle = { type: "idle" as const }
+
+type SpeechSynthLike = {
+  cancel(): void
+  speak(utterance: unknown): void
+}
+
+type SpeechUtteranceLike = {
+  lang: string
+  rate: number
+}
 
 type UserActions = {
   fork?: (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -228,6 +240,7 @@ export function MessageTimeline(props: {
   const settings = useSettings()
   const dialog = useDialog()
   const language = useLanguage()
+  const server = useServer()
   const { params, sessionKey } = useSessionKey()
   const platform = usePlatform()
 
@@ -238,15 +251,36 @@ export function MessageTimeline(props: {
     if (!id) return emptyMessages
     return sync.data.message[id] ?? emptyMessages
   })
-  const pending = createMemo(() =>
-    sessionMessages().findLast(
-      (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
-    ),
-  )
+  const pending = createMemo(() => {
+    const msgs = sessionMessages()
+    const last = msgs[msgs.length - 1]
+    if (last?.role === "assistant" && typeof last.time.completed !== "number") return last as AssistantMessage
+    return undefined
+  })
   const sessionStatus = createMemo(() => {
     const id = sessionID()
     if (!id) return idle
     return sync.data.session_status[id] ?? idle
+  })
+  const spoken = createMemo(() => {
+    const list = sessionMessages()
+    for (let i = list.length - 1; i >= 0; i--) {
+      const message = list[i]
+      if (message.role !== "assistant") continue
+      if (typeof message.time.completed !== "number") continue
+      const text = (sync.data.part[message.id] ?? [])
+        .flatMap((part) => {
+          if (part.type !== "text") return []
+          if (part.synthetic || part.ignored) return []
+          const text = part.text.trim()
+          if (!text) return []
+          return [text]
+        })
+        .join("\n")
+        .trim()
+      if (!text) continue
+      return { id: message.id, text }
+    }
   })
   const working = createMemo(() => !!pending() || sessionStatus().type !== "idle")
   const tint = createMemo(() => messageAgentColor(sessionMessages(), sync.data.agent))
@@ -259,13 +293,27 @@ export function MessageTimeline(props: {
     return "hidden"
   })
 
+  let audio: HTMLAudioElement | undefined
+  let audioUrl: string | undefined
+
+  const clearAudio = () => {
+    audio?.pause()
+    audio = undefined
+    if (!audioUrl) return
+    URL.revokeObjectURL(audioUrl)
+    audioUrl = undefined
+  }
+
+  onCleanup(() => {
+    clearAudio()
+  })
+
   createEffect(() => {
     if (workingStatus() !== "hiding") return
 
     setTimeoutDone(false)
     makeTimer(() => setTimeoutDone(true), 260, setTimeout)
   })
-
   const activeMessageID = createMemo(() => {
     const parentID = pending()?.parentID
     if (parentID) {
@@ -318,6 +366,75 @@ export function MessageTimeline(props: {
   })
 
   let more: HTMLButtonElement | undefined
+
+  let spokenSession = ""
+  let spokenMessage = ""
+
+  const speak = (input: { messageID: string; text: string }) => {
+    spokenMessage = input.messageID
+    const conn = server.current?.http
+    const run = async () => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (conn?.password) {
+        headers.Authorization = `Basic ${btoa(`${conn.username ?? "opencode"}:${conn.password}`)}`
+      }
+
+      const res = await (platform.fetch ?? fetch)(new URL("/tts/edge", conn?.url ?? globalSDK.url).toString(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: input.text }),
+      })
+
+      if (!res.ok) throw new Error(`Edge TTS request failed (${res.status})`)
+      const blob = await res.blob()
+      clearAudio()
+      audioUrl = URL.createObjectURL(blob)
+      audio = new Audio(audioUrl)
+      await audio.play()
+    }
+
+    void run().catch(() => {
+      const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+      const Ctor =
+        typeof window === "undefined" ? undefined : getSpeechSynthesisUtteranceCtor<SpeechUtteranceLike>(window)
+      if (!synth || !Ctor) {
+        showToast({
+          title: language.t("prompt.toast.voicePlaybackUnavailable.title"),
+          description: language.t("prompt.toast.voicePlaybackUnavailable.description"),
+        })
+        return
+      }
+
+      const utterance = new Ctor(input.text)
+      utterance.lang =
+        typeof document !== "undefined" ? document.documentElement.lang || navigator.language || "en-US" : "en-US"
+      utterance.rate = 1
+      synth.cancel()
+      synth.speak(utterance)
+    })
+  }
+
+  createEffect(() => {
+    if (settings.voice.autoSpeak()) return
+    const synth = typeof window === "undefined" ? undefined : getSpeechSynthesis<SpeechSynthLike>(window)
+    synth?.cancel()
+  })
+
+  createEffect(() => {
+    const session = sessionID() ?? ""
+    const latest = spoken()
+    if (session !== spokenSession) {
+      spokenSession = session
+      spokenMessage = latest?.id ?? ""
+      return
+    }
+    if (!settings.voice.autoSpeak()) return
+    if (!latest?.id || latest.id === spokenMessage) return
+
+    speak({ messageID: latest.id, text: latest.text })
+  })
 
   const viewShare = () => {
     const url = shareUrl()
@@ -896,8 +1013,7 @@ export function MessageTimeline(props: {
             </Show>
             <div
               role="log"
-              data-slot="session-turn-list"
-              class="flex flex-col items-start justify-start pb-16 transition-[margin]"
+              class="flex flex-col gap-12 items-start justify-start pb-16 transition-[margin]"
               classList={{
                 "w-full": true,
                 "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
@@ -943,10 +1059,7 @@ export function MessageTimeline(props: {
                         "min-w-0 w-full max-w-full": true,
                         "md:max-w-200 2xl:max-w-[1000px]": props.centered,
                       }}
-                      style={{
-                        "content-visibility": active() ? undefined : "auto",
-                        "contain-intrinsic-size": active() ? undefined : "auto 500px",
-                      }}
+                      style={{ "content-visibility": "auto", "contain-intrinsic-size": "auto 500px" }}
                     >
                       <Show when={commentCount() > 0}>
                         <div class="w-full px-4 md:px-5 pb-2">
@@ -993,6 +1106,7 @@ export function MessageTimeline(props: {
                         messageID={messageID}
                         messages={sessionMessages()}
                         actions={props.actions}
+                        onSpeak={speak}
                         active={active()}
                         status={active() ? sessionStatus() : undefined}
                         showReasoningSummaries={settings.general.showReasoningSummaries()}
