@@ -63,6 +63,36 @@ describe("Session.listGlobal", () => {
     expect(allIds).toContain(archived.id)
   })
 
+  test("excludes descendants of archived sessions", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    const root = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => Session.create({ title: "root-session" }),
+    })
+    const child = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => Session.create({ title: "child-session", parentID: root.id }),
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => Session.setArchived({ sessionID: root.id, time: Date.now() }),
+    })
+
+    const sessions = [...Session.listGlobal({ limit: 200 })]
+    const ids = sessions.map((session) => session.id)
+
+    expect(ids).not.toContain(root.id)
+    expect(ids).not.toContain(child.id)
+
+    const all = [...Session.listGlobal({ limit: 200, archived: true })]
+    const allIds = all.map((session) => session.id)
+
+    expect(allIds).toContain(root.id)
+    expect(allIds).toContain(child.id)
+  })
+
   test("supports cursor pagination", async () => {
     await using tmp = await tmpdir({ git: true })
 

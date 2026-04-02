@@ -86,6 +86,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { RecentTile, RecentSidebarPanel } from "./layout/sidebar-recent"
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(
@@ -157,6 +158,7 @@ export default function Layout(props: ParentProps) {
     sizing: false,
     peek: undefined as string | undefined,
     peeked: false,
+    recent: false,
   })
 
   const editor = createInlineEditorController()
@@ -631,7 +633,7 @@ export default function Layout(props: ParentProps) {
     const project = currentProject()
     if (!project) return false
     if (project.vcs !== "git") return false
-    return layout.sidebar.workspaces(project.worktree)()
+    return layout.sidebar.workspaces(project.worktree, true)()
   })
 
   const visibleSessionDirs = createMemo(() => {
@@ -659,7 +661,7 @@ export default function Layout(props: ParentProps) {
           workspaceKey(item.worktree) === key || item.sandboxes?.some((sandbox) => workspaceKey(sandbox) === key),
       )
       if (!project) continue
-      if (project.vcs === "git" && layout.sidebar.workspaces(project.worktree)()) continue
+      if (project.vcs === "git" && layout.sidebar.workspaces(project.worktree, true)()) continue
       setStore("workspaceExpanded", directory, false)
     }
   })
@@ -776,7 +778,7 @@ export default function Layout(props: ParentProps) {
       directory,
       sessionID,
       task: (rev) =>
-        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk }))
+        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk, preview: true }))
           .then((messages) => {
             if (prefetchToken.value !== token) return
             if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
@@ -995,20 +997,45 @@ export default function Layout(props: ParentProps) {
   }
 
   async function archiveSession(session: Session) {
-    const [store, setStore] = globalSync.child(session.directory)
+    const [store, setStore] = globalSync.child(session.directory, { bootstrap: false })
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
+    const children = new Map<string, string[]>()
+    for (const item of sessions) {
+      if (!item.parentID) continue
+      const list = children.get(item.parentID) ?? []
+      list.push(item.id)
+      children.set(item.parentID, list)
+    }
 
-    await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
-    })
+    const drop = new Set<string>()
+    const walk = (id: string) => {
+      if (drop.has(id)) return
+      drop.add(id)
+      for (const child of children.get(id) ?? []) {
+        walk(child)
+      }
+    }
+
+    walk(session.id)
+
+    const nextSession = [sessions[index + 1], sessions[index - 1]].find((item) => item && !drop.has(item.id))
+
+    const result = await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        time: { archived: Date.now() },
+      })
+      .catch(() => undefined)
+    if (!result || result.error) return false
     setStore(
       produce((draft) => {
-        const match = Binary.search(draft.session, session.id, (s) => s.id)
-        if (match.found) draft.session.splice(match.index, 1)
+        for (const id of drop) {
+          const match = Binary.search(draft.session, id, (s) => s.id)
+          if (!match.found) continue
+          draft.session.splice(match.index, 1)
+        }
       }),
     )
     if (session.id === params.id) {
@@ -1018,6 +1045,7 @@ export default function Layout(props: ParentProps) {
         navigate(`/${params.dir}/session`)
       }
     }
+    return true
   }
 
   command.register("layout", () => {
@@ -1131,8 +1159,8 @@ export default function Layout(props: ParentProps) {
           const project = currentProject()
           if (!project) return
           if (project.vcs !== "git") return
-          const wasEnabled = layout.sidebar.workspaces(project.worktree)()
-          layout.sidebar.toggleWorkspaces(project.worktree)
+          const wasEnabled = layout.sidebar.workspaces(project.worktree, true)()
+          layout.sidebar.toggleWorkspaces(project.worktree, true)
           showToast({
             title: wasEnabled
               ? language.t("toast.workspace.disabled.title")
@@ -1284,6 +1312,7 @@ export default function Layout(props: ParentProps) {
 
   async function navigateToProject(directory: string | undefined) {
     if (!directory) return
+    setState("recent", false)
     const root = projectRoot(directory)
     server.projects.touch(root)
     const project = layout.projects.list().find((item) => item.worktree === root)
@@ -1444,13 +1473,14 @@ export default function Layout(props: ParentProps) {
   }
 
   function toggleProjectWorkspaces(project: LocalProject) {
-    const enabled = layout.sidebar.workspaces(project.worktree)()
+    const fallback = project.vcs === "git" ? true : undefined
+    const enabled = layout.sidebar.workspaces(project.worktree, fallback)()
     if (enabled) {
-      layout.sidebar.toggleWorkspaces(project.worktree)
+      layout.sidebar.toggleWorkspaces(project.worktree, fallback)
       return
     }
     if (project.vcs !== "git") return
-    layout.sidebar.toggleWorkspaces(project.worktree)
+    layout.sidebar.toggleWorkspaces(project.worktree, fallback)
   }
 
   const showEditProjectDialog = (project: LocalProject) => {
@@ -1771,6 +1801,18 @@ export default function Layout(props: ParentProps) {
 
   createEffect(
     on(
+      () => [pageReady(), layoutReady(), currentDir()] as const,
+      ([ready, loaded, directory]) => {
+        if (!ready || !loaded) return
+        if (!directory) return
+        layout.projects.open(directory)
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
       () => {
         return [pageReady(), route().slug, params.id, currentProject()?.worktree, currentDir()] as const
       },
@@ -1949,7 +1991,7 @@ export default function Layout(props: ParentProps) {
 
     if (!created?.directory) return
 
-    setWorkspaceName(created.directory, created.branch, project.id, created.branch)
+    setWorkspaceName(created.directory, created.name, project.id, created.branch)
 
     const local = project.worktree
     const key = workspaceKey(created.directory)
@@ -2023,7 +2065,7 @@ export default function Layout(props: ParentProps) {
     closeProject,
     showEditProjectDialog,
     toggleProjectWorkspaces,
-    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
+    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree, true)(),
     workspaceIds,
     workspaceLabel,
     sessionProps: {
@@ -2078,7 +2120,7 @@ export default function Layout(props: ParentProps) {
       const item = project()
       if (!item) return false
       if (item.vcs !== "git") return false
-      return layout.sidebar.workspaces(item.worktree)()
+      return layout.sidebar.workspaces(item.worktree, true)()
     })
     const canToggle = createMemo(() => {
       const item = project()
@@ -2296,6 +2338,7 @@ export default function Layout(props: ParentProps) {
                                 sortNow={sortNow}
                                 mobile={panelProps.mobile}
                                 popover={popover()}
+                                depth={directory === project()!.worktree ? 0 : 1}
                               />
                             )}
                           </For>
@@ -2348,6 +2391,18 @@ export default function Layout(props: ParentProps) {
     )
   }
 
+  const recentSessionProps: typeof projectSidebarCtx.sessionProps = {
+    navList: currentSessions,
+    sidebarExpanded,
+    sidebarHovering,
+    nav: () => state.nav,
+    hoverSession: () => state.hoverSession,
+    setHoverSession,
+    clearHoverProjectSoon,
+    prefetchSession,
+    archiveSession,
+  }
+
   const projects = () => layout.projects.list()
   const projectOverlay = () => <ProjectDragOverlay projects={projects} activeProject={() => store.activeProject} />
   const sidebarContent = (mobile?: boolean) => (
@@ -2371,8 +2426,28 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+      renderRecentTile={() => (
+        <RecentTile
+          selected={() => state.recent}
+          onClick={() => {
+            setState("recent", true)
+            layout.sidebar.open()
+          }}
+        />
+      )}
       renderPanel={() =>
-        mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
+        state.recent ? (
+          <RecentSidebarPanel
+            mobile={mobile}
+            merged={mobile ? undefined : layout.sidebar.opened() ? true : undefined}
+            sessionProps={recentSessionProps}
+            sidebarWidth={() => layout.sidebar.width()}
+            sidebarOpened={() => layout.sidebar.opened()}
+            sidebarHovering={sidebarHovering}
+          />
+        ) : (
+          mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
+        )
       }
     />
   )
