@@ -47,7 +47,7 @@ function mockGitFailure(failArg: string) {
         }),
       )
     }),
-  ).pipe(Layer.provide(CrossSpawnSpawner.defaultLayer))
+  ).pipe(Layer.provide(CrossSpawnSpawner.layer), Layer.provide(NodeFileSystem.layer), Layer.provide(NodePath.layer))
 }
 
 function projectLayerWithFailure(failArg: string) {
@@ -235,6 +235,54 @@ describe("Project.fromDirectory with worktrees", () => {
         .quiet()
         .catch(() => {})
       await $`git worktree remove ${worktree2}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("discovers existing worktrees from the root without opening them individually", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    const worktree1 = path.join(tmp.path, "..", path.basename(tmp.path) + "-root-wt1")
+    const worktree2 = path.join(tmp.path, "..", path.basename(tmp.path) + "-root-wt2")
+    try {
+      await $`git worktree add ${worktree1} -b root-branch-${Date.now()}`.cwd(tmp.path).quiet()
+      await $`git worktree add ${worktree2} -b root-branch-${Date.now() + 1}`.cwd(tmp.path).quiet()
+
+      const { project } = await Project.fromDirectory(tmp.path)
+
+      expect(project.worktree).toBe(tmp.path)
+      expect(project.sandboxes).toContain(worktree1)
+      expect(project.sandboxes).toContain(worktree2)
+      expect(project.sandboxes).not.toContain(tmp.path)
+    } finally {
+      await $`git worktree remove ${worktree1}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+      await $`git worktree remove ${worktree2}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("Project.sandboxes refreshes manual worktrees added after initial discovery", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    const { project } = await Project.fromDirectory(tmp.path)
+    const worktree = path.join(tmp.path, "..", path.basename(tmp.path) + "-late-wt")
+    try {
+      await $`git worktree add ${worktree} -b late-branch-${Date.now()}`.cwd(tmp.path).quiet()
+
+      const sandboxes = await Project.sandboxes(project.id)
+      const listed = Project.list().find((item) => item.id === project.id)
+
+      expect(sandboxes).toContain(worktree)
+      expect(listed?.sandboxes).toContain(worktree)
+    } finally {
+      await $`git worktree remove ${worktree}`
         .cwd(tmp.path)
         .quiet()
         .catch(() => {})
