@@ -1,3 +1,14 @@
+## Fork Notice
+
+> [!IMPORTANT]
+> This fork exists because we wanted an OpenCode branch that prioritizes runtime stability and orchestration UX.
+>
+> Memory usage and leak-related work comes first, motivated by upstream reports like [anomalyco/opencode#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645), [#19167](https://github.com/anomalyco/opencode/issues/19167), and [#19247](https://github.com/anomalyco/opencode/issues/19247).
+>
+> We also carry voice-to-text, text-to-speech, and recent-session improvements that make multi-session orchestration less brittle: bounded shell output, MCP cleanup and shutdown work, browser and desktop voice controls, and a stronger Recently Active flow.
+>
+> If you care more about long-running stability and session orchestration than strict upstream parity, this is the branch we are actively using.
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>
@@ -115,6 +126,51 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 ### Documentation
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+
+### MCP Lifecycle
+
+Local MCP servers are cleaned up automatically in this fork. OpenCode can close a local MCP child process when the shared client is released, during shutdown, and it also reaps idle shared clients after `10` minutes by default. You can raise or lower that idle window with `OPENCODE_MCP_IDLE_MS` (milliseconds).
+
+### PR Session Naming Tool
+
+This fork highlights a PR-focused session rename flow in the GitHub/`gh pr create` instructions:
+
+- After a PR is created (or detected as already open), the agent should rename the active session to exactly match the PR as `#<pr_number> <pr_title>`.
+- Example: `#524 fix: harden tenant bootstrap config seeding`.
+
+### Memory Diagnostics
+
+This fork carries built-in memory profiling helpers intended for leak hunts, panic triage, and long-running session investigations.
+
+Useful commands:
+
+```bash
+bun run --cwd packages/opencode profile:memory
+bun run --cwd packages/opencode profile:memory:wait
+bun run --cwd packages/opencode profile:memory:workload
+```
+
+Artifacts are written under `~/.local/share/opencode/log`:
+
+- `memory-<label>-<timestamp>.ndjson`: rolling NDJSON samples from the memory monitor
+- `memory/<timestamp>/sample.json`: point-in-time process, heap, session, PTY, and instance-cache stats
+- `memory/<timestamp>/meta.json`: trigger reason, threshold, RSS summary, and active-session counts
+- `memory/<timestamp>/ps.txt`: process list captured at snapshot time
+- `memory/<timestamp>/vmmap.txt`: macOS virtual memory summary, when available
+- `memory/<timestamp>/sample.txt`: macOS stack sampling output, when available
+- `memory/<timestamp>/heap.heapsnapshot`: V8 heap snapshot for DevTools Memory analysis
+
+Heap snapshot notes:
+
+- Open `heap.heapsnapshot` in Chrome DevTools or another V8-compatible heap viewer.
+- Use `sample.json` and `meta.json` first to confirm whether the spike is heap, child-process RSS, PTY growth, or instance-cache pressure before drilling into the heap graph.
+- On macOS, `vmmap.txt` and `sample.txt` are often the fastest way to distinguish heap growth from mapped-file or native allocations.
+
+Retention and disk safety:
+
+- Top-level log files in `~/.local/share/opencode/log` are auto-trimmed to a total of `512 MiB`.
+- Heap snapshot directories in `~/.local/share/opencode/log/memory` are capped to the newest `2`.
+- The retention caps are automatic so repeated profiling does not silently exhaust disk space.
 
 ### Contributing
 
