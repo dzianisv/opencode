@@ -1,13 +1,43 @@
-## Fork Notice
+## Fork — what & why
 
 > [!IMPORTANT]
-> This fork exists because we wanted an OpenCode branch that prioritizes runtime stability and orchestration UX.
->
-> Memory usage and leak-related work comes first, motivated by upstream reports like [anomalyco/opencode#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645), [#19167](https://github.com/anomalyco/opencode/issues/19167), and [#19247](https://github.com/anomalyco/opencode/issues/19247).
->
-> We also carry voice-to-text, text-to-speech, and recent-session improvements that make multi-session orchestration less brittle: bounded shell output, MCP cleanup and shutdown work, browser and desktop voice controls, and a stronger Recently Active flow.
->
-> If you care more about long-running stability and session orchestration than strict upstream parity, this is the branch we are actively using.
+> This fork rebases on `upstream/dev` and ships a focused set of patches we rely on daily.
+> Upstream moves fast and we want that — this fork exists because we need these fixes now.
+
+**Multi-session orchestration**
+- `Recently Active` dashboard across repos and worktrees
+- session tree, worktree visibility, session naming
+
+**Long-running stability**
+- bounded shell output and runtime artifacts
+- MCP cleanup, idle disposal, graceful shutdown
+- startup recovery for stuck tools and unfinished messages
+- session idle sweep, memory diagnostics
+
+**Snapshot hardening**
+- large-file exclusion (>2 MB auto-skipped)
+- `--cached` diff for correct staged-tree comparisons
+
+**Install the fork**
+
+```bash
+npm i -g @vibetechnologies/opencode@latest   # stable
+npm i -g @vibetechnologies/opencode@dev      # tracks dev branch
+opencode                                      # binary name unchanged
+```
+
+<details><summary>From source</summary>
+
+```bash
+git clone https://github.com/dzianisv/opencode.git
+cd opencode && bun install && bun run install:local
+```
+</details>
+
+<p align="center">
+  <img src="docs/images/fork-ui-1.webp" alt="Fork UI screenshot 1" width="49%" />
+  <img src="docs/images/fork-ui-2.webp" alt="Fork UI screenshot 2" width="49%" />
+</p>
 
 <p align="center">
   <a href="https://opencode.ai">
@@ -21,8 +51,8 @@
 <p align="center">The open source AI coding agent.</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://www.npmjs.com/package/@vibetechnologies/opencode"><img alt="fork npm" src="https://img.shields.io/npm/v/%40vibetechnologies%2Fopencode?style=flat-square&label=fork%20npm" /></a>
+  <a href="https://github.com/dzianisv/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/dzianisv/opencode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
 <p align="center">

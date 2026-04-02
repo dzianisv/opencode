@@ -42,13 +42,66 @@ import { createStore, produce } from "solid-js/store"
 import { Global } from "@/global"
 import { Filesystem } from "@/util/filesystem"
 import { useTuiConfig } from "./tui-config"
-import { isRecord } from "@/util/record"
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui"
 
-type Theme = TuiThemeCurrent & {
-  _hasSelectedListItemText: boolean
+type ThemeColors = {
+  primary: RGBA
+  secondary: RGBA
+  accent: RGBA
+  error: RGBA
+  warning: RGBA
+  success: RGBA
+  info: RGBA
+  text: RGBA
+  textMuted: RGBA
+  selectedListItemText: RGBA
+  background: RGBA
+  backgroundPanel: RGBA
+  backgroundElement: RGBA
+  backgroundMenu: RGBA
+  border: RGBA
+  borderActive: RGBA
+  borderSubtle: RGBA
+  diffAdded: RGBA
+  diffRemoved: RGBA
+  diffContext: RGBA
+  diffHunkHeader: RGBA
+  diffHighlightAdded: RGBA
+  diffHighlightRemoved: RGBA
+  diffAddedBg: RGBA
+  diffRemovedBg: RGBA
+  diffContextBg: RGBA
+  diffLineNumber: RGBA
+  diffAddedLineNumberBg: RGBA
+  diffRemovedLineNumberBg: RGBA
+  markdownText: RGBA
+  markdownHeading: RGBA
+  markdownLink: RGBA
+  markdownLinkText: RGBA
+  markdownCode: RGBA
+  markdownBlockQuote: RGBA
+  markdownEmph: RGBA
+  markdownStrong: RGBA
+  markdownHorizontalRule: RGBA
+  markdownListItem: RGBA
+  markdownListEnumeration: RGBA
+  markdownImage: RGBA
+  markdownImageText: RGBA
+  markdownCodeBlock: RGBA
+  syntaxComment: RGBA
+  syntaxKeyword: RGBA
+  syntaxFunction: RGBA
+  syntaxVariable: RGBA
+  syntaxString: RGBA
+  syntaxNumber: RGBA
+  syntaxType: RGBA
+  syntaxOperator: RGBA
+  syntaxPunctuation: RGBA
 }
-type ThemeColor = Exclude<keyof TuiThemeCurrent, "thinkingOpacity">
+
+type Theme = ThemeColors & {
+  _hasSelectedListItemText: boolean
+  thinkingOpacity: number
+}
 
 export function selectedForeground(theme: Theme, bg?: RGBA): RGBA {
   // If theme explicitly defines selectedListItemText, use it
@@ -78,7 +131,7 @@ type ColorValue = HexColor | RefName | Variant | RGBA
 export type ThemeJson = {
   $schema?: string
   defs?: Record<string, HexColor | RefName>
-  theme: Omit<Record<ThemeColor, ColorValue>, "selectedListItemText" | "backgroundMenu"> & {
+  theme: Omit<Record<keyof ThemeColors, ColorValue>, "selectedListItemText" | "backgroundMenu"> & {
     selectedListItemText?: ColorValue
     backgroundMenu?: ColorValue
     thinkingOpacity?: number
@@ -121,103 +174,27 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   carbonfox,
 }
 
-type State = {
-  themes: Record<string, ThemeJson>
-  mode: "dark" | "light"
-  lock: "dark" | "light" | undefined
-  active: string
-  ready: boolean
-}
-
-const pluginThemes: Record<string, ThemeJson> = {}
-let customThemes: Record<string, ThemeJson> = {}
-let systemTheme: ThemeJson | undefined
-
-function listThemes() {
-  // Priority: defaults < plugin installs < custom files < generated system.
-  const themes = {
-    ...DEFAULT_THEMES,
-    ...pluginThemes,
-    ...customThemes,
-  }
-  if (!systemTheme) return themes
-  return {
-    ...themes,
-    system: systemTheme,
-  }
-}
-
-function syncThemes() {
-  setStore("themes", listThemes())
-}
-
-const [store, setStore] = createStore<State>({
-  themes: listThemes(),
-  mode: "dark",
-  lock: undefined,
-  active: "opencode",
-  ready: false,
-})
-
-export function allThemes() {
-  return store.themes
-}
-
-function isTheme(theme: unknown): theme is ThemeJson {
-  if (!isRecord(theme)) return false
-  if (!isRecord(theme.theme)) return false
-  return true
-}
-
-export function hasTheme(name: string) {
-  if (!name) return false
-  return allThemes()[name] !== undefined
-}
-
-export function addTheme(name: string, theme: unknown) {
-  if (!name) return false
-  if (!isTheme(theme)) return false
-  if (hasTheme(name)) return false
-  pluginThemes[name] = theme
-  syncThemes()
-  return true
-}
-
-export function upsertTheme(name: string, theme: unknown) {
-  if (!name) return false
-  if (!isTheme(theme)) return false
-  if (customThemes[name] !== undefined) {
-    customThemes[name] = theme
-  } else {
-    pluginThemes[name] = theme
-  }
-  syncThemes()
-  return true
-}
-
 export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
   const defs = theme.defs ?? {}
-  function resolveColor(c: ColorValue, chain: string[] = []): RGBA {
+  function resolveColor(c: ColorValue): RGBA {
     if (c instanceof RGBA) return c
     if (typeof c === "string") {
       if (c === "transparent" || c === "none") return RGBA.fromInts(0, 0, 0, 0)
 
       if (c.startsWith("#")) return RGBA.fromHex(c)
 
-      if (chain.includes(c)) {
-        throw new Error(`Circular color reference: ${[...chain, c].join(" -> ")}`)
-      }
-
-      const next = defs[c] ?? theme.theme[c as ThemeColor]
-      if (next === undefined) {
+      if (defs[c] != null) {
+        return resolveColor(defs[c])
+      } else if (theme.theme[c as keyof ThemeColors] !== undefined) {
+        return resolveColor(theme.theme[c as keyof ThemeColors]!)
+      } else {
         throw new Error(`Color reference "${c}" not found in defs or theme`)
       }
-      return resolveColor(next, [...chain, c])
     }
     if (typeof c === "number") {
       return ansiToRgba(c)
     }
-    return resolveColor(c[mode], chain)
+    return resolveColor(c[mode])
   }
 
   const resolved = Object.fromEntries(
@@ -226,7 +203,7 @@ export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
       .map(([key, value]) => {
         return [key, resolveColor(value as ColorValue)]
       }),
-  ) as Partial<Record<ThemeColor, RGBA>>
+  ) as Partial<ThemeColors>
 
   // Handle selectedListItemText separately since it's optional
   const hasSelectedListItemText = theme.theme.selectedListItemText !== undefined
@@ -310,18 +287,14 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       if (value === "dark" || value === "light") return value
       return
     }
-
-    setStore(
-      produce((draft) => {
-        const lock = pick(kv.get("theme_mode_lock"))
-        const mode = pick(kv.get("theme_mode", props.mode))
-        draft.mode = lock ?? mode ?? props.mode
-        draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "opencode")
-        draft.active = typeof active === "string" ? active : "opencode"
-        draft.ready = false
-      }),
-    )
+    const lock = pick(kv.get("theme_mode_lock"))
+    const [store, setStore] = createStore({
+      themes: DEFAULT_THEMES,
+      mode: lock ?? pick(kv.get("theme_mode", props.mode)) ?? props.mode,
+      lock,
+      active: (config.theme ?? kv.get("theme", "opencode")) as string,
+      ready: false,
+    })
 
     createEffect(() => {
       const theme = config.theme
@@ -329,46 +302,52 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     })
 
     function init() {
-      Promise.allSettled([
-        resolveSystemTheme(store.mode),
-        getCustomThemes()
-          .then((custom) => {
-            customThemes = custom
-            syncThemes()
-          })
-          .catch(() => {
-            setStore("active", "opencode")
-          }),
-      ]).finally(() => {
-        setStore("ready", true)
-      })
+      resolveSystemTheme(store.mode)
+      getCustomThemes()
+        .then((custom) => {
+          setStore(
+            produce((draft) => {
+              Object.assign(draft.themes, custom)
+            }),
+          )
+        })
+        .catch(() => {
+          setStore("active", "opencode")
+        })
+        .finally(() => {
+          if (store.active !== "system") {
+            setStore("ready", true)
+          }
+        })
     }
 
     onMount(init)
 
     function resolveSystemTheme(mode: "dark" | "light" = store.mode) {
-      return renderer
+      renderer
         .getPalette({
           size: 16,
         })
-        .then((colors: TerminalColors) => {
+        .then((colors) => {
           if (!colors.palette[0]) {
-            systemTheme = undefined
-            syncThemes()
             if (store.active === "system") {
-              setStore("active", "opencode")
+              setStore(
+                produce((draft) => {
+                  draft.active = "opencode"
+                  draft.ready = true
+                }),
+              )
             }
             return
           }
-          systemTheme = generateSystem(colors, mode)
-          syncThemes()
-        })
-        .catch(() => {
-          systemTheme = undefined
-          syncThemes()
-          if (store.active === "system") {
-            setStore("active", "opencode")
-          }
+          setStore(
+            produce((draft) => {
+              draft.themes.system = generateSystem(colors, mode)
+              if (store.active === "system") {
+                draft.ready = true
+              }
+            }),
+          )
         })
     }
 
@@ -398,29 +377,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       apply(mode)
     }
     renderer.on(CliRenderEvents.THEME_MODE, handle)
-
-    const refresh = () => {
-      renderer.clearPaletteCache()
-      init()
-    }
-    process.on("SIGUSR2", refresh)
-
     onCleanup(() => {
       renderer.off(CliRenderEvents.THEME_MODE, handle)
-      process.off("SIGUSR2", refresh)
     })
 
     const values = createMemo(() => {
-      const active = store.themes[store.active]
-      if (active) return resolveTheme(active, store.mode)
-
-      const saved = kv.get("theme")
-      if (typeof saved === "string") {
-        const theme = store.themes[saved]
-        if (theme) return resolveTheme(theme, store.mode)
-      }
-
-      return resolveTheme(store.themes.opencode, store.mode)
+      return resolveTheme(store.themes[store.active] ?? store.themes.opencode, store.mode)
     })
 
     createEffect(() => {
@@ -441,10 +403,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         return store.active
       },
       all() {
-        return allThemes()
-      },
-      has(name: string) {
-        return hasTheme(name)
+        return store.themes
       },
       syntax,
       subtleSyntax,
@@ -464,10 +423,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         pin(mode)
       },
       set(theme: string) {
-        if (!hasTheme(theme)) return false
         setStore("active", theme)
         kv.set("theme", theme)
-        return true
       },
       get ready() {
         return store.ready
@@ -1233,4 +1190,37 @@ function getSyntaxRules(theme: Theme) {
       },
     },
   ]
+}
+
+// Module-level registry for plugin-installed themes (accessible outside component context)
+const _pluginThemes = new Map<string, ThemeJson>()
+
+export function hasTheme(name: string): boolean {
+  return name in DEFAULT_THEMES || _pluginThemes.has(name)
+}
+
+export function upsertTheme(name: string, data: ThemeJson): void {
+  _pluginThemes.set(name, data)
+}
+
+/**
+ * Add a theme to the plugin registry. Returns true if the theme was added,
+ * false if it already exists or the data is invalid (missing theme object).
+ */
+export function addTheme(name: string, data: unknown): boolean {
+  if (!data || typeof data !== "object" || !("theme" in data)) return false
+  if (_pluginThemes.has(name) || name in DEFAULT_THEMES) return false
+  _pluginThemes.set(name, data as ThemeJson)
+  return true
+}
+
+/**
+ * Returns all registered themes (built-in + plugin).
+ */
+export function allThemes(): Record<string, ThemeJson> {
+  const result: Record<string, ThemeJson> = { ...DEFAULT_THEMES }
+  for (const [name, theme] of _pluginThemes) {
+    result[name] = theme
+  }
+  return result
 }

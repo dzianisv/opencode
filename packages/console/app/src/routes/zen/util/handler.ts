@@ -100,7 +100,6 @@ export async function handler(
       session: sessionId,
       request: requestId,
       client: ocClient,
-      ...(model === "mimo-v2-pro-free" && JSON.stringify(body).length < 1000 ? { payload: JSON.stringify(body) } : {}),
     })
     const zenData = ZenData.list(opts.modelList)
     const modelInfo = validateModel(zenData, model)
@@ -133,23 +132,26 @@ export async function handler(
         retry,
         stickyProvider,
       )
-      validateModelSettings(billingSource, authInfo)
+      validateModelSettings(authInfo)
       updateProviderKey(authInfo, providerInfo)
       logger.metric({ provider: providerInfo.id })
 
       const startTimestamp = Date.now()
       const reqUrl = providerInfo.modifyUrl(providerInfo.api, isStream)
       const reqBody = JSON.stringify(
-        providerInfo.modifyBody({
-          ...createBodyConverter(opts.format, providerInfo.format)(body),
-          model: providerInfo.model,
-          ...(providerInfo.payloadModifier ?? {}),
-          ...Object.fromEntries(
-            Object.entries(providerInfo.payloadMappings ?? {})
-              .map(([k, v]) => [k, input.request.headers.get(v)])
-              .filter(([_k, v]) => !!v),
-          ),
-        }),
+        providerInfo.modifyBody(
+          {
+            ...createBodyConverter(opts.format, providerInfo.format)(body),
+            model: providerInfo.model,
+            ...(providerInfo.payloadModifier ?? {}),
+            ...Object.fromEntries(
+              Object.entries(providerInfo.payloadMappings ?? {})
+                .map(([k, v]) => [k, input.request.headers.get(v)])
+                .filter(([_k, v]) => !!v),
+            ),
+          },
+          authInfo?.workspaceID,
+        ),
       )
       logger.debug("REQUEST URL: " + reqUrl)
       logger.debug("REQUEST: " + reqBody.substring(0, 300) + "...")
@@ -476,17 +478,15 @@ export async function handler(
       ...(() => {
         const providerProps = zenData.providers[modelProvider.id]
         const format = providerProps.format
-        const opts = {
+        const providerModel = modelProvider.model
+        if (format === "anthropic") return anthropicHelper({ reqModel, providerModel })
+        if (format === "google") return googleHelper({ reqModel, providerModel })
+        if (format === "openai") return openaiHelper({ reqModel, providerModel })
+        return oaCompatHelper({
           reqModel,
-          providerModel: modelProvider.model,
+          providerModel,
           adjustCacheUsage: providerProps.adjustCacheUsage,
-          safetyIdentifier: modelProvider.safetyIdentifier ? ip : undefined,
-          workspaceID: authInfo?.workspaceID,
-        }
-        if (format === "anthropic") return anthropicHelper(opts)
-        if (format === "google") return googleHelper(opts)
-        if (format === "openai") return openaiHelper(opts)
-        return oaCompatHelper(opts)
+        })
       })(),
     }
   }
@@ -776,10 +776,9 @@ export async function handler(
     return "balance"
   }
 
-  function validateModelSettings(billingSource: BillingSource, authInfo: AuthInfo) {
-    if (billingSource === "lite") return
-    if (billingSource === "anonymous") return
-    if (authInfo!.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
+  function validateModelSettings(authInfo: AuthInfo) {
+    if (!authInfo) return
+    if (authInfo.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
   }
 
   function updateProviderKey(authInfo: AuthInfo, providerInfo: ProviderInfo) {

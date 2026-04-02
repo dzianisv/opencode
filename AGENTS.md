@@ -158,3 +158,14 @@ Do not generate repeated snapshots blindly. Retention keeps only the newest `2` 
 ## Type Checking
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+
+## Pre-Push Verification (mandatory)
+
+Before considering any task complete and before pushing code, you **must** verify all of the following pass:
+
+1. **Typecheck**: `cd packages/opencode && bun typecheck` — must report 0 errors
+2. **App build**: `cd packages/app && bun run build` — must succeed
+3. **Local install**: `bun run install:local` (from repo root) — must succeed end-to-end
+4. **Tests**: `cd packages/opencode && bun test` — must pass
+
+If any step fails, fix the issue before pushing. Do not push broken code.
