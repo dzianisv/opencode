@@ -16,6 +16,16 @@ function foreign(err: unknown) {
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> | null } : T
 
+/**
+ * Helper to project BusEvent definitions (which lack `schema`, `version`, `aggregate`)
+ * into the projector registry. The cast is safe at runtime since the definition is
+ * used only as a Map key.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function busProject(def: object, func: (db: any, data: any) => void): any {
+  return [def, func]
+}
+
 function grab<T extends object, K1 extends keyof T, X>(
   obj: T,
   field1: K1,
@@ -62,26 +72,26 @@ export function toPartialRow(info: DeepPartial<Session.Info>) {
 }
 
 export default [
-  SyncEvent.project(Session.Event.Created, (db, data) => {
+  busProject(Session.Event.Created, (db, data) => {
     db.insert(SessionTable).values(Session.toRow(data.info)).run()
   }),
 
-  SyncEvent.project(Session.Event.Updated, (db, data) => {
+  busProject(Session.Event.Updated, (db, data) => {
     const info = data.info
     const row = db
       .update(SessionTable)
       .set(toPartialRow(info))
-      .where(eq(SessionTable.id, data.sessionID))
+      .where(eq(SessionTable.id, data.info.id))
       .returning()
       .get()
-    if (!row) throw new NotFoundError({ message: `Session not found: ${data.sessionID}` })
+    if (!row) throw new NotFoundError({ message: `Session not found: ${data.info.id}` })
   }),
 
-  SyncEvent.project(Session.Event.Deleted, (db, data) => {
-    db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
+  busProject(Session.Event.Deleted, (db, data) => {
+    db.delete(SessionTable).where(eq(SessionTable.id, data.info.id)).run()
   }),
 
-  SyncEvent.project(MessageV2.Event.Updated, (db, data) => {
+  busProject(MessageV2.Event.Updated, (db, data) => {
     const time_created = data.info.time.created
     const { id, sessionID, ...rest } = data.info
 
@@ -101,19 +111,19 @@ export default [
     }
   }),
 
-  SyncEvent.project(MessageV2.Event.Removed, (db, data) => {
+  busProject(MessageV2.Event.Removed, (db, data) => {
     db.delete(MessageTable)
       .where(and(eq(MessageTable.id, data.messageID), eq(MessageTable.session_id, data.sessionID)))
       .run()
   }),
 
-  SyncEvent.project(MessageV2.Event.PartRemoved, (db, data) => {
+  busProject(MessageV2.Event.PartRemoved, (db, data) => {
     db.delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
       .run()
   }),
 
-  SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
+  busProject(MessageV2.Event.PartUpdated, (db, data) => {
     const { id, messageID, sessionID, ...rest } = data.part
 
     try {
