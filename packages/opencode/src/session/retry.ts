@@ -85,6 +85,23 @@ export namespace SessionRetry {
     return undefined
   }
 
+export function sleep(ms: number, abort?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, ms)
+      if (abort) {
+        if (abort.aborted) {
+          clearTimeout(timer)
+          reject(abort.reason)
+          return
+        }
+        abort.addEventListener("abort", () => {
+          clearTimeout(timer)
+          reject(abort.reason)
+        }, { once: true })
+      }
+    })
+  }
+
   export function policy(opts: {
     parse: (error: unknown) => Err
     set: (input: { attempt: number; message: string; next: number }) => Effect.Effect<void>

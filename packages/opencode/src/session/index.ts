@@ -1,5 +1,6 @@
 import { Slug } from "@opencode-ai/util/slug"
 import path from "path"
+import { Effect, Layer, ServiceMap } from "effect"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Decimal } from "decimal.js"
@@ -9,21 +10,20 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
-import { SyncEvent } from "../sync"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import type { SQL } from "../storage/db"
-import { SessionTable } from "./session.sql"
+import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
-import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
+import { ResumeAbortError, ResumeError } from "./auto-resume"
 import { Instance } from "../project/instance"
-import { InstanceState } from "@/effect/instance-state"
 import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
+import { WorkspaceContext } from "../control-plane/workspace-context"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
@@ -33,8 +33,8 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Permission } from "@/permission"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
-import { Effect, Layer, Scope, ServiceMap } from "effect"
-import { makeRuntime } from "@/effect/run-service"
+import { iife } from "@/util/iife"
+import { Filesystem } from "@/util/filesystem"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -185,40 +185,24 @@ export namespace Session {
   export type GlobalInfo = z.output<typeof GlobalInfo>
 
   export const Event = {
-    Created: SyncEvent.define({
-      type: "session.created",
-      version: 1,
-      aggregate: "sessionID",
-      schema: z.object({
-        sessionID: SessionID.zod,
+    Created: BusEvent.define(
+      "session.created",
+      z.object({
         info: Info,
       }),
-    }),
-    Updated: SyncEvent.define({
-      type: "session.updated",
-      version: 1,
-      aggregate: "sessionID",
-      schema: z.object({
-        sessionID: SessionID.zod,
-        info: updateSchema(Info).extend({
-          share: updateSchema(Info.shape.share.unwrap()).optional(),
-          time: updateSchema(Info.shape.time).optional(),
-        }),
-      }),
-      busSchema: z.object({
-        sessionID: SessionID.zod,
+    ),
+    Updated: BusEvent.define(
+      "session.updated",
+      z.object({
         info: Info,
       }),
-    }),
-    Deleted: SyncEvent.define({
-      type: "session.deleted",
-      version: 1,
-      aggregate: "sessionID",
-      schema: z.object({
-        sessionID: SessionID.zod,
+    ),
+    Deleted: BusEvent.define(
+      "session.deleted",
+      z.object({
         info: Info,
       }),
-    }),
+    ),
     Diff: BusEvent.define(
       "session.diff",
       z.object({
@@ -235,456 +219,6 @@ export namespace Session {
     ),
   }
 
-  export function plan(input: { slug: string; time: { created: number } }) {
-    const base = Instance.project.vcs
-      ? path.join(Instance.worktree, ".opencode", "plans")
-      : path.join(Global.Path.data, "plans")
-    return path.join(base, [input.time.created, input.slug].join("-") + ".md")
-  }
-
-  export const getUsage = (input: {
-    model: Provider.Model
-    usage: LanguageModelV2Usage
-    metadata?: ProviderMetadata
-  }) => {
-    const safe = (value: number) => {
-      if (!Number.isFinite(value)) return 0
-      return value
-    }
-    const inputTokens = safe(input.usage.inputTokens ?? 0)
-    const outputTokens = safe(input.usage.outputTokens ?? 0)
-    const reasoningTokens = safe(input.usage.reasoningTokens ?? 0)
-
-    const cacheReadInputTokens = safe(input.usage.cachedInputTokens ?? 0)
-    const cacheWriteInputTokens = safe(
-      (input.metadata?.["anthropic"]?.["cacheCreationInputTokens"] ??
-        // google-vertex-anthropic returns metadata under "vertex" key
-        // (AnthropicMessagesLanguageModel custom provider key from 'vertex.anthropic.messages')
-        input.metadata?.["vertex"]?.["cacheCreationInputTokens"] ??
-        // @ts-expect-error
-        input.metadata?.["bedrock"]?.["usage"]?.["cacheWriteInputTokens"] ??
-        // @ts-expect-error
-        input.metadata?.["venice"]?.["usage"]?.["cacheCreationInputTokens"] ??
-        0) as number,
-    )
-
-    // AI SDK v6 normalized inputTokens to include cached tokens across all providers
-    // (including Anthropic/Bedrock which previously excluded them). Always subtract cache
-    // tokens to get the non-cached input count for separate cost calculation.
-    const adjustedInputTokens = safe(inputTokens - cacheReadInputTokens - cacheWriteInputTokens)
-
-    const total = input.usage.totalTokens
-
-    const tokens = {
-      total,
-      input: adjustedInputTokens,
-      output: outputTokens,
-      reasoning: reasoningTokens,
-      cache: {
-        write: cacheWriteInputTokens,
-        read: cacheReadInputTokens,
-      },
-    }
-
-    const costInfo =
-      input.model.cost?.experimentalOver200K && tokens.input + tokens.cache.read > 200_000
-        ? input.model.cost.experimentalOver200K
-        : input.model.cost
-    return {
-      cost: safe(
-        new Decimal(0)
-          .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-          .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-          .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-          .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
-          // TODO: update models.dev to have better pricing model, for now:
-          // charge reasoning tokens at the same rate as output tokens
-          .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
-          .toNumber(),
-      ),
-      tokens,
-    }
-  }
-
-  export class BusyError extends Error {
-    constructor(public readonly sessionID: string) {
-      super(`Session ${sessionID} is busy`)
-    }
-  }
-
-  export interface Interface {
-    readonly create: (input?: {
-      parentID?: SessionID
-      title?: string
-      permission?: Permission.Ruleset
-      workspaceID?: WorkspaceID
-    }) => Effect.Effect<Info>
-    readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
-    readonly touch: (sessionID: SessionID) => Effect.Effect<void>
-    readonly get: (id: SessionID) => Effect.Effect<Info>
-    readonly share: (id: SessionID) => Effect.Effect<{ url: string }>
-    readonly unshare: (id: SessionID) => Effect.Effect<void>
-    readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
-    readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
-    readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
-    readonly setRevert: (input: {
-      sessionID: SessionID
-      revert: Info["revert"]
-      summary: Info["summary"]
-    }) => Effect.Effect<void>
-    readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
-    readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
-    readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
-    readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<MessageV2.WithParts[]>
-    readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
-    readonly remove: (sessionID: SessionID) => Effect.Effect<void>
-    readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
-    readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
-    readonly removePart: (input: {
-      sessionID: SessionID
-      messageID: MessageID
-      partID: PartID
-    }) => Effect.Effect<PartID>
-    readonly updatePart: <T extends MessageV2.Part>(part: T) => Effect.Effect<T>
-    readonly updatePartDelta: (input: {
-      sessionID: SessionID
-      messageID: MessageID
-      partID: PartID
-      field: string
-      delta: string
-    }) => Effect.Effect<void>
-    readonly initialize: (input: {
-      sessionID: SessionID
-      modelID: ModelID
-      providerID: ProviderID
-      messageID: MessageID
-    }) => Effect.Effect<void>
-  }
-
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Session") {}
-
-  type Patch = z.infer<typeof Event.Updated.schema>["info"]
-
-  const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
-    Effect.sync(() => Database.use(fn))
-
-  export const layer: Layer.Layer<Service, never, Bus.Service | Config.Service> = Layer.effect(
-    Service,
-    Effect.gen(function* () {
-      const bus = yield* Bus.Service
-      const config = yield* Config.Service
-      const scope = yield* Scope.Scope
-
-      const createNext = Effect.fn("Session.createNext")(function* (input: {
-        id?: SessionID
-        title?: string
-        parentID?: SessionID
-        workspaceID?: WorkspaceID
-        directory: string
-        permission?: Permission.Ruleset
-      }) {
-        const ctx = yield* InstanceState.context
-        const result: Info = {
-          id: SessionID.descending(input.id),
-          slug: Slug.create(),
-          version: Installation.VERSION,
-          projectID: ctx.project.id,
-          directory: input.directory,
-          workspaceID: input.workspaceID,
-          parentID: input.parentID,
-          title: input.title ?? createDefaultTitle(!!input.parentID),
-          permission: input.permission,
-          time: {
-            created: Date.now(),
-            updated: Date.now(),
-          },
-        }
-        log.info("created", result)
-
-        yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
-
-        const cfg = yield* config.get()
-        if (!result.parentID && (Flag.OPENCODE_AUTO_SHARE || cfg.share === "auto")) {
-          yield* share(result.id).pipe(Effect.ignore, Effect.forkIn(scope))
-        }
-
-        if (!Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
-          // This only exist for backwards compatibility. We should not be
-          // manually publishing this event; it is a sync event now
-          yield* bus.publish(Event.Updated, {
-            sessionID: result.id,
-            info: result,
-          })
-        }
-
-        return result
-      })
-
-      const get = Effect.fn("Session.get")(function* (id: SessionID) {
-        const row = yield* db((d) => d.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
-        if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
-        return fromRow(row)
-      })
-
-      const share = Effect.fn("Session.share")(function* (id: SessionID) {
-        const cfg = yield* config.get()
-        if (cfg.share === "disabled") throw new Error("Sharing is disabled in configuration")
-        const result = yield* Effect.promise(async () => {
-          const { ShareNext } = await import("@/share/share-next")
-          return ShareNext.create(id)
-        })
-        yield* Effect.sync(() => SyncEvent.run(Event.Updated, { sessionID: id, info: { share: { url: result.url } } }))
-        return result
-      })
-
-      const unshare = Effect.fn("Session.unshare")(function* (id: SessionID) {
-        yield* Effect.promise(async () => {
-          const { ShareNext } = await import("@/share/share-next")
-          await ShareNext.remove(id)
-        })
-        yield* Effect.sync(() => SyncEvent.run(Event.Updated, { sessionID: id, info: { share: { url: null } } }))
-      })
-
-      const children = Effect.fn("Session.children")(function* (parentID: SessionID) {
-        const ctx = yield* InstanceState.context
-        const rows = yield* db((d) =>
-          d
-            .select()
-            .from(SessionTable)
-            .where(and(eq(SessionTable.project_id, ctx.project.id), eq(SessionTable.parent_id, parentID)))
-            .all(),
-        )
-        return rows.map(fromRow)
-      })
-
-      const remove: (sessionID: SessionID) => Effect.Effect<void> = Effect.fnUntraced(function* (sessionID: SessionID) {
-        try {
-          const session = yield* get(sessionID)
-          const kids = yield* children(sessionID)
-          for (const child of kids) {
-            yield* remove(child.id)
-          }
-          yield* unshare(sessionID).pipe(Effect.ignore)
-          yield* Effect.sync(() => {
-            SyncEvent.run(Event.Deleted, { sessionID, info: session })
-            SyncEvent.remove(sessionID)
-          })
-        } catch (e) {
-          log.error(e)
-        }
-      })
-
-      const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
-        Effect.gen(function* () {
-          yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
-          return msg
-        }).pipe(Effect.withSpan("Session.updateMessage"))
-
-      const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
-        Effect.gen(function* () {
-          yield* Effect.sync(() =>
-            SyncEvent.run(MessageV2.Event.PartUpdated, {
-              sessionID: part.sessionID,
-              part: structuredClone(part),
-              time: Date.now(),
-            }),
-          )
-          return part
-        }).pipe(Effect.withSpan("Session.updatePart"))
-
-      const create = Effect.fn("Session.create")(function* (input?: {
-        parentID?: SessionID
-        title?: string
-        permission?: Permission.Ruleset
-        workspaceID?: WorkspaceID
-      }) {
-        const directory = yield* InstanceState.directory
-        return yield* createNext({
-          parentID: input?.parentID,
-          directory,
-          title: input?.title,
-          permission: input?.permission,
-          workspaceID: input?.workspaceID,
-        })
-      })
-
-      const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
-        const directory = yield* InstanceState.directory
-        const original = yield* get(input.sessionID)
-        const title = getForkedTitle(original.title)
-        const session = yield* createNext({
-          directory,
-          workspaceID: original.workspaceID,
-          title,
-        })
-        const msgs = yield* messages({ sessionID: input.sessionID })
-        const idMap = new Map<string, MessageID>()
-
-        for (const msg of msgs) {
-          if (input.messageID && msg.info.id >= input.messageID) break
-          const newID = MessageID.ascending()
-          idMap.set(msg.info.id, newID)
-
-          const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
-          const cloned = yield* updateMessage({
-            ...msg.info,
-            sessionID: session.id,
-            id: newID,
-            ...(parentID && { parentID }),
-          })
-
-          for (const part of msg.parts) {
-            yield* updatePart({
-              ...part,
-              id: PartID.ascending(),
-              messageID: cloned.id,
-              sessionID: session.id,
-            })
-          }
-        }
-        return session
-      })
-
-      const patch = (sessionID: SessionID, info: Patch) =>
-        Effect.sync(() => SyncEvent.run(Event.Updated, { sessionID, info }))
-
-      const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
-        yield* patch(sessionID, { time: { updated: Date.now() } })
-      })
-
-      const setTitle = Effect.fn("Session.setTitle")(function* (input: { sessionID: SessionID; title: string }) {
-        yield* patch(input.sessionID, { title: input.title })
-      })
-
-      const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
-        yield* patch(input.sessionID, { time: { archived: input.time } })
-      })
-
-      const setPermission = Effect.fn("Session.setPermission")(function* (input: {
-        sessionID: SessionID
-        permission: Permission.Ruleset
-      }) {
-        yield* patch(input.sessionID, { permission: input.permission, time: { updated: Date.now() } })
-      })
-
-      const setRevert = Effect.fn("Session.setRevert")(function* (input: {
-        sessionID: SessionID
-        revert: Info["revert"]
-        summary: Info["summary"]
-      }) {
-        yield* patch(input.sessionID, { summary: input.summary, time: { updated: Date.now() }, revert: input.revert })
-      })
-
-      const clearRevert = Effect.fn("Session.clearRevert")(function* (sessionID: SessionID) {
-        yield* patch(sessionID, { time: { updated: Date.now() }, revert: null })
-      })
-
-      const setSummary = Effect.fn("Session.setSummary")(function* (input: {
-        sessionID: SessionID
-        summary: Info["summary"]
-      }) {
-        yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary })
-      })
-
-      const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
-        return yield* Effect.tryPromise(() => Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])).pipe(
-          Effect.orElseSucceed(() => [] as Snapshot.FileDiff[]),
-        )
-      })
-
-      const messages = Effect.fn("Session.messages")(function* (input: { sessionID: SessionID; limit?: number }) {
-        if (input.limit) {
-          return MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).items
-        }
-        return Array.from(MessageV2.stream(input.sessionID)).reverse()
-      })
-
-      const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {
-        sessionID: SessionID
-        messageID: MessageID
-      }) {
-        yield* Effect.sync(() =>
-          SyncEvent.run(MessageV2.Event.Removed, {
-            sessionID: input.sessionID,
-            messageID: input.messageID,
-          }),
-        )
-        return input.messageID
-      })
-
-      const removePart = Effect.fn("Session.removePart")(function* (input: {
-        sessionID: SessionID
-        messageID: MessageID
-        partID: PartID
-      }) {
-        yield* Effect.sync(() =>
-          SyncEvent.run(MessageV2.Event.PartRemoved, {
-            sessionID: input.sessionID,
-            messageID: input.messageID,
-            partID: input.partID,
-          }),
-        )
-        return input.partID
-      })
-
-      const updatePartDelta = Effect.fn("Session.updatePartDelta")(function* (input: {
-        sessionID: SessionID
-        messageID: MessageID
-        partID: PartID
-        field: string
-        delta: string
-      }) {
-        yield* bus.publish(MessageV2.Event.PartDelta, input)
-      })
-
-      const initialize = Effect.fn("Session.initialize")(function* (input: {
-        sessionID: SessionID
-        modelID: ModelID
-        providerID: ProviderID
-        messageID: MessageID
-      }) {
-        yield* Effect.promise(() =>
-          SessionPrompt.command({
-            sessionID: input.sessionID,
-            messageID: input.messageID,
-            model: input.providerID + "/" + input.modelID,
-            command: Command.Default.INIT,
-            arguments: "",
-          }),
-        )
-      })
-
-      return Service.of({
-        create,
-        fork,
-        touch,
-        get,
-        share,
-        unshare,
-        setTitle,
-        setArchived,
-        setPermission,
-        setRevert,
-        clearRevert,
-        setSummary,
-        diff,
-        messages,
-        children,
-        remove,
-        updateMessage,
-        removeMessage,
-        removePart,
-        updatePart,
-        updatePartDelta,
-        initialize,
-      })
-    }),
-  )
-
-  export const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Config.defaultLayer))
-
-  const { runPromise } = makeRuntime(Service, defaultLayer)
-
   export const create = fn(
     z
       .object({
@@ -694,46 +228,332 @@ export namespace Session {
         workspaceID: WorkspaceID.zod.optional(),
       })
       .optional(),
-    (input) => runPromise((svc) => svc.create(input)),
+    async (input) => {
+      return createNext({
+        parentID: input?.parentID,
+        directory: Instance.directory,
+        title: input?.title,
+        permission: input?.permission,
+        workspaceID: input?.workspaceID,
+      })
+    },
   )
 
-  export const fork = fn(z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional() }), (input) =>
-    runPromise((svc) => svc.fork(input)),
+  export const fork = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod.optional(),
+    }),
+    async (input) => {
+      const original = await get(input.sessionID)
+      if (!original) throw new Error("session not found")
+      const title = getForkedTitle(original.title)
+      const session = await createNext({
+        directory: Instance.directory,
+        workspaceID: original.workspaceID,
+        title,
+      })
+      const msgs = await messages({ sessionID: input.sessionID })
+      const idMap = new Map<string, MessageID>()
+
+      for (const msg of msgs) {
+        if (input.messageID && msg.info.id >= input.messageID) break
+        const newID = MessageID.ascending()
+        idMap.set(msg.info.id, newID)
+
+        const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
+        const cloned = await updateMessage({
+          ...msg.info,
+          sessionID: session.id,
+          id: newID,
+          ...(parentID && { parentID }),
+        })
+
+        for (const part of msg.parts) {
+          await updatePart({
+            ...part,
+            id: PartID.ascending(),
+            messageID: cloned.id,
+            sessionID: session.id,
+          })
+        }
+      }
+      return session
+    },
   )
 
-  export const touch = fn(SessionID.zod, (id) => runPromise((svc) => svc.touch(id)))
-  export const get = fn(SessionID.zod, (id) => runPromise((svc) => svc.get(id)))
-  export const share = fn(SessionID.zod, (id) => runPromise((svc) => svc.share(id)))
-  export const unshare = fn(SessionID.zod, (id) => runPromise((svc) => svc.unshare(id)))
+  export const touch = fn(SessionID.zod, async (sessionID) => {
+    const now = Date.now()
+    Database.use((db) => {
+      const row = db
+        .update(SessionTable)
+        .set({ time_updated: now })
+        .where(eq(SessionTable.id, sessionID))
+        .returning()
+        .get()
+      if (!row) throw new NotFoundError({ message: `Session not found: ${sessionID}` })
+      const info = fromRow(row)
+      Database.effect(() => Bus.publish(Event.Updated, { info }))
+    })
+  })
 
-  export const setTitle = fn(z.object({ sessionID: SessionID.zod, title: z.string() }), (input) =>
-    runPromise((svc) => svc.setTitle(input)),
+  export async function createNext(input: {
+    id?: SessionID
+    title?: string
+    parentID?: SessionID
+    workspaceID?: WorkspaceID
+    directory: string
+    permission?: Permission.Ruleset
+  }) {
+    const result: Info = {
+      id: SessionID.descending(input.id),
+      slug: Slug.create(),
+      version: Installation.VERSION,
+      projectID: Instance.project.id,
+      directory: input.directory,
+      workspaceID: input.workspaceID,
+      parentID: input.parentID,
+      title: input.title ?? createDefaultTitle(!!input.parentID),
+      permission: input.permission,
+      time: {
+        created: Date.now(),
+        updated: Date.now(),
+      },
+    }
+    log.info("created", result)
+    Database.use((db) => {
+      db.insert(SessionTable).values(toRow(result)).run()
+      Database.effect(() =>
+        Bus.publish(Event.Created, {
+          info: result,
+        }),
+      )
+    })
+    const cfg = await Config.get()
+    if (!result.parentID && (Flag.OPENCODE_AUTO_SHARE || cfg.share === "auto"))
+      share(result.id).catch(() => {
+        // Silently ignore sharing errors during session creation
+      })
+    Bus.publish(Event.Updated, {
+      info: result,
+    })
+    return result
+  }
+
+  export function plan(input: { slug: string; time: { created: number } }) {
+    const base = Instance.project.vcs
+      ? path.join(Instance.worktree, ".opencode", "plans")
+      : path.join(Global.Path.data, "plans")
+    return path.join(base, [input.time.created, input.slug].join("-") + ".md")
+  }
+
+  export const get = fn(SessionID.zod, async (id) => {
+    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
+    return fromRow(row)
+  })
+
+  export const share = fn(SessionID.zod, async (id) => {
+    const cfg = await Config.get()
+    if (cfg.share === "disabled") {
+      throw new Error("Sharing is disabled in configuration")
+    }
+    const { ShareNext } = await import("@/share/share-next")
+    const share = await ShareNext.create(id)
+    Database.use((db) => {
+      const row = db.update(SessionTable).set({ share_url: share.url }).where(eq(SessionTable.id, id)).returning().get()
+      if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
+      const info = fromRow(row)
+      Database.effect(() => Bus.publish(Event.Updated, { info }))
+    })
+    return share
+  })
+
+  export const unshare = fn(SessionID.zod, async (id) => {
+    // Use ShareNext to remove the share (same as share function uses ShareNext to create)
+    const { ShareNext } = await import("@/share/share-next")
+    await ShareNext.remove(id)
+    Database.use((db) => {
+      const row = db.update(SessionTable).set({ share_url: null }).where(eq(SessionTable.id, id)).returning().get()
+      if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
+      const info = fromRow(row)
+      Database.effect(() => Bus.publish(Event.Updated, { info }))
+    })
+  })
+
+  export const setTitle = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      title: z.string(),
+    }),
+    async (input) => {
+      return Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({ title: input.title })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+    },
   )
 
-  export const setArchived = fn(z.object({ sessionID: SessionID.zod, time: z.number().optional() }), (input) =>
-    runPromise((svc) => svc.setArchived(input)),
+  export const setArchived = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      time: z.number().optional(),
+    }),
+    async (input) => {
+      const info = Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({ time_archived: input.time })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+
+      if (input.time === undefined) return info
+
+      const list = await children(input.sessionID)
+      await Promise.all(
+        list
+          .filter((session) => session.time.archived !== input.time)
+          .map((session) =>
+            setArchived({
+              sessionID: session.id,
+              time: input.time,
+            }),
+          ),
+      )
+
+      return info
+    },
   )
 
-  export const setPermission = fn(z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset }), (input) =>
-    runPromise((svc) => svc.setPermission(input)),
+  export const setPermission = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      permission: Permission.Ruleset,
+    }),
+    async (input) => {
+      return Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({ permission: input.permission, time_updated: Date.now() })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+    },
   )
 
   export const setRevert = fn(
-    z.object({ sessionID: SessionID.zod, revert: Info.shape.revert, summary: Info.shape.summary }),
-    (input) =>
-      runPromise((svc) => svc.setRevert({ sessionID: input.sessionID, revert: input.revert, summary: input.summary })),
+    z.object({
+      sessionID: SessionID.zod,
+      revert: Info.shape.revert,
+      summary: Info.shape.summary,
+    }),
+    async (input) => {
+      return Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({
+            revert: input.revert ?? null,
+            summary_additions: input.summary?.additions,
+            summary_deletions: input.summary?.deletions,
+            summary_files: input.summary?.files,
+            time_updated: Date.now(),
+          })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+    },
   )
 
-  export const clearRevert = fn(SessionID.zod, (id) => runPromise((svc) => svc.clearRevert(id)))
+  export const clearRevert = fn(SessionID.zod, async (sessionID) => {
+    return Database.use((db) => {
+      const row = db
+        .update(SessionTable)
+        .set({
+          revert: null,
+          time_updated: Date.now(),
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .returning()
+        .get()
+      if (!row) throw new NotFoundError({ message: `Session not found: ${sessionID}` })
+      const info = fromRow(row)
+      Database.effect(() => Bus.publish(Event.Updated, { info }))
+      return info
+    })
+  })
 
-  export const setSummary = fn(z.object({ sessionID: SessionID.zod, summary: Info.shape.summary }), (input) =>
-    runPromise((svc) => svc.setSummary({ sessionID: input.sessionID, summary: input.summary })),
+  export const setSummary = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      summary: Info.shape.summary,
+    }),
+    async (input) => {
+      return Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({
+            summary_additions: input.summary?.additions,
+            summary_deletions: input.summary?.deletions,
+            summary_files: input.summary?.files,
+            time_updated: Date.now(),
+          })
+          .where(eq(SessionTable.id, input.sessionID))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+    },
   )
 
-  export const diff = fn(SessionID.zod, (id) => runPromise((svc) => svc.diff(id)))
+  export const diff = fn(SessionID.zod, async (sessionID) => {
+    try {
+      return await Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])
+    } catch {
+      return []
+    }
+  })
 
-  export const messages = fn(z.object({ sessionID: SessionID.zod, limit: z.number().optional() }), (input) =>
-    runPromise((svc) => svc.messages(input)),
+  export const messages = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      limit: z.number().optional(),
+    }),
+    async (input) => {
+      const result = [] as MessageV2.WithParts[]
+      for await (const msg of MessageV2.stream(input.sessionID)) {
+        if (input.limit && result.length >= input.limit) break
+        result.push(msg)
+      }
+      result.reverse()
+      return result
+    },
   )
 
   export function* list(input?: {
@@ -746,12 +566,14 @@ export namespace Session {
   }) {
     const project = Instance.project
     const conditions = [eq(SessionTable.project_id, project.id)]
+    const workspace = WorkspaceContext.workspaceID
+    const directory = input?.directory ? Filesystem.resolve(input.directory) : undefined
 
-    if (input?.workspaceID) {
-      conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
+    if (workspace) {
+      conditions.push(or(eq(SessionTable.workspace_id, workspace), isNull(SessionTable.workspace_id))!)
     }
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+    if (directory) {
+      conditions.push(eq(SessionTable.directory, directory))
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
@@ -789,9 +611,10 @@ export namespace Session {
     archived?: boolean
   }) {
     const conditions: SQL[] = []
+    const directory = input?.directory ? Filesystem.resolve(input.directory) : undefined
 
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+    if (directory) {
+      conditions.push(eq(SessionTable.directory, directory))
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
@@ -848,26 +671,216 @@ export namespace Session {
     }
   }
 
-  export const children = fn(SessionID.zod, (id) => runPromise((svc) => svc.children(id)))
-  export const remove = fn(SessionID.zod, (id) => runPromise((svc) => svc.remove(id)))
-  export async function updateMessage<T extends MessageV2.Info>(msg: T): Promise<T> {
-    MessageV2.Info.parse(msg)
-    return runPromise((svc) => svc.updateMessage(msg))
+  export function* listResumable(input?: {
+    limit?: number
+  }) {
+    const limit = input?.limit ?? 100
+    if (limit <= 0) return
+
+    const probe = Math.max(limit * 5, limit)
+
+    const tool = Database.use((db) =>
+      db
+        .select({
+          sessionID: MessageTable.session_id,
+          time: MessageTable.time_created,
+        })
+        .from(MessageTable)
+        .innerJoin(
+          PartTable,
+          and(eq(PartTable.message_id, MessageTable.id), eq(PartTable.session_id, MessageTable.session_id)),
+        )
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is not null`,
+            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${PartTable.data}, '$.state.status') = 'error'`,
+            sql`json_extract(${PartTable.data}, '$.state.error') in (${ResumeError}, ${ResumeAbortError})`,
+          ),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .limit(probe)
+        .all(),
+    )
+
+    const abort = Database.use((db) =>
+      db
+        .select({
+          sessionID: MessageTable.session_id,
+          time: MessageTable.time_created,
+        })
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is not null`,
+            sql`json_extract(${MessageTable.data}, '$.error.name') = ${MessageV2.AbortedError.name}`,
+          ),
+        )
+        .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+        .limit(probe)
+        .all(),
+    )
+
+    const seen = new Map<SessionID, number>()
+    for (const row of [...tool, ...abort]) {
+      const time = seen.get(row.sessionID)
+      if (time !== undefined && time >= row.time) continue
+      seen.set(row.sessionID, row.time)
+    }
+    if (seen.size === 0) return
+
+    const ids = [...seen.keys()]
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(SessionTable)
+        .where(and(inArray(SessionTable.id, ids), isNull(SessionTable.time_archived)))
+        .all(),
+    )
+
+    const sorted = rows
+      .map((row) => ({
+        info: fromRow(row),
+        time: seen.get(row.id) ?? 0,
+      }))
+      .sort((a, b) => b.time - a.time)
+      .slice(0, limit)
+
+    for (const row of sorted) {
+      yield row.info
+    }
   }
 
-  export const removeMessage = fn(z.object({ sessionID: SessionID.zod, messageID: MessageID.zod }), (input) =>
-    runPromise((svc) => svc.removeMessage(input)),
+  export const children = fn(SessionID.zod, async (parentID) => {
+    const project = Instance.project
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(SessionTable)
+        .where(and(eq(SessionTable.project_id, project.id), eq(SessionTable.parent_id, parentID)))
+        .all(),
+    )
+    return rows.map(fromRow)
+  })
+
+  export const remove = fn(SessionID.zod, async (sessionID) => {
+    const project = Instance.project
+    try {
+      const session = await get(sessionID)
+      for (const child of await children(sessionID)) {
+        await remove(child.id)
+      }
+      await unshare(sessionID).catch(() => {})
+      // CASCADE delete handles messages and parts automatically
+      Database.use((db) => {
+        db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run()
+        Database.effect(() =>
+          Bus.publish(Event.Deleted, {
+            info: session,
+          }),
+        )
+      })
+    } catch (e) {
+      log.error(e)
+    }
+  })
+
+  export const updateMessage = fn(MessageV2.Info, async (msg) => {
+    const time_created = msg.time.created
+    const { id, sessionID, ...data } = msg
+    Database.use((db) => {
+      db.insert(MessageTable)
+        .values({
+          id,
+          session_id: sessionID,
+          time_created,
+          data,
+        })
+        .onConflictDoUpdate({ target: MessageTable.id, set: { data } })
+        .run()
+      Database.effect(() =>
+        Bus.publish(MessageV2.Event.Updated, {
+          sessionID: msg.sessionID,
+          info: msg,
+        }),
+      )
+    })
+    return msg
+  })
+
+  export const removeMessage = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
+    }),
+    async (input) => {
+      // CASCADE delete handles parts automatically
+      Database.use((db) => {
+        db.delete(MessageTable)
+          .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
+          .run()
+        Database.effect(() =>
+          Bus.publish(MessageV2.Event.Removed, {
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+          }),
+        )
+      })
+      return input.messageID
+    },
   )
 
   export const removePart = fn(
-    z.object({ sessionID: SessionID.zod, messageID: MessageID.zod, partID: PartID.zod }),
-    (input) => runPromise((svc) => svc.removePart(input)),
+    z.object({
+      sessionID: SessionID.zod,
+      messageID: MessageID.zod,
+      partID: PartID.zod,
+    }),
+    async (input) => {
+      Database.use((db) => {
+        db.delete(PartTable)
+          .where(and(eq(PartTable.id, input.partID), eq(PartTable.session_id, input.sessionID)))
+          .run()
+        Database.effect(() =>
+          Bus.publish(MessageV2.Event.PartRemoved, {
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+            partID: input.partID,
+          }),
+        )
+      })
+      return input.partID
+    },
   )
 
-  export async function updatePart<T extends MessageV2.Part>(part: T): Promise<T> {
-    MessageV2.Part.parse(part)
-    return runPromise((svc) => svc.updatePart(part))
-  }
+  const UpdatePartInput = MessageV2.Part
+
+  export const updatePart = fn(UpdatePartInput, async (part) => {
+    const { id, messageID, sessionID, ...data } = part
+    const time = Date.now()
+    Database.use((db) => {
+      db.insert(PartTable)
+        .values({
+          id,
+          message_id: messageID,
+          session_id: sessionID,
+          time_created: time,
+          data,
+        })
+        .onConflictDoUpdate({ target: PartTable.id, set: { data } })
+        .run()
+      Database.effect(() =>
+        Bus.publish(MessageV2.Event.PartUpdated, {
+          sessionID: part.sessionID,
+          part: structuredClone(part),
+          time,
+        }),
+      )
+    })
+    return part
+  })
 
   export const updatePartDelta = fn(
     z.object({
@@ -877,11 +890,187 @@ export namespace Session {
       field: z.string(),
       delta: z.string(),
     }),
-    (input) => runPromise((svc) => svc.updatePartDelta(input)),
+    async (input) => {
+      Bus.publish(MessageV2.Event.PartDelta, input)
+    },
   )
 
-  export const initialize = fn(
-    z.object({ sessionID: SessionID.zod, modelID: ModelID.zod, providerID: ProviderID.zod, messageID: MessageID.zod }),
-    (input) => runPromise((svc) => svc.initialize(input)),
+  export const getUsage = fn(
+    z.object({
+      model: z.custom<Provider.Model>(),
+      usage: z.custom<LanguageModelV2Usage>(),
+      metadata: z.custom<ProviderMetadata>().optional(),
+    }),
+    (input) => {
+      const safe = (value: number) => {
+        if (!Number.isFinite(value)) return 0
+        return value
+      }
+      const inputTokens = safe(input.usage.inputTokens ?? 0)
+      const outputTokens = safe(input.usage.outputTokens ?? 0)
+      const reasoningTokens = safe(input.usage.reasoningTokens ?? 0)
+
+      const cacheReadInputTokens = safe(input.usage.cachedInputTokens ?? 0)
+      const cacheWriteInputTokens = safe(
+        (input.metadata?.["anthropic"]?.["cacheCreationInputTokens"] ??
+          // @ts-expect-error
+          input.metadata?.["bedrock"]?.["usage"]?.["cacheWriteInputTokens"] ??
+          // @ts-expect-error
+          input.metadata?.["venice"]?.["usage"]?.["cacheCreationInputTokens"] ??
+          0) as number,
+      )
+
+      // OpenRouter provides inputTokens as the total count of input tokens (including cached).
+      // AFAIK other providers (OpenRouter/OpenAI/Gemini etc.) do it the same way e.g. vercel/ai#8794 (comment)
+      // Anthropic does it differently though - inputTokens doesn't include cached tokens.
+      // It looks like OpenCode's cost calculation assumes all providers return inputTokens the same way Anthropic does (I'm guessing getUsage logic was originally implemented with anthropic), so it's causing incorrect cost calculation for OpenRouter and others.
+      const excludesCachedTokens = !!(input.metadata?.["anthropic"] || input.metadata?.["bedrock"])
+      const adjustedInputTokens = safe(
+        excludesCachedTokens ? inputTokens : inputTokens - cacheReadInputTokens - cacheWriteInputTokens,
+      )
+
+      const total = iife(() => {
+        // Anthropic doesn't provide total_tokens, also ai sdk will vastly undercount if we
+        // don't compute from components
+        if (
+          input.model.api.npm === "@ai-sdk/anthropic" ||
+          input.model.api.npm === "@ai-sdk/amazon-bedrock" ||
+          input.model.api.npm === "@ai-sdk/google-vertex/anthropic"
+        ) {
+          return adjustedInputTokens + outputTokens + cacheReadInputTokens + cacheWriteInputTokens
+        }
+        return input.usage.totalTokens
+      })
+
+      const tokens = {
+        total,
+        input: adjustedInputTokens,
+        output: outputTokens,
+        reasoning: reasoningTokens,
+        cache: {
+          write: cacheWriteInputTokens,
+          read: cacheReadInputTokens,
+        },
+      }
+
+      const costInfo =
+        input.model.cost?.experimentalOver200K && tokens.input + tokens.cache.read > 200_000
+          ? input.model.cost.experimentalOver200K
+          : input.model.cost
+      return {
+        cost: safe(
+          new Decimal(0)
+            .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+            // TODO: update models.dev to have better pricing model, for now:
+            // charge reasoning tokens at the same rate as output tokens
+            .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+            .toNumber(),
+        ),
+        tokens,
+      }
+    },
   )
+
+  /**
+   * Recover orphaned assistant messages left incomplete after a server crash or restart.
+   * Finds assistant messages with no `time.completed`, forces their non-terminal tool
+   * parts to error status, marks the messages as completed, and emits bus events so
+   * connected frontends update.
+   *
+   * @see https://github.com/anomalyco/opencode/issues/19023
+   */
+  export async function recover() {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.time.completed') is null`,
+          ),
+        )
+        .all(),
+    )
+    if (rows.length === 0) return
+    log.info("recovering orphaned assistant messages", { count: rows.length })
+    const now = Date.now()
+    for (const row of rows) {
+      const msg = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Assistant
+      // Fix non-terminal tool parts
+      const parts = await MessageV2.parts(row.id)
+      for (const part of parts) {
+        if (part.type !== "tool") continue
+        if (part.state.status === "completed" || part.state.status === "error") continue
+        await updatePart({
+          ...part,
+          state: {
+            ...part.state,
+            status: "error",
+            error: "Tool execution was interrupted by server restart",
+            time: {
+              start: part.state.status === "running" ? part.state.time.start : now,
+              end: now,
+            },
+          },
+        })
+      }
+      // Mark message completed
+      msg.time.completed = now
+      await updateMessage(msg)
+      log.info("recovered orphaned message", { messageID: row.id, sessionID: row.session_id })
+    }
+  }
+
+  export class BusyError extends Error {
+    constructor(public readonly sessionID: string) {
+      super(`Session ${sessionID} is busy`)
+    }
+  }
+
+  export const initialize = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      modelID: ModelID.zod,
+      providerID: ProviderID.zod,
+      messageID: MessageID.zod,
+    }),
+    async (input) => {
+      await SessionPrompt.command({
+        sessionID: input.sessionID,
+        messageID: input.messageID,
+        model: input.providerID + "/" + input.modelID,
+        command: Command.Default.INIT,
+        arguments: "",
+      })
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // Effect-native service
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    create(opts?: Parameters<typeof create>[0]): Effect.Effect<Info>
+    updateMessage(msg: MessageV2.Info): Effect.Effect<MessageV2.Info>
+    updatePart(part: Parameters<typeof updatePart>[0]): Effect.Effect<any>
+    messages(input: Parameters<typeof messages>[0]): Effect.Effect<Awaited<ReturnType<typeof messages>>>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/Session") {}
+
+  export const layer = Layer.effect(
+    Service,
+    Effect.sync(() => ({
+      create: (opts?: Parameters<typeof create>[0]) => Effect.promise(() => create(opts)),
+      updateMessage: (msg: MessageV2.Info) => Effect.promise(() => updateMessage(msg)),
+      updatePart: (part: Parameters<typeof updatePart>[0]) => Effect.promise(() => updatePart(part)),
+      messages: (input: Parameters<typeof messages>[0]) => Effect.promise(() => messages(input)),
+    })),
+  )
+
+  export const defaultLayer: Layer.Layer<Service> = layer
 }
