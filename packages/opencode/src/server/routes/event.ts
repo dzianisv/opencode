@@ -32,7 +32,7 @@ export const EventRoutes = () =>
       c.header("X-Accel-Buffering", "no")
       c.header("X-Content-Type-Options", "nosniff")
       return streamSSE(c, async (stream) => {
-        const q = new AsyncQueue<string | null>()
+        const q = new AsyncQueue<string>()
         let done = false
 
         q.push(
@@ -57,7 +57,7 @@ export const EventRoutes = () =>
           done = true
           clearInterval(heartbeat)
           unsub()
-          q.push(null)
+          q.close()
           log.info("event disconnected")
         }
 
@@ -72,7 +72,6 @@ export const EventRoutes = () =>
 
         try {
           for await (const data of q) {
-            if (data === null) return
             await stream.writeSSE({ data })
           }
         } finally {

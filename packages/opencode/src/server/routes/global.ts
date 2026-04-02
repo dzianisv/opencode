@@ -1,71 +1,21 @@
-import { Hono, type Context } from "hono"
+import { Hono } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { streamSSE } from "hono/streaming"
 import z from "zod"
 import { BusEvent } from "@/bus/bus-event"
-import { SyncEvent } from "@/sync"
 import { GlobalBus } from "@/bus/global"
-import { AsyncQueue } from "@/util/queue"
 import { Instance } from "../../project/instance"
 import { Installation } from "@/installation"
 import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
+import { Memory } from "@/diagnostic/memory"
+import { Session } from "../../session"
 
 const log = Log.create({ service: "server" })
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
-
-async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>) => () => void) {
-  return streamSSE(c, async (stream) => {
-    const q = new AsyncQueue<string | null>()
-    let done = false
-
-    q.push(
-      JSON.stringify({
-        payload: {
-          type: "server.connected",
-          properties: {},
-        },
-      }),
-    )
-
-    // Send heartbeat every 10s to prevent stalled proxy streams.
-    const heartbeat = setInterval(() => {
-      q.push(
-        JSON.stringify({
-          payload: {
-            type: "server.heartbeat",
-            properties: {},
-          },
-        }),
-      )
-    }, 10_000)
-
-    const stop = () => {
-      if (done) return
-      done = true
-      clearInterval(heartbeat)
-      unsub()
-      q.push(null)
-      log.info("global event disconnected")
-    }
-
-    const unsub = subscribe(q)
-
-    stream.onAbort(stop)
-
-    try {
-      for await (const data of q) {
-        if (data === null) return
-        await stream.writeSSE({ data })
-      }
-    } finally {
-      stop()
-    }
-  })
-}
 
 export const GlobalRoutes = lazy(() =>
   new Hono()
@@ -118,61 +68,43 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         log.info("global event connected")
-        c.header("Cache-Control", "no-cache, no-transform")
         c.header("X-Accel-Buffering", "no")
         c.header("X-Content-Type-Options", "nosniff")
-
-        return streamEvents(c, (q) => {
+        return streamSSE(c, async (stream) => {
+          stream.writeSSE({
+            data: JSON.stringify({
+              payload: {
+                type: "server.connected",
+                properties: {},
+              },
+            }),
+          })
           async function handler(event: any) {
-            q.push(JSON.stringify(event))
+            await stream.writeSSE({
+              data: JSON.stringify(event),
+            })
           }
           GlobalBus.on("event", handler)
-          return () => GlobalBus.off("event", handler)
-        })
-      },
-    )
-    .get(
-      "/sync-event",
-      describeRoute({
-        summary: "Subscribe to global sync events",
-        description: "Get global sync events",
-        operationId: "global.sync-event.subscribe",
-        responses: {
-          200: {
-            description: "Event stream",
-            content: {
-              "text/event-stream": {
-                schema: resolver(
-                  z
-                    .object({
-                      payload: SyncEvent.payloads(),
-                    })
-                    .meta({
-                      ref: "SyncEvent",
-                    }),
-                ),
-              },
-            },
-          },
-        },
-      }),
-      async (c) => {
-        log.info("global sync event connected")
-        c.header("Cache-Control", "no-cache, no-transform")
-        c.header("X-Accel-Buffering", "no")
-        c.header("X-Content-Type-Options", "nosniff")
-        return streamEvents(c, (q) => {
-          return SyncEvent.subscribeAll(({ def, event }) => {
-            // TODO: don't pass def, just pass the type (and it should
-            // be versioned)
-            q.push(
-              JSON.stringify({
+
+          // Send heartbeat every 10s to prevent stalled proxy streams.
+          const heartbeat = setInterval(() => {
+            stream.writeSSE({
+              data: JSON.stringify({
                 payload: {
-                  ...event,
-                  type: SyncEvent.versionedType(def.type, def.version),
+                  type: "server.heartbeat",
+                  properties: {},
                 },
               }),
-            )
+            })
+          }, 10_000)
+
+          await new Promise<void>((resolve) => {
+            stream.onAbort(() => {
+              clearInterval(heartbeat)
+              GlobalBus.off("event", handler)
+              resolve()
+              log.info("global event disconnected")
+            })
           })
         })
       },
@@ -252,61 +184,80 @@ export const GlobalRoutes = lazy(() =>
         return c.json(true)
       },
     )
-    .post(
-      "/upgrade",
+    .get(
+      "/memory",
       describeRoute({
-        summary: "Upgrade opencode",
-        description: "Upgrade opencode to the specified version or latest if not specified.",
-        operationId: "global.upgrade",
+        summary: "Get memory diagnostics",
+        description: "Returns process memory, instance cache state, session counts, and optional process-tree memory.",
+        operationId: "global.memory",
         responses: {
           200: {
-            description: "Upgrade result",
+            description: "Memory diagnostics",
             content: {
               "application/json": {
-                schema: resolver(
-                  z.union([
-                    z.object({
-                      success: z.literal(true),
-                      version: z.string(),
-                    }),
-                    z.object({
-                      success: z.literal(false),
-                      error: z.string(),
-                    }),
-                  ]),
-                ),
+                schema: resolver(Memory.Sample),
               },
             },
           },
-          ...errors(400),
         },
       }),
       validator(
-        "json",
+        "query",
         z.object({
-          target: z.string().optional(),
+          children: z.coerce.boolean().optional(),
         }),
       ),
       async (c) => {
-        const method = await Installation.method()
-        if (method === "unknown") {
-          return c.json({ success: false, error: "Unknown installation method" }, 400)
-        }
-        const target = c.req.valid("json").target || (await Installation.latest(method))
-        const result = await Installation.upgrade(method, target)
-          .then(() => ({ success: true as const, version: target }))
-          .catch((e) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
-        if (result.success) {
-          GlobalBus.emit("event", {
-            directory: "global",
-            payload: {
-              type: Installation.Event.Updated.type,
-              properties: { version: target },
+        const query = c.req.valid("query")
+        return c.json(await Memory.sample({ children: query.children }))
+      },
+    )
+    .get(
+      "/session",
+      describeRoute({
+        summary: "List sessions globally",
+        description: "List sessions across all projects, sorted by most recently updated.",
+        operationId: "global.session.list",
+        responses: {
+          200: {
+            description: "List of sessions",
+            content: {
+              "application/json": {
+                schema: resolver(Session.GlobalInfo.array()),
+              },
             },
-          })
-          return c.json(result)
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          start: z.coerce.number().optional(),
+          cursor: z.coerce.number().optional(),
+          search: z.string().optional(),
+          limit: z.coerce.number().optional(),
+          roots: z.coerce.boolean().optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        const limit = query.limit ?? 50
+        const sessions: Session.GlobalInfo[] = []
+        for (const session of Session.listGlobal({
+          roots: query.roots,
+          start: query.start,
+          cursor: query.cursor,
+          search: query.search,
+          limit: limit + 1,
+        })) {
+          sessions.push(session)
         }
-        return c.json(result, 500)
+        if (sessions.length > limit) {
+          const next = sessions[limit - 1]
+          sessions.length = limit
+          if (next) c.header("x-next-cursor", String(next.time.updated))
+        }
+        return c.json(sessions)
       },
     ),
 )
