@@ -1,24 +1,20 @@
-import os from "os"
 import path from "path"
-import { Effect, Layer, ServiceMap } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { Config } from "@/config/config"
-import { InstanceState } from "@/effect/instance-state"
-import { makeRuntime } from "@/effect/run-service"
-import { Flag } from "@/flag/flag"
-import { AppFileSystem } from "@/filesystem"
-import { withTransientReadRetry } from "@/util/effect-http-client"
+import os from "os"
 import { Global } from "../global"
+import { Filesystem } from "../util/filesystem"
+import { Config } from "../config/config"
 import { Instance } from "../project/instance"
+import { Flag } from "@/flag/flag"
 import { Log } from "../util/log"
+import { Glob } from "../util/glob"
 import type { MessageV2 } from "./message-v2"
-import type { MessageID } from "./schema"
+import { Effect, Layer, ServiceMap } from "effect"
 
 const log = Log.create({ service: "instruction" })
 
 const FILES = [
   "AGENTS.md",
-  ...(Flag.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT ? [] : ["CLAUDE.md"]),
+  "CLAUDE.md",
   "CONTEXT.md", // deprecated
 ]
 
@@ -34,225 +30,134 @@ function globalFiles() {
   return files
 }
 
-function extract(messages: MessageV2.WithParts[]) {
-  const paths = new Set<string>()
-  for (const msg of messages) {
-    for (const part of msg.parts) {
-      if (part.type === "tool" && part.tool === "read" && part.state.status === "completed") {
-        if (part.state.time.compacted) continue
-        const loaded = part.state.metadata?.loaded
-        if (!loaded || !Array.isArray(loaded)) continue
-        for (const p of loaded) {
-          if (typeof p === "string") paths.add(p)
-        }
-      }
-    }
+async function resolveRelative(instruction: string): Promise<string[]> {
+  if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+    return Filesystem.globUp(instruction, Instance.directory, Instance.worktree).catch(() => [])
   }
-  return paths
+  if (!Flag.OPENCODE_CONFIG_DIR) {
+    log.warn(
+      `Skipping relative instruction "${instruction}" - no OPENCODE_CONFIG_DIR set while project config is disabled`,
+    )
+    return []
+  }
+  return Filesystem.globUp(instruction, Flag.OPENCODE_CONFIG_DIR, Flag.OPENCODE_CONFIG_DIR).catch(() => [])
 }
 
-export namespace Instruction {
-  export interface Interface {
-    readonly clear: (messageID: MessageID) => Effect.Effect<void>
-    readonly systemPaths: () => Effect.Effect<Set<string>, AppFileSystem.Error>
-    readonly system: () => Effect.Effect<string[], AppFileSystem.Error>
-    readonly find: (dir: string) => Effect.Effect<string | undefined, AppFileSystem.Error>
-    readonly resolve: (
-      messages: MessageV2.WithParts[],
-      filepath: string,
-      messageID: MessageID,
-    ) => Effect.Effect<{ filepath: string; content: string }[], AppFileSystem.Error>
+export namespace InstructionPrompt {
+  const state = Instance.state(() => {
+    return {
+      claims: new Map<string, Set<string>>(),
+    }
+  })
+
+  function isClaimed(messageID: string, filepath: string) {
+    const claimed = state().claims.get(messageID)
+    if (!claimed) return false
+    return claimed.has(filepath)
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Instruction") {}
+  function claim(messageID: string, filepath: string) {
+    const current = state()
+    let claimed = current.claims.get(messageID)
+    if (!claimed) {
+      claimed = new Set()
+      current.claims.set(messageID, claimed)
+    }
+    claimed.add(filepath)
+  }
 
-  export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.Service | HttpClient.HttpClient> =
-    Layer.effect(
-      Service,
-      Effect.gen(function* () {
-        const cfg = yield* Config.Service
-        const fs = yield* AppFileSystem.Service
-        const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
-
-        const state = yield* InstanceState.make(
-          Effect.fn("Instruction.state")(() =>
-            Effect.succeed({
-              // Track which instruction files have already been attached for a given assistant message.
-              claims: new Map<MessageID, Set<string>>(),
-            }),
-          ),
-        )
-
-        const relative = Effect.fnUntraced(function* (instruction: string) {
-          if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-            return yield* fs
-              .globUp(instruction, Instance.directory, Instance.worktree)
-              .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-          }
-          if (!Flag.OPENCODE_CONFIG_DIR) {
-            log.warn(
-              `Skipping relative instruction "${instruction}" - no OPENCODE_CONFIG_DIR set while project config is disabled`,
-            )
-            return []
-          }
-          return yield* fs
-            .globUp(instruction, Flag.OPENCODE_CONFIG_DIR, Flag.OPENCODE_CONFIG_DIR)
-            .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-        })
-
-        const read = Effect.fnUntraced(function* (filepath: string) {
-          return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
-        })
-
-        const fetch = Effect.fnUntraced(function* (url: string) {
-          const res = yield* http.execute(HttpClientRequest.get(url)).pipe(
-            Effect.timeout(5000),
-            Effect.catch(() => Effect.succeed(null)),
-          )
-          if (!res) return ""
-          const body = yield* res.arrayBuffer.pipe(Effect.catch(() => Effect.succeed(new ArrayBuffer(0))))
-          return new TextDecoder().decode(body)
-        })
-
-        const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
-          const s = yield* InstanceState.get(state)
-          s.claims.delete(messageID)
-        })
-
-        const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
-          const config = yield* cfg.get()
-          const paths = new Set<string>()
-
-          // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
-          if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-            for (const file of FILES) {
-              const matches = yield* fs.findUp(file, Instance.directory, Instance.worktree)
-              if (matches.length > 0) {
-                matches.forEach((item) => paths.add(path.resolve(item)))
-                break
-              }
-            }
-          }
-
-          for (const file of globalFiles()) {
-            if (yield* fs.existsSafe(file)) {
-              paths.add(path.resolve(file))
-              break
-            }
-          }
-
-          if (config.instructions) {
-            for (const raw of config.instructions) {
-              if (raw.startsWith("https://") || raw.startsWith("http://")) continue
-              const instruction = raw.startsWith("~/") ? path.join(os.homedir(), raw.slice(2)) : raw
-              const matches = yield* (
-                path.isAbsolute(instruction)
-                  ? fs.glob(path.basename(instruction), {
-                      cwd: path.dirname(instruction),
-                      absolute: true,
-                      include: "file",
-                    })
-                  : relative(instruction)
-              ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
-              matches.forEach((item) => paths.add(path.resolve(item)))
-            }
-          }
-
-          return paths
-        })
-
-        const system = Effect.fn("Instruction.system")(function* () {
-          const config = yield* cfg.get()
-          const paths = yield* systemPaths()
-          const urls = (config.instructions ?? []).filter(
-            (item) => item.startsWith("https://") || item.startsWith("http://"),
-          )
-
-          const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
-          const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
-
-          return [
-            ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
-            ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
-          ]
-        })
-
-        const find = Effect.fn("Instruction.find")(function* (dir: string) {
-          for (const file of FILES) {
-            const filepath = path.resolve(path.join(dir, file))
-            if (yield* fs.existsSafe(filepath)) return filepath
-          }
-        })
-
-        const resolve = Effect.fn("Instruction.resolve")(function* (
-          messages: MessageV2.WithParts[],
-          filepath: string,
-          messageID: MessageID,
-        ) {
-          const sys = yield* systemPaths()
-          const already = extract(messages)
-          const results: { filepath: string; content: string }[] = []
-          const s = yield* InstanceState.get(state)
-
-          const target = path.resolve(filepath)
-          const root = path.resolve(Instance.directory)
-          let current = path.dirname(target)
-
-          // Walk upward from the file being read and attach nearby instruction files once per message.
-          while (current.startsWith(root) && current !== root) {
-            const found = yield* find(current)
-            if (!found || found === target || sys.has(found) || already.has(found)) {
-              current = path.dirname(current)
-              continue
-            }
-
-            let set = s.claims.get(messageID)
-            if (!set) {
-              set = new Set()
-              s.claims.set(messageID, set)
-            }
-            if (set.has(found)) {
-              current = path.dirname(current)
-              continue
-            }
-
-            set.add(found)
-            const content = yield* read(found)
-            if (content) {
-              results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })
-            }
-
-            current = path.dirname(current)
-          }
-
-          return results
-        })
-
-        return Service.of({ clear, systemPaths, system, find, resolve })
-      }),
-    )
-
-  export const defaultLayer = layer.pipe(
-    Layer.provide(Config.defaultLayer),
-    Layer.provide(AppFileSystem.defaultLayer),
-    Layer.provide(FetchHttpClient.layer),
-  )
-
-  const { runPromise } = makeRuntime(Service, defaultLayer)
-
-  export function clear(messageID: MessageID) {
-    return runPromise((svc) => svc.clear(messageID))
+  export function clear(messageID: string) {
+    state().claims.delete(messageID)
   }
 
   export async function systemPaths() {
-    return runPromise((svc) => svc.systemPaths())
+    const config = await Config.get()
+    const paths = new Set<string>()
+
+    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      for (const file of FILES) {
+        const matches = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
+        if (matches.length > 0) {
+          matches.forEach((p) => {
+            paths.add(path.resolve(p))
+          })
+          break
+        }
+      }
+    }
+
+    for (const file of globalFiles()) {
+      if (await Filesystem.exists(file)) {
+        paths.add(path.resolve(file))
+        break
+      }
+    }
+
+    if (config.instructions) {
+      for (let instruction of config.instructions) {
+        if (instruction.startsWith("https://") || instruction.startsWith("http://")) continue
+        if (instruction.startsWith("~/")) {
+          instruction = path.join(os.homedir(), instruction.slice(2))
+        }
+        const matches = path.isAbsolute(instruction)
+          ? await Glob.scan(path.basename(instruction), {
+              cwd: path.dirname(instruction),
+              absolute: true,
+              include: "file",
+            }).catch(() => [])
+          : await resolveRelative(instruction)
+        matches.forEach((p) => {
+          paths.add(path.resolve(p))
+        })
+      }
+    }
+
+    return paths
   }
 
   export function loaded(messages: MessageV2.WithParts[]) {
-    return extract(messages)
+    const paths = new Set<string>()
+    for (const msg of messages) {
+      for (const part of msg.parts) {
+        if (part.type === "tool" && part.tool === "read" && part.state.status === "completed") {
+          if (part.state.time.compacted) continue
+          const loaded = part.state.metadata?.loaded
+          if (!loaded || !Array.isArray(loaded)) continue
+          for (const p of loaded) {
+            if (typeof p === "string") paths.add(p)
+          }
+        }
+      }
+    }
+    return paths
   }
 
   export async function resolve(messages: MessageV2.WithParts[], filepath: string, messageID: MessageID) {
     return runPromise((svc) => svc.resolve(messages, filepath, messageID))
   }
+}
+
+// ---------------------------------------------------------------------------
+// Instruction: alias for InstructionPrompt + Effect service
+// ---------------------------------------------------------------------------
+
+export namespace Instruction {
+  export const { clear, systemPaths, system, loaded, find, resolve } = InstructionPrompt
+
+  export interface EffectInterface {
+    systemPaths(): Effect.Effect<Set<string>>
+    system(): Effect.Effect<string[]>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/Instruction") {}
+
+  export const layer: Layer.Layer<Service> = Layer.effect(
+    Service,
+    Effect.sync((): EffectInterface => ({
+      systemPaths: () => Effect.promise(() => InstructionPrompt.systemPaths()),
+      system: () => Effect.promise(() => InstructionPrompt.system()),
+    })),
+  )
+
+  export const defaultLayer: Layer.Layer<Service> = layer
 }

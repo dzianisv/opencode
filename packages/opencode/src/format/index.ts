@@ -1,4 +1,5 @@
 import { Effect, Layer, ServiceMap } from "effect"
+import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { InstanceState } from "@/effect/instance-state"
@@ -173,10 +174,10 @@ export namespace Format {
         return result
       })
 
-      const file = Effect.fn("Format.file")(function* (filepath: string) {
+      const file: (filepath: string) => Effect.Effect<void> = Effect.fn("Format.file")(function* (filepath: string) {
         const { formatFile } = yield* InstanceState.get(state)
         yield* formatFile(filepath)
-      })
+      }) as unknown as (filepath: string) => Effect.Effect<void>
 
       return Service.of({ init, status, file })
     }),
@@ -184,7 +185,7 @@ export namespace Format {
 
   export const defaultLayer = layer.pipe(
     Layer.provide(Config.defaultLayer),
-    Layer.provide(CrossSpawnSpawner.defaultLayer),
+    Layer.provide(CrossSpawnSpawner.layer.pipe(Layer.provide(NodeFileSystem.layer), Layer.provide(NodePath.layer))),
   )
 
   const { runPromise } = makeRuntime(Service, defaultLayer)

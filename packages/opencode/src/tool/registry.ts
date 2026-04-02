@@ -7,13 +7,15 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { TodoWriteTool } from "./todo"
+import { TodoWriteTool, TodoReadTool } from "./todo"
+import { RenameTool } from "./rename"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
+import { Instance } from "../project/instance"
 import { Config } from "../config/config"
 import path from "path"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -26,9 +28,11 @@ import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { Truncate } from "./truncate"
+
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
+import { existsSync } from "fs"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -43,8 +47,61 @@ import { AppFileSystem } from "../filesystem"
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
 
-  type State = {
-    custom: Tool.Info[]
+  export const state = Instance.state(async () => {
+    const custom = [] as Tool.Info[]
+
+    const files = await Config.directories().then((dirs) =>
+      dirs.flatMap((dir) =>
+        Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }).map((file) => ({
+          dir,
+          file,
+        })),
+      ),
+    )
+    const deps = files.some((item) => {
+      return existsSync(path.join(item.dir, "package.json")) || existsSync(path.join(item.dir, "node_modules"))
+    })
+    if (deps) await Config.waitForDependencies()
+    for (const item of files) {
+      const namespace = path.basename(item.file, path.extname(item.file))
+      const mod = await import(pathToFileURL(item.file).href)
+      for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
+        custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
+      }
+    }
+
+    const plugins = await Plugin.list()
+    for (const plugin of plugins) {
+      for (const [id, def] of Object.entries(plugin.tool ?? {})) {
+        custom.push(fromPlugin(id, def))
+      }
+    }
+
+    return { custom }
+  })
+
+  function fromPlugin(id: string, def: ToolDefinition): Tool.Info {
+    return {
+      id,
+      init: async (initCtx) => ({
+        parameters: z.object(def.args),
+        description: def.description,
+        execute: async (args, ctx) => {
+          const pluginCtx = {
+            ...ctx,
+            directory: Instance.directory,
+            worktree: Instance.worktree,
+          } as unknown as PluginToolContext
+          const result = await def.execute(args as any, pluginCtx)
+          const out = await Truncate.output(result, {}, initCtx?.agent)
+          return {
+            title: "",
+            output: out.truncated ? out.content : result,
+            metadata: { truncated: out.truncated, outputPath: out.truncated ? out.outputPath : undefined },
+          }
+        },
+      }),
+    }
   }
 
   export interface Interface {
@@ -250,7 +307,7 @@ export namespace ToolRegistry {
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function ids() {
-    return runPromise((svc) => svc.ids())
+    return all().then((x) => x.map((t) => t.id))
   }
 
   export async function tools(
@@ -259,7 +316,59 @@ export namespace ToolRegistry {
       modelID: ModelID
     },
     agent?: Agent.Info,
-  ): Promise<(Tool.Def & { id: string })[]> {
-    return runPromise((svc) => svc.tools(model, agent))
+  ) {
+    const tools = await all()
+    const result = await Promise.all(
+      tools
+        .filter((t) => {
+          // Enable websearch/codesearch for zen users OR via enable flag
+          if (t.id === "codesearch" || t.id === "websearch") {
+            return model.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
+          }
+
+          // use apply tool in same format as codex
+          const usePatch =
+            model.modelID.includes("gpt-") && !model.modelID.includes("oss") && !model.modelID.includes("gpt-4")
+          if (t.id === "apply_patch") return usePatch
+          if (t.id === "edit" || t.id === "write") return !usePatch
+
+          return true
+        })
+        .map(async (t) => {
+          using _ = log.time(t.id)
+          const tool = await t.init({ agent })
+          const output = {
+            description: tool.description,
+            parameters: tool.parameters,
+          }
+          await Plugin.trigger("tool.definition", { toolID: t.id }, output)
+          return {
+            id: t.id,
+            ...tool,
+            description: output.description,
+            parameters: output.parameters,
+          }
+        }),
+    )
+    return result
   }
+
+  // ---------------------------------------------------------------------------
+  // Effect-based service
+  // ---------------------------------------------------------------------------
+
+  export interface EffectInterface {
+    all(): Effect.Effect<Awaited<ReturnType<typeof all>>>
+    ids(): Effect.Effect<string[]>
+  }
+
+  export class Service extends ServiceMap.Service<Service, EffectInterface>()("@opencode/ToolRegistry") {}
+
+  export const layer: Layer.Layer<Service> = Layer.effect(
+    Service,
+    Effect.sync((): EffectInterface => ({
+      all: () => Effect.promise(() => all()),
+      ids: () => Effect.promise(() => ids()),
+    })),
+  )
 }
