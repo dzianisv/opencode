@@ -103,6 +103,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
    - Create new branch if needed
    - Push to remote with -u flag if needed
    - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.
+4. After PR creation succeeds, rename the current session using the rename tool so the title exactly matches the PR in this format: `#<pr_number> <pr_title>` (example: `#524 fix: harden tenant bootstrap config seeding`). If a PR already exists, use that PR's number and title.
 <example>
 gh pr create --title "the pr title" --body "$(cat <<'EOF'
 ## Summary
