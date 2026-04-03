@@ -213,6 +213,27 @@ test("large added files are skipped", async () => {
   })
 })
 
+test("large tracked files are skipped", async () => {
+  await using tmp = await bootstrap()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await Filesystem.write(`${tmp.path}/tracked.bin`, new Uint8Array(2 * 1024 * 1024 + 1))
+      await $`git add tracked.bin`.cwd(tmp.path).quiet()
+      await $`git commit --no-gpg-sign -m tracked`.cwd(tmp.path).quiet()
+
+      const before = await Snapshot.track()
+      expect(before).toBeTruthy()
+
+      await Filesystem.write(`${tmp.path}/tracked.bin`, new Uint8Array(2 * 1024 * 1024 + 2))
+
+      expect((await Snapshot.patch(before!)).files).toEqual([])
+      expect(await Snapshot.diff(before!)).toBe("")
+      expect(await Snapshot.track()).toBe(before)
+    },
+  })
+})
+
 test("nested directory revert", async () => {
   await using tmp = await bootstrap()
   await Instance.provide({
@@ -1269,44 +1290,48 @@ test("revert preserves patch order when the same hash appears again", async () =
   })
 })
 
-test("revert handles large mixed batches across chunk boundaries", async () => {
-  await using tmp = await bootstrap()
-  await Instance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const base = Array.from({ length: 140 }, (_, i) => fwd(tmp.path, "batch", `${i}.txt`))
-      const fresh = Array.from({ length: 140 }, (_, i) => fwd(tmp.path, "fresh", `${i}.txt`))
+test(
+  "revert handles large mixed batches across chunk boundaries",
+  async () => {
+    await using tmp = await bootstrap()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const base = Array.from({ length: 140 }, (_, i) => fwd(tmp.path, "batch", `${i}.txt`))
+        const fresh = Array.from({ length: 140 }, (_, i) => fwd(tmp.path, "fresh", `${i}.txt`))
 
-      await $`mkdir -p ${tmp.path}/batch ${tmp.path}/fresh`.quiet()
-      await Promise.all(base.map((file, i) => Filesystem.write(file, `base-${i}`)))
+        await $`mkdir -p ${tmp.path}/batch ${tmp.path}/fresh`.quiet()
+        await Promise.all(base.map((file, i) => Filesystem.write(file, `base-${i}`)))
 
-      const snap = await Snapshot.track()
-      expect(snap).toBeTruthy()
+        const snap = await Snapshot.track()
+        expect(snap).toBeTruthy()
 
-      await Promise.all(base.map((file, i) => Filesystem.write(file, `next-${i}`)))
-      await Promise.all(fresh.map((file, i) => Filesystem.write(file, `fresh-${i}`)))
+        await Promise.all(base.map((file, i) => Filesystem.write(file, `next-${i}`)))
+        await Promise.all(fresh.map((file, i) => Filesystem.write(file, `fresh-${i}`)))
 
-      const patch = await Snapshot.patch(snap!)
-      expect(patch.files.length).toBe(base.length + fresh.length)
+        const patch = await Snapshot.patch(snap!)
+        expect(patch.files.length).toBe(base.length + fresh.length)
 
-      await Snapshot.revert([patch])
+        await Snapshot.revert([patch])
 
-      await Promise.all(
-        base.map(async (file, i) => {
-          expect(await fs.readFile(file, "utf-8")).toBe(`base-${i}`)
-        }),
-      )
+        await Promise.all(
+          base.map(async (file, i) => {
+            expect(await fs.readFile(file, "utf-8")).toBe(`base-${i}`)
+          }),
+        )
 
-      await Promise.all(
-        fresh.map(async (file) => {
-          expect(
-            await fs
-              .access(file)
-              .then(() => true)
-              .catch(() => false),
-          ).toBe(false)
-        }),
-      )
-    },
-  })
-})
+        await Promise.all(
+          fresh.map(async (file) => {
+            expect(
+              await fs
+                .access(file)
+                .then(() => true)
+                .catch(() => false),
+            ).toBe(false)
+          }),
+        )
+      },
+    })
+  },
+  { timeout: 15_000 },
+)

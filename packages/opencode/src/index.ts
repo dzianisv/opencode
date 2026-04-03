@@ -69,7 +69,7 @@ let cli = yargs(hideBin(process.argv))
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
-  .version("version", "show version number", Installation.VERSION)
+  .version("version", "show version number", Installation.DISPLAY)
   .alias("version", "v")
   .option("print-logs", {
     describe: "print logs to stderr",
@@ -97,6 +97,7 @@ let cli = yargs(hideBin(process.argv))
 
     Log.Default.info("opencode", {
       version: Installation.VERSION,
+      display: Installation.DISPLAY,
       args: process.argv.slice(2),
     })
 
