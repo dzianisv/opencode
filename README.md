@@ -1,32 +1,43 @@
-## Fork Notice
+## Fork — what & why
 
 > [!IMPORTANT]
-> This fork rebases regularly on `upstream/dev` and keeps a focused set of changes we rely on in daily use.
->
-> **Why this fork exists**
->
-> 1. Better UI/UX for multi-session orchestration across repos, worktrees, and long-running agent sessions
-> 2. Better memory and lifecycle management so the agent can run longer under real workload
->
-> Upstream moves fast and we want that. This fork exists because we needed these orchestration and serve-mode fixes badly enough to maintain them on top.
+> This fork rebases on `upstream/dev` and ships a focused set of patches we rely on daily.
+> Upstream moves fast and we want that — this fork exists because we need these fixes now.
 
-### TL;DR — what we add on top of `upstream/dev`
+**Multi-session orchestration**
+- `Recently Active` dashboard across repos and worktrees
+- session tree, worktree visibility, session naming
 
-- **Better multi-session orchestration UI/UX**
-  - `Recently Active` dashboard across repos and worktrees
-  - better session tree and worktree visibility
-  - stronger recent-session flow and session naming
-- **Better long-running stability and memory behavior**
-  - bounded shell output and runtime artifacts
-  - MCP cleanup, idle disposal, and graceful shutdown
-  - startup recovery for stuck tools and unfinished assistant messages
-  - session idle sweep and memory diagnostics
+**Long-running stability**
+- bounded shell output and runtime artifacts
+- MCP cleanup, idle disposal, graceful shutdown
+- startup recovery for stuck tools and unfinished messages
+- session idle sweep, memory diagnostics
+
+**Snapshot hardening**
+- large-file exclusion (>2 MB auto-skipped)
+- `--cached` diff for correct staged-tree comparisons
+
+**Install the fork**
+
+```bash
+npm i -g @vibetechnologies/opencode@latest   # stable
+npm i -g @vibetechnologies/opencode@dev      # tracks dev branch
+opencode                                      # binary name unchanged
+```
+
+<details><summary>From source</summary>
+
+```bash
+git clone https://github.com/dzianisv/opencode.git
+cd opencode && bun install && bun run install:local
+```
+</details>
 
 <p align="center">
   <img src="docs/images/fork-ui-1.webp" alt="Fork UI screenshot 1" width="49%" />
   <img src="docs/images/fork-ui-2.webp" alt="Fork UI screenshot 2" width="49%" />
 </p>
-<p align="center"><em>Fork-specific UI and orchestration improvements on top of upstream/dev.</em></p>
 
 <p align="center">
   <a href="https://opencode.ai">
@@ -40,8 +51,8 @@
 <p align="center">The open source AI coding agent.</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://www.npmjs.com/package/@vibetechnologies/opencode"><img alt="fork npm" src="https://img.shields.io/npm/v/%40vibetechnologies%2Fopencode?style=flat-square&label=fork%20npm" /></a>
+  <a href="https://github.com/dzianisv/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/dzianisv/opencode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
 <p align="center">
