@@ -12,6 +12,7 @@ import { Config } from "../../config/config"
 import { errors } from "../error"
 import { Memory } from "@/diagnostic/memory"
 import { Session } from "../../session"
+import { AsyncQueue } from "../../util/queue"
 
 const log = Log.create({ service: "server" })
 
@@ -68,44 +69,58 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         log.info("global event connected")
-        c.header("X-Accel-Buffering", "no")
-        c.header("X-Content-Type-Options", "nosniff")
-        return streamSSE(c, async (stream) => {
-          stream.writeSSE({
-            data: JSON.stringify({
-              payload: {
-                type: "server.connected",
-                properties: {},
-              },
-            }),
+        const res = streamSSE(c, async (stream) => {
+          const q = new AsyncQueue<string>()
+          let done = false
+          const push = (payload: unknown) => {
+            q.push(JSON.stringify(payload))
+          }
+          push({
+            payload: {
+              type: "server.connected",
+              properties: {},
+            },
           })
-          async function handler(event: any) {
-            await stream.writeSSE({
-              data: JSON.stringify(event),
-            })
+          const handler = (event: { directory?: string; payload: unknown }) => {
+            push(event)
           }
           GlobalBus.on("event", handler)
 
           // Send heartbeat every 10s to prevent stalled proxy streams.
           const heartbeat = setInterval(() => {
-            stream.writeSSE({
-              data: JSON.stringify({
-                payload: {
-                  type: "server.heartbeat",
-                  properties: {},
-                },
-              }),
+            push({
+              payload: {
+                type: "server.heartbeat",
+                properties: {},
+              },
             })
           }, 10_000)
 
-          await new Promise<void>((resolve) => {
-            stream.onAbort(() => {
-              clearInterval(heartbeat)
-              GlobalBus.off("event", handler)
-              resolve()
-              log.info("global event disconnected")
-            })
-          })
+          const stop = () => {
+            if (done) return
+            done = true
+            GlobalBus.off("event", handler)
+            clearInterval(heartbeat)
+            q.close()
+            log.info("global event disconnected")
+          }
+          stream.onAbort(stop)
+
+          try {
+            for await (const data of q) {
+              await stream.writeSSE({ data })
+            }
+          } finally {
+            stop()
+          }
+        })
+        const headers = new Headers(res.headers)
+        headers.set("Cache-Control", "no-cache, no-transform")
+        headers.set("X-Accel-Buffering", "no")
+        headers.set("X-Content-Type-Options", "nosniff")
+        return new Response(res.body, {
+          status: res.status,
+          headers,
         })
       },
     )
