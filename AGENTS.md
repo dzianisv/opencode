@@ -132,6 +132,15 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- **Always wrap `bun test` with `timeout`** to prevent orphaned processes burning CPU indefinitely:
+  ```bash
+  # Good — process dies after 5 minutes max
+  timeout 300 bun test
+
+  # For a single test file
+  timeout 120 bun test path/to/file.test.ts
+  ```
+  Bun's `--timeout` flag only caps per-assertion time, not overall process lifetime. The `timeout` command enforces a hard wall-clock kill.
 
 ## Memory Panic Triage
 
