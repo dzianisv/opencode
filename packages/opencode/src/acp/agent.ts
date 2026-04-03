@@ -5,6 +5,8 @@ import {
   type AuthenticateRequest,
   type AuthMethod,
   type CancelNotification,
+  type CloseSessionRequest,
+  type CloseSessionResponse,
   type ForkSessionRequest,
   type ForkSessionResponse,
   type InitializeRequest,
@@ -805,6 +807,12 @@ export namespace ACP {
         }
         throw e
       }
+    }
+
+    async unstable_closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+      this.sessionManager.remove(params.sessionId)
+      this.permissionQueues.delete(params.sessionId)
+      return {}
     }
 
     private async processMessage(message: SessionMessageResponse) {
