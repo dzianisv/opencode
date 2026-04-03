@@ -1,13 +1,32 @@
 ## Fork Notice
 
 > [!IMPORTANT]
-> This fork exists because we wanted an OpenCode branch that prioritizes runtime stability and orchestration UX.
+> This fork rebases regularly on `upstream/dev` and keeps a focused set of changes we rely on in daily use.
 >
-> Memory usage and leak-related work comes first, motivated by upstream reports like [anomalyco/opencode#17908](https://github.com/anomalyco/opencode/issues/17908), [#17237](https://github.com/anomalyco/opencode/issues/17237), [#12687](https://github.com/anomalyco/opencode/issues/12687), [#15645](https://github.com/anomalyco/opencode/issues/15645), [#19167](https://github.com/anomalyco/opencode/issues/19167), and [#19247](https://github.com/anomalyco/opencode/issues/19247).
+> **Why this fork exists**
 >
-> We also carry voice-to-text, text-to-speech, and recent-session improvements that make multi-session orchestration less brittle: bounded shell output, MCP cleanup and shutdown work, browser and desktop voice controls, and a stronger Recently Active flow.
+> 1. Better UI/UX for multi-session orchestration across repos, worktrees, and long-running agent sessions
+> 2. Better memory and lifecycle management so the agent can run longer under real workload
 >
-> If you care more about long-running stability and session orchestration than strict upstream parity, this is the branch we are actively using.
+> Upstream moves fast and we want that. This fork exists because we needed these orchestration and serve-mode fixes badly enough to maintain them on top.
+
+### TL;DR — what we add on top of `upstream/dev`
+
+- **Better multi-session orchestration UI/UX**
+  - `Recently Active` dashboard across repos and worktrees
+  - better session tree and worktree visibility
+  - stronger recent-session flow and session naming
+- **Better long-running stability and memory behavior**
+  - bounded shell output and runtime artifacts
+  - MCP cleanup, idle disposal, and graceful shutdown
+  - startup recovery for stuck tools and unfinished assistant messages
+  - session idle sweep and memory diagnostics
+
+<p align="center">
+  <img src="docs/images/fork-ui-1.webp" alt="Fork UI screenshot 1" width="49%" />
+  <img src="docs/images/fork-ui-2.webp" alt="Fork UI screenshot 2" width="49%" />
+</p>
+<p align="center"><em>Fork-specific UI and orchestration improvements on top of upstream/dev.</em></p>
 
 <p align="center">
   <a href="https://opencode.ai">
