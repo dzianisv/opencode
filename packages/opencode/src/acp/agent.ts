@@ -5,6 +5,8 @@ import {
   type AuthenticateRequest,
   type AuthMethod,
   type CancelNotification,
+  type CloseSessionRequest,
+  type CloseSessionResponse,
   type ForkSessionRequest,
   type ForkSessionResponse,
   type InitializeRequest,
@@ -140,12 +142,26 @@ export namespace ACP {
     private eventStarted = false
     private bashSnapshots = new Map<string, string>()
     private toolStarts = new Set<string>()
+    private toolSessions = new Map<string, string>()
     private permissionQueues = new Map<string, Promise<void>>()
     private permissionOptions: PermissionOption[] = [
       { optionId: "once", kind: "allow_once", name: "Allow once" },
       { optionId: "always", kind: "allow_always", name: "Always allow" },
       { optionId: "reject", kind: "reject_once", name: "Reject" },
     ]
+
+    private clearTool(callID: string) {
+      this.toolStarts.delete(callID)
+      this.bashSnapshots.delete(callID)
+      this.toolSessions.delete(callID)
+    }
+
+    private clearSessionTools(sessionId: string) {
+      for (const [callID, id] of this.toolSessions) {
+        if (id !== sessionId) continue
+        this.clearTool(callID)
+      }
+    }
 
     constructor(connection: AgentSideConnection, config: ACPConfig) {
       this.connection = connection
@@ -335,8 +351,7 @@ export namespace ACP {
                 return
 
               case "completed": {
-                this.toolStarts.delete(part.callID)
-                this.bashSnapshots.delete(part.callID)
+                this.clearTool(part.callID)
                 const kind = toToolKind(part.tool)
                 const content: ToolCallContent[] = [
                   {
@@ -416,8 +431,7 @@ export namespace ACP {
                 return
               }
               case "error":
-                this.toolStarts.delete(part.callID)
-                this.bashSnapshots.delete(part.callID)
+                this.clearTool(part.callID)
                 await this.connection
                   .sessionUpdate({
                     sessionId,
@@ -822,6 +836,13 @@ export namespace ACP {
       }
     }
 
+    async unstable_closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+      this.clearSessionTools(params.sessionId)
+      this.sessionManager.remove(params.sessionId)
+      this.permissionQueues.delete(params.sessionId)
+      return {}
+    }
+
     private async processMessage(message: SessionMessageResponse) {
       log.debug("process message", message)
       if (message.info.role !== "assistant" && message.info.role !== "user") return
@@ -865,8 +886,7 @@ export namespace ACP {
                 })
               break
             case "completed":
-              this.toolStarts.delete(part.callID)
-              this.bashSnapshots.delete(part.callID)
+              this.clearTool(part.callID)
               const kind = toToolKind(part.tool)
               const content: ToolCallContent[] = [
                 {
@@ -945,8 +965,7 @@ export namespace ACP {
                 })
               break
             case "error":
-              this.toolStarts.delete(part.callID)
-              this.bashSnapshots.delete(part.callID)
+              this.clearTool(part.callID)
               await this.connection
                 .sessionUpdate({
                   sessionId,
@@ -1111,6 +1130,7 @@ export namespace ACP {
     private async toolStart(sessionId: string, part: ToolPart) {
       if (this.toolStarts.has(part.callID)) return
       this.toolStarts.add(part.callID)
+      this.toolSessions.set(part.callID, sessionId)
       await this.connection
         .sessionUpdate({
           sessionId,
