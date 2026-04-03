@@ -1,0 +1,237 @@
+{
+  "cmd": [
+    "bun",
+    "run",
+    "--conditions=browser",
+    "./src/index.ts",
+    "debug",
+    "wait"
+  ],
+  "pid": 14529,
+  "started_at": "2026-03-31T15:09:28.961Z",
+  "ended_at": "2026-03-31T15:09:44.877Z",
+  "config": {
+    "duration": 15,
+    "interval": 1000,
+    "warmup": 2,
+    "out": ""
+  },
+  "summary": {
+    "start_rss_mb": 216.328125,
+    "end_rss_mb": 317.25,
+    "peak_rss_mb": 416.3125,
+    "delta_rss_mb": 100.921875,
+    "slope_mb_per_s": 6.363697269689135,
+    "samples": 16
+  },
+  "samples": [
+    {
+      "at": "2026-03-31T15:09:29.004Z",
+      "elapsed_ms": 43,
+      "total_rss_kb": 221520,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 221520,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:30.039Z",
+      "elapsed_ms": 1078,
+      "total_rss_kb": 404704,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 404704,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:31.084Z",
+      "elapsed_ms": 2123,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:32.149Z",
+      "elapsed_ms": 3188,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:33.205Z",
+      "elapsed_ms": 4244,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:34.279Z",
+      "elapsed_ms": 5318,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:35.352Z",
+      "elapsed_ms": 6391,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:36.424Z",
+      "elapsed_ms": 7463,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:37.500Z",
+      "elapsed_ms": 8539,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:38.561Z",
+      "elapsed_ms": 9600,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:39.621Z",
+      "elapsed_ms": 10660,
+      "total_rss_kb": 426304,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 426304,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:40.671Z",
+      "elapsed_ms": 11710,
+      "total_rss_kb": 425872,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 425872,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:41.729Z",
+      "elapsed_ms": 12768,
+      "total_rss_kb": 425792,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 425792,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:42.767Z",
+      "elapsed_ms": 13806,
+      "total_rss_kb": 425792,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 425792,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:43.825Z",
+      "elapsed_ms": 14864,
+      "total_rss_kb": 324864,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 324864,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-31T15:09:44.863Z",
+      "elapsed_ms": 15902,
+      "total_rss_kb": 324864,
+      "proc": [
+        {
+          "pid": 14529,
+          "ppid": 14508,
+          "rss_kb": 324864,
+          "cmd": "bun run --conditions=browser ./src/index.ts debug wait"
+        }
+      ]
+    }
+  ]
+}
