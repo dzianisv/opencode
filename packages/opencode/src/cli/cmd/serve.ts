@@ -91,6 +91,7 @@ export const ServeCommand = cmd({
     void autoresume().catch((error) => {
       log.error("auto resume process failed", { error })
     })
+    Session.startSweep()
 
     const shutdown = async (signal: string) => {
       log.warn("received signal, shutting down", { signal })
