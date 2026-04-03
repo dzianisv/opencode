@@ -38,6 +38,7 @@ describe("acp.agent interface compliance", () => {
     "listSessions",
     "unstable_forkSession",
     "unstable_resumeSession",
+    "unstable_closeSession",
     "unstable_setSessionModel",
   ]
 
