@@ -213,6 +213,27 @@ test("large added files are skipped", async () => {
   })
 })
 
+test("large tracked files are skipped", async () => {
+  await using tmp = await bootstrap()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await Filesystem.write(`${tmp.path}/tracked.bin`, new Uint8Array(2 * 1024 * 1024 + 1))
+      await $`git add tracked.bin`.cwd(tmp.path).quiet()
+      await $`git commit --no-gpg-sign -m tracked`.cwd(tmp.path).quiet()
+
+      const before = await Snapshot.track()
+      expect(before).toBeTruthy()
+
+      await Filesystem.write(`${tmp.path}/tracked.bin`, new Uint8Array(2 * 1024 * 1024 + 2))
+
+      expect((await Snapshot.patch(before!)).files).toEqual([])
+      expect(await Snapshot.diff(before!)).toBe("")
+      expect(await Snapshot.track()).toBe(before)
+    },
+  })
+})
+
 test("nested directory revert", async () => {
   await using tmp = await bootstrap()
   await Instance.provide({

@@ -180,7 +180,10 @@ export namespace Snapshot {
                 { concurrency: 8 },
               )).filter((item): item is string => Boolean(item))
               yield* sync(large)
-              const result = yield* git([...cfg, ...args(["add", "--sparse", "."])], { cwd: state.directory })
+              const skip = large.map((item) => `:(exclude)${item.replaceAll("\\", "/")}`)
+              const result = yield* git([...cfg, ...args(["add", "--sparse", "--", ".", ...skip])], {
+                cwd: state.directory,
+              })
               if (result.code !== 0) {
                 log.warn("failed to add snapshot files", {
                   exitCode: result.code,
