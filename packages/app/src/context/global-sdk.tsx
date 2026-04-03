@@ -206,10 +206,6 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       clearHeartbeat()
     }
 
-    const ensureStarted = () => {
-      void start()
-    }
-
     const onVisibility = () => {
       if (typeof document === "undefined") return
       if (document.visibilityState !== "visible") return
@@ -240,14 +236,8 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       url: currentServer.http.url,
       client: sdk,
       event: {
-        on(...args: Parameters<typeof emitter.on>) {
-          ensureStarted()
-          return emitter.on(...args)
-        },
-        listen(...args: Parameters<typeof emitter.listen>) {
-          ensureStarted()
-          return emitter.listen(...args)
-        },
+        on: emitter.on.bind(emitter),
+        listen: emitter.listen.bind(emitter),
         start,
       },
       createClient(opts: Omit<Parameters<typeof createSdkForServer>[0], "server" | "fetch">) {
