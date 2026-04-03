@@ -13,6 +13,7 @@ import { Log } from "../util/log"
 
 declare global {
   const OPENCODE_VERSION: string
+  const OPENCODE_DISPLAY_VERSION: string
   const OPENCODE_CHANNEL: string
 }
 
@@ -62,6 +63,7 @@ export namespace Installation {
   export type Info = z.infer<typeof Info>
 
   export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
+  export const DISPLAY = typeof OPENCODE_DISPLAY_VERSION === "string" ? OPENCODE_DISPLAY_VERSION : VERSION
   export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
