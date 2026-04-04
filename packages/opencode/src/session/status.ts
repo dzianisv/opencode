@@ -80,11 +80,11 @@ export namespace SessionStatus {
 
       const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
         const data = yield* InstanceState.get(state)
-        yield* Effect.promise(() => Bus.publish(Event.Status, { sessionID, status }))
         if (status.type === "idle") {
           GC.set(sessionID, false)
-          yield* Effect.promise(() => Bus.publish(Event.Idle, { sessionID }))
           data.delete(sessionID)
+          yield* Effect.promise(() => Bus.publish(Event.Status, { sessionID, status }))
+          yield* Effect.promise(() => Bus.publish(Event.Idle, { sessionID }))
           return
         }
         if (status.type === "busy") {
@@ -95,6 +95,7 @@ export namespace SessionStatus {
           GC.touch()
         }
         data.set(sessionID, status)
+        yield* Effect.promise(() => Bus.publish(Event.Status, { sessionID, status }))
       })
 
       return Service.of({ get, list, set })
