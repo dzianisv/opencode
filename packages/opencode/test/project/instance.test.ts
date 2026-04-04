@@ -60,4 +60,28 @@ describe("instance cache", () => {
     const idle = Instance.stats().entries.find((item) => item.directory === tmp.path)
     expect(idle?.refs).toBe(0)
   })
+
+  test("deduplicates concurrent create after sweep yield", async () => {
+    await using tmp = await tmpdir({ git: true })
+    let inits = 0
+
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        Instance.provide({
+          directory: tmp.path,
+          init: async () => {
+            inits += 1
+            await Bun.sleep(5)
+          },
+          fn: async () => {
+            await Bun.sleep(1)
+            return null
+          },
+        }),
+      ),
+    )
+
+    expect(inits).toBe(1)
+    expect(Instance.stats().entries.filter((item) => item.directory === tmp.path).length).toBe(1)
+  })
 })

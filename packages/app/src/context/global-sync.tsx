@@ -306,6 +306,7 @@ function createGlobalSync() {
       store,
       setStore,
       push: queue.push,
+      isActive: () => children.pinned(directory),
       setSessionTodo,
       vcsCache: children.vcsCache.get(directory),
       loadLsp: () => {
