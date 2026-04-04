@@ -95,13 +95,17 @@ export const ServeCommand = cmd({
 
     const shutdown = async (signal: string) => {
       log.warn("received signal, shutting down", { signal })
+      Session.stopSweep()
+      await Memory.snapshot({ reason: `shutdown:${signal}` }).catch((e) => {
+        log.error("shutdown snapshot failed", { error: e })
+      })
+      Memory.stop()
       await Instance.disposeAll().catch((e: unknown) => {
         log.error("instance disposal failed", { error: e })
       })
       await MCP.closeAll().catch((e: unknown) => {
         log.error("mcp close failed", { error: e })
       })
-      Memory.stop()
       await server.stop()
     }
 
