@@ -528,6 +528,7 @@ describe("applyDirectoryEvent", () => {
         pushes.push(directory)
       },
       directory: "/tmp",
+      isActive: () => true,
       loadLsp() {
         lspLoads += 1
       },
@@ -548,5 +549,42 @@ describe("applyDirectoryEvent", () => {
 
     expect(pushes).toEqual(["/tmp"])
     expect(lspLoads).toBe(1)
+  })
+
+  test("suppresses rebootstrap on disposal for inactive directories", () => {
+    const [store, setStore] = createStore(baseState())
+    const pushes: string[] = []
+
+    applyDirectoryEvent({
+      event: { type: "server.instance.disposed" },
+      store,
+      setStore,
+      push(directory) {
+        pushes.push(directory)
+      },
+      directory: "/tmp",
+      isActive: () => false,
+      loadLsp() {},
+    })
+
+    expect(pushes).toEqual([])
+  })
+
+  test("falls back to rebootstrap on disposal when isActive is not provided", () => {
+    const [store, setStore] = createStore(baseState())
+    const pushes: string[] = []
+
+    applyDirectoryEvent({
+      event: { type: "server.instance.disposed" },
+      store,
+      setStore,
+      push(directory) {
+        pushes.push(directory)
+      },
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(pushes).toEqual(["/tmp"])
   })
 })
