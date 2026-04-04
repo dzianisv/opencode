@@ -94,11 +94,18 @@ export function applyDirectoryEvent(input: {
   loadLsp: () => void
   vcsCache?: VcsCache
   setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+  isActive?: () => boolean
 }) {
   const event = input.event
   switch (event.type) {
     case "server.instance.disposed": {
-      input.push(input.directory)
+      // Only rebootstrap if the directory is currently active (pinned by a
+      // rendered component). Inactive directories bootstrap on next access,
+      // preventing a disposal → rebootstrap → disposal churn loop when many
+      // directories are tracked and the server is near its instance limit.
+      if (input.isActive === undefined || input.isActive()) {
+        input.push(input.directory)
+      }
       return
     }
     case "session.created": {
