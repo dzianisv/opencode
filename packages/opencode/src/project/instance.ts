@@ -136,7 +136,7 @@ async function drop(directory: string, force = false, task?: Promise<Shape>) {
   })
   if (!ctx) return true
 
-  await Promise.all([State.dispose(directory), disposeInstance(directory)])
+  await context.provide(ctx, () => Promise.all([State.dispose(directory), disposeInstance(directory)]))
   emit(directory)
   return true
 }
