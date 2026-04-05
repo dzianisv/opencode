@@ -185,6 +185,10 @@ export const Instance = {
     let existing = cache.get(directory)
     if (!existing) {
       await sweep()
+      // re-check after yield — a concurrent caller may have created it
+      existing = cache.get(directory)
+    }
+    if (!existing) {
       Log.Default.info("creating instance", { directory })
       existing = track(
         directory,
