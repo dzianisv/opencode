@@ -10,6 +10,10 @@ export type ResumeMatch = {
   user: MessageV2.User
 }
 
+export type ResumeAction =
+  | { type: "interrupted"; assistant: MessageV2.Assistant; user: MessageV2.User }
+  | { type: "unanswered"; user: MessageV2.User }
+
 function interrupted(item: MessageV2.WithParts) {
   if (item.info.role !== "assistant") return false
   if (MessageV2.AbortedError.isInstance(item.info.error)) return true
@@ -19,6 +23,28 @@ function interrupted(item: MessageV2.WithParts) {
       part.state.status === "error" &&
       (part.state.error === ResumeError || part.state.error === ResumeAbortError),
   )
+}
+
+/**
+ * Unified picker: returns the single best recovery action for a session.
+ *
+ * Priority:
+ *   1. **unanswered** – last message is a user message with no assistant reply
+ *   2. **interrupted** – last assistant was interrupted with no subsequent user message
+ */
+export function pickAction(input: MessageV2.WithParts[]): ResumeAction | undefined {
+  if (input.length === 0) return
+
+  const last = input[input.length - 1]
+
+  // Priority 1: trailing user message with no assistant reply
+  if (last.info.role === "user") {
+    return { type: "unanswered", user: last.info as MessageV2.User }
+  }
+
+  // Priority 2: interrupted assistant (existing pickResume logic)
+  const match = pickResume(input)
+  if (match) return { type: "interrupted", ...match }
 }
 
 export function pickResume(input: MessageV2.WithParts[]) {

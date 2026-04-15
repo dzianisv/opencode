@@ -671,6 +671,49 @@ export namespace Session {
     }
   }
 
+  /**
+   * Find sessions where the most recent message is a user message (no assistant reply).
+   * Only returns sessions updated within `age` milliseconds.
+   */
+  export function* listUnanswered(input?: { limit?: number; age?: number }) {
+    const limit = input?.limit ?? 100
+    if (limit <= 0) return
+    const cutoff = Date.now() - (input?.age ?? 60 * 60 * 1000)
+
+    // Subquery: latest message per session
+    const rows = Database.use((db) =>
+      db
+        .select({
+          sessionID: MessageTable.session_id,
+          time: sql<number>`max(${MessageTable.time_created})`.as("time"),
+        })
+        .from(MessageTable)
+        .innerJoin(
+          SessionTable,
+          and(eq(SessionTable.id, MessageTable.session_id), isNull(SessionTable.time_archived)),
+        )
+        .where(gte(MessageTable.time_created, cutoff))
+        .groupBy(MessageTable.session_id)
+        .having(
+          sql`json_extract((select data from message where session_id = ${MessageTable.session_id} order by time_created desc, id desc limit 1), '$.role') = 'user'`,
+        )
+        .orderBy(desc(sql`time`))
+        .limit(limit)
+        .all(),
+    )
+    if (rows.length === 0) return
+
+    const ids = rows.map((r) => r.sessionID)
+    const sessions = Database.use((db) =>
+      db.select().from(SessionTable).where(inArray(SessionTable.id, ids)).all(),
+    )
+    const map = new Map(sessions.map((r) => [r.id, fromRow(r)]))
+    for (const row of rows) {
+      const info = map.get(row.sessionID)
+      if (info) yield info
+    }
+  }
+
   export function* listResumable(input?: {
     limit?: number
   }) {

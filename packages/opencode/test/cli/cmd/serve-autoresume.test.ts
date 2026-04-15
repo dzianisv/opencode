@@ -6,6 +6,7 @@ import { MessageID, PartID } from "../../../src/session/schema"
 import { ModelID, ProviderID } from "../../../src/provider/schema"
 import { ResumePrompt, ResumeError } from "../../../src/session/auto-resume"
 import { SessionPrompt } from "../../../src/session/prompt"
+import { SessionRevert } from "../../../src/session/revert"
 import { WorkspaceContext } from "../../../src/control-plane/workspace-context"
 import { autoresume } from "../../../src/cli/cmd/serve"
 import { tmpdir } from "../../fixture/fixture"
@@ -89,9 +90,15 @@ async function seed(input: { sessionID: string; at: number; kind: "tool" | "abor
   }
 }
 
+async function seedUnanswered(input: { sessionID: string; at: number }) {
+  const u = user({ sessionID: input.sessionID, at: input.at })
+  await Session.updateMessage(u)
+}
+
 const env = {
   scan: process.env.OPENCODE_SERVE_RESUME_SCAN_LIMIT,
   max: process.env.OPENCODE_SERVE_RESUME_MAX,
+  age: process.env.OPENCODE_SERVE_RESUME_AGE_MS,
 }
 
 beforeEach(async () => {
@@ -103,6 +110,8 @@ afterEach(async () => {
   else process.env.OPENCODE_SERVE_RESUME_SCAN_LIMIT = env.scan
   if (env.max === undefined) delete process.env.OPENCODE_SERVE_RESUME_MAX
   else process.env.OPENCODE_SERVE_RESUME_MAX = env.max
+  if (env.age === undefined) delete process.env.OPENCODE_SERVE_RESUME_AGE_MS
+  else process.env.OPENCODE_SERVE_RESUME_AGE_MS = env.age
   mock.restore()
   await resetDatabase()
 })
@@ -183,5 +192,113 @@ describe("serve autoresume", () => {
     expect(seen.length).toBe(2)
     expect(seen[0]).toBe(ids[3])
     expect(seen[1]).toBe(ids[2])
+  })
+
+  test("resumes unanswered user messages via loop instead of prompt", async () => {
+    await using tmp = await tmpdir()
+    const ids = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const s1 = await Session.create({})
+        // Seed with a user message that has no assistant reply
+        await seedUnanswered({ sessionID: s1.id, at: Date.now() })
+        return [s1.id]
+      },
+    })
+
+    process.env.OPENCODE_SERVE_RESUME_SCAN_LIMIT = "30"
+    process.env.OPENCODE_SERVE_RESUME_MAX = "5"
+    process.env.OPENCODE_SERVE_RESUME_AGE_MS = String(60 * 60 * 1000)
+
+    const prompted: string[] = []
+    const looped: string[] = []
+    spyOn(WorkspaceContext, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(Instance, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(SessionRevert as any, "cleanup").mockImplementation(async () => {})
+    spyOn(Session as any, "touch").mockImplementation(async () => {})
+    spyOn(SessionPrompt as any, "prompt").mockImplementation(async (input: any) => {
+      prompted.push(input.sessionID)
+      return {} as any
+    })
+    spyOn(SessionPrompt as any, "loop").mockImplementation(async (input: any) => {
+      looped.push(input.sessionID)
+      return {} as any
+    })
+
+    await autoresume()
+
+    // Unanswered sessions should use loop, not prompt
+    expect(prompted.length).toBe(0)
+    expect(looped.length).toBe(1)
+    expect(looped[0]).toBe(ids[0])
+  })
+
+  test("unanswered takes priority over interrupted for same session", async () => {
+    await using tmp = await tmpdir()
+    const ids = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const s1 = await Session.create({})
+        // Interrupted assistant followed by unanswered user message
+        await seed({ sessionID: s1.id, at: Date.now() - 5000, kind: "tool", followup: true })
+        return [s1.id]
+      },
+    })
+
+    process.env.OPENCODE_SERVE_RESUME_SCAN_LIMIT = "30"
+    process.env.OPENCODE_SERVE_RESUME_MAX = "5"
+    process.env.OPENCODE_SERVE_RESUME_AGE_MS = String(60 * 60 * 1000)
+
+    const prompted: string[] = []
+    const looped: string[] = []
+    spyOn(WorkspaceContext, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(Instance, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(SessionRevert as any, "cleanup").mockImplementation(async () => {})
+    spyOn(Session as any, "touch").mockImplementation(async () => {})
+    spyOn(SessionPrompt as any, "prompt").mockImplementation(async (input: any) => {
+      prompted.push(input.sessionID)
+      return {} as any
+    })
+    spyOn(SessionPrompt as any, "loop").mockImplementation(async (input: any) => {
+      looped.push(input.sessionID)
+      return {} as any
+    })
+
+    await autoresume()
+
+    // Should use loop (unanswered) not prompt (interrupted)
+    expect(prompted.length).toBe(0)
+    expect(looped.length).toBe(1)
+    expect(looped[0]).toBe(ids[0])
+  })
+
+  test("skips unanswered sessions older than age cutoff", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const s1 = await Session.create({})
+        // User message from 2 hours ago
+        await seedUnanswered({ sessionID: s1.id, at: Date.now() - 2 * 60 * 60 * 1000 })
+      },
+    })
+
+    process.env.OPENCODE_SERVE_RESUME_SCAN_LIMIT = "30"
+    process.env.OPENCODE_SERVE_RESUME_MAX = "5"
+    process.env.OPENCODE_SERVE_RESUME_AGE_MS = String(60 * 60 * 1000) // 1 hour
+
+    const looped: string[] = []
+    spyOn(WorkspaceContext, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(Instance, "provide").mockImplementation(async (input: any) => input.fn())
+    spyOn(SessionRevert as any, "cleanup").mockImplementation(async () => {})
+    spyOn(Session as any, "touch").mockImplementation(async () => {})
+    spyOn(SessionPrompt as any, "loop").mockImplementation(async (input: any) => {
+      looped.push(input.sessionID)
+      return {} as any
+    })
+
+    await autoresume()
+
+    expect(looped.length).toBe(0)
   })
 })

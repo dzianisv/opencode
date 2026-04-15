@@ -11,7 +11,8 @@ import { Log } from "../../util/log"
 import { Memory } from "../../diagnostic/memory"
 import { Session } from "../../session"
 import { SessionPrompt } from "../../session/prompt"
-import { pickResume, ResumePrompt } from "../../session/auto-resume"
+import { SessionRevert } from "../../session/revert"
+import { pickAction, ResumePrompt } from "../../session/auto-resume"
 import { WorkspaceContext } from "../../control-plane/workspace-context"
 import { InstanceBootstrap } from "../../project/bootstrap"
 
@@ -26,14 +27,34 @@ function num(name: string, fallback: number) {
 export async function autoresume() {
   const scan = num("OPENCODE_SERVE_RESUME_SCAN_LIMIT", 30)
   const max = num("OPENCODE_SERVE_RESUME_MAX", 3)
+  const age = num("OPENCODE_SERVE_RESUME_AGE_MS", 60 * 60 * 1000)
   if (scan <= 0 || max <= 0) return
 
   await Session.recover()
 
-  const list = [...Session.listResumable({ limit: scan })]
+  // Collect candidates from both interrupted and unanswered sessions
+  const interrupted = [...Session.listResumable({ limit: scan })]
+  const unanswered = [...Session.listUnanswered({ limit: scan, age })]
+
+  // Deduplicate: unanswered takes priority over interrupted for the same session
+  const seen = new Set<string>()
+  type Candidate = { session: Session.Info; source: "unanswered" | "interrupted" }
+  const candidates: Candidate[] = []
+
+  for (const session of unanswered) {
+    if (seen.has(session.id)) continue
+    seen.add(session.id)
+    candidates.push({ session, source: "unanswered" })
+  }
+  for (const session of interrupted) {
+    if (seen.has(session.id)) continue
+    seen.add(session.id)
+    candidates.push({ session, source: "interrupted" })
+  }
+
   let resumed = 0
 
-  for (const session of list) {
+  for (const { session, source } of candidates) {
     if (resumed >= max) break
     const msgs = await Session.messages({ sessionID: session.id }).catch((error) => {
       log.error("auto resume message load failed", { sessionID: session.id, error })
@@ -41,8 +62,8 @@ export async function autoresume() {
     })
     if (!msgs) continue
 
-    const hit = pickResume(msgs)
-    if (!hit) continue
+    const action = pickAction(msgs)
+    if (!action) continue
 
     const ok = await WorkspaceContext.provide({
       workspaceID: session.workspaceID,
@@ -50,12 +71,19 @@ export async function autoresume() {
         return Instance.provide({
           directory: session.directory,
           init: InstanceBootstrap,
-          fn() {
+          async fn() {
+            if (action.type === "unanswered") {
+              // User message already exists — run cleanup + touch + loop directly
+              await SessionRevert.cleanup(session)
+              await Session.touch(session.id)
+              return SessionPrompt.loop({ sessionID: session.id })
+            }
+            // Interrupted assistant — inject a resume prompt
             return SessionPrompt.prompt({
               sessionID: session.id,
-              agent: hit.user.agent,
-              model: hit.user.model,
-              variant: hit.user.variant,
+              agent: action.user.agent,
+              model: action.user.model,
+              variant: action.user.variant,
               parts: [{ type: "text", text: ResumePrompt }],
             })
           },
@@ -64,16 +92,27 @@ export async function autoresume() {
     })
       .then(() => true)
       .catch((error) => {
-        log.error("auto resume failed", { sessionID: session.id, error })
+        log.error("auto resume failed", { sessionID: session.id, type: action.type, error })
         return false
       })
     if (!ok) continue
 
     resumed += 1
-    log.info("auto resumed session", { sessionID: session.id, directory: session.directory, assistantID: hit.assistant.id })
+    log.info("auto resumed session", {
+      sessionID: session.id,
+      type: action.type,
+      directory: session.directory,
+    })
   }
 
-  log.info("auto resume complete", { scanned: list.length, resumed, scan_limit: scan, resume_limit: max })
+  log.info("auto resume complete", {
+    scanned: candidates.length,
+    resumed,
+    interrupted: interrupted.length,
+    unanswered: unanswered.length,
+    scan_limit: scan,
+    resume_limit: max,
+  })
 }
 
 export const ServeCommand = cmd({

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { pickResume, ResumeAbortError, ResumeError } from "../../src/session/auto-resume"
+import { pickAction, pickResume, ResumeAbortError, ResumeError } from "../../src/session/auto-resume"
 
 const user = (input: { id: string; sessionID: string; at: number }) =>
   ({
@@ -104,5 +104,49 @@ describe("session auto resume", () => {
     ])
     expect(out?.assistant.id).toBe(a1.id)
     expect(out?.user.id).toBe(u1.id)
+  })
+})
+
+describe("pickAction", () => {
+  test("returns unanswered when last message is user", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const action = pickAction([row(u1)])
+    expect(action?.type).toBe("unanswered")
+    if (action?.type === "unanswered") {
+      expect(action.user.id).toBe(u1.id)
+    }
+  })
+
+  test("returns unanswered even when an interrupted assistant precedes the user", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2 })
+    const u2 = user({ id: "m3", sessionID: "ses_1", at: 3 })
+    const action = pickAction([row(u1), row(a1, [tool({ sessionID: "ses_1", messageID: a1.id })]), row(u2)])
+    expect(action?.type).toBe("unanswered")
+    if (action?.type === "unanswered") {
+      expect(action.user.id).toBe(u2.id)
+    }
+  })
+
+  test("returns interrupted when last message is interrupted assistant", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2 })
+    const action = pickAction([row(u1), row(a1, [tool({ sessionID: "ses_1", messageID: a1.id })])])
+    expect(action?.type).toBe("interrupted")
+    if (action?.type === "interrupted") {
+      expect(action.assistant.id).toBe(a1.id)
+      expect(action.user.id).toBe(u1.id)
+    }
+  })
+
+  test("returns undefined when last assistant completed normally", () => {
+    const u1 = user({ id: "m1", sessionID: "ses_1", at: 1 })
+    const a1 = assistant({ id: "m2", sessionID: "ses_1", parentID: u1.id, at: 2 })
+    const action = pickAction([row(u1), row(a1)])
+    expect(action).toBeUndefined()
+  })
+
+  test("returns undefined for empty input", () => {
+    expect(pickAction([])).toBeUndefined()
   })
 })
