@@ -9,7 +9,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { getFilename } from "@opencode-ai/util/path"
 import { A, useNavigate, useParams } from "@solidjs/router"
-import { type Accessor, createMemo, For, type JSX, Match, onCleanup, Show, Switch } from "solid-js"
+import { type Accessor, createMemo, createSignal, For, type JSX, Match, onCleanup, Show, Switch } from "solid-js"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { getAvatarColors, type LocalProject, useLayout } from "@/context/layout"
@@ -77,6 +77,7 @@ export type SessionItemProps = {
   mobile?: boolean
   dense?: boolean
   popover?: boolean
+  collapsible?: boolean
   children: ReadonlyMap<string, string[]>
   depth?: number
   sidebarExpanded: Accessor<boolean>
@@ -334,6 +335,10 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       .filter((s): s is Session => s !== undefined && !s.time?.archived),
   )
 
+  const [collapsed, setCollapsed] = createSignal(false)
+  const hasChildren = createMemo(() => childSessions().length > 0)
+  const showToggle = createMemo(() => props.collapsible && hasChildren())
+
   return (
     <>
       <div
@@ -342,6 +347,23 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
                hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active"
         style={{ "padding-left": pad() }}
       >
+        <Show when={showToggle()}>
+          <button
+            type="button"
+            aria-label={collapsed() ? language.t("common.expand") : language.t("common.collapse")}
+            aria-expanded={!collapsed()}
+            data-action="session-children-toggle"
+            class="absolute left-1 top-0 bottom-0 flex items-center justify-center w-5 z-10 text-icon-weak hover:text-icon-base focus:outline-none"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setCollapsed((c) => !c)
+            }}
+          >
+            <Icon name={collapsed() ? "chevron-right" : "chevron-down"} size="small" />
+          </button>
+        </Show>
+
         <Show
           when={hoverEnabled()}
           fallback={
@@ -401,31 +423,34 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
           </Tooltip>
         </div>
       </div>
-      <For each={childSessions()}>
-        {(child) => (
-          <SessionItem
-            session={child}
-            list={props.list}
-            navList={props.navList}
-            lookup={props.lookup}
-            prefixes={props.prefixes}
-            slug={props.slug}
-            mobile={props.mobile}
-            dense={props.dense}
-            popover={props.popover}
-            children={props.children}
-            depth={depth() + 1}
-            sidebarExpanded={props.sidebarExpanded}
-            sidebarHovering={props.sidebarHovering}
-            nav={props.nav}
-            hoverSession={props.hoverSession}
-            setHoverSession={props.setHoverSession}
-            clearHoverProjectSoon={props.clearHoverProjectSoon}
-            prefetchSession={props.prefetchSession}
-            archiveSession={props.archiveSession}
-          />
-        )}
-      </For>
+      <Show when={!collapsed()}>
+        <For each={childSessions()}>
+          {(child) => (
+            <SessionItem
+              session={child}
+              list={props.list}
+              navList={props.navList}
+              lookup={props.lookup}
+              prefixes={props.prefixes}
+              slug={props.slug}
+              mobile={props.mobile}
+              dense={props.dense}
+              popover={props.popover}
+              collapsible={props.collapsible}
+              children={props.children}
+              depth={depth() + 1}
+              sidebarExpanded={props.sidebarExpanded}
+              sidebarHovering={props.sidebarHovering}
+              nav={props.nav}
+              hoverSession={props.hoverSession}
+              setHoverSession={props.setHoverSession}
+              clearHoverProjectSoon={props.clearHoverProjectSoon}
+              prefetchSession={props.prefetchSession}
+              archiveSession={props.archiveSession}
+            />
+          )}
+        </For>
+      </Show>
     </>
   )
 }

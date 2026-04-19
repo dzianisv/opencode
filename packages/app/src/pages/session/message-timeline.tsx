@@ -554,7 +554,7 @@ export function MessageTimeline(props: {
       navigate(`/${params.dir}/session/${nextSessionID}`)
       return
     }
-    navigate(`/${params.dir}/session`)
+    navigate(params.dir === "recent" ? "/recent" : `/${params.dir}/session`)
   }
 
   const archiveSession = async (sessionID: string) => {

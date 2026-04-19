@@ -159,7 +159,11 @@ export default function Layout(props: ParentProps) {
     sizing: false,
     peek: undefined as string | undefined,
     peeked: false,
-    recent: false,
+    recent: params.dir === "recent",
+  })
+
+  createEffect(() => {
+    setState("recent", params.dir === "recent")
   })
 
   const editor = createInlineEditorController()
@@ -1036,7 +1040,7 @@ export default function Layout(props: ParentProps) {
       if (nextSession) {
         navigate(`/${params.dir}/session/${nextSession.id}`)
       } else {
-        navigate(`/${params.dir}/session`)
+        navigate(params.dir === "recent" ? "/recent" : `/${params.dir}/session`)
       }
     }
     return true
@@ -2042,6 +2046,7 @@ export default function Layout(props: ParentProps) {
   const projectSidebarCtx: ProjectSidebarContext = {
     currentDir,
     currentProject,
+    recentMode: () => state.recent,
     sidebarOpened: () => layout.sidebar.opened(),
     sidebarHovering,
     hoverProject: () => state.hoverProject,
@@ -2394,6 +2399,7 @@ export default function Layout(props: ParentProps) {
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
+    collapsible: true,
   }
 
   const projects = () => layout.projects.list()
@@ -2423,7 +2429,7 @@ export default function Layout(props: ParentProps) {
         <RecentTile
           selected={() => state.recent}
           onClick={() => {
-            setState("recent", true)
+            navigate(params.id ? `/recent/session/${params.id}` : "/recent")
             layout.sidebar.open()
           }}
         />

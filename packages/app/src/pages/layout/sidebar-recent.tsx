@@ -1,6 +1,5 @@
 import { createEffect, createMemo, For, on, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { base64Encode } from "@opencode-ai/util/encode"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
@@ -108,7 +107,7 @@ export const RecentSidebarPanel = (props: {
     timer = setTimeout(() => setStore("search", val), 300)
   }
 
-  const slug = (session: GlobalSession) => base64Encode(session.directory)
+  const slug = (_session: GlobalSession) => "recent"
   const archiveSession = async (session: Session) => {
     const ok = await props.sessionProps.archiveSession(session)
     if (!ok) return false

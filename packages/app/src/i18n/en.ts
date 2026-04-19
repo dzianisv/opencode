@@ -671,6 +671,8 @@ export const dict = {
   "common.delete": "Delete",
   "common.close": "Close",
   "common.edit": "Edit",
+  "common.expand": "Expand",
+  "common.collapse": "Collapse",
   "common.loadMore": "Load more",
   "common.key.esc": "ESC",
   "common.key.ctrl": "Ctrl",
