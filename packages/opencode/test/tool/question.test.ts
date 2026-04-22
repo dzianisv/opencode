@@ -1,12 +1,9 @@
-import { describe, expect } from "bun:test"
-import { Effect, Fiber, Layer } from "effect"
-import { Tool } from "../../src/tool/tool"
+import { describe, expect, test } from "bun:test"
 import { QuestionTool } from "../../src/tool/question"
 import { Question } from "../../src/question"
 import { SessionID, MessageID } from "../../src/session/schema"
-import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { provideTmpdirInstance } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { Instance } from "../../src/project/instance"
+import { tmpdir } from "../fixture/fixture"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-session"),
@@ -19,24 +16,21 @@ const ctx = {
   ask: async () => {},
 }
 
-const it = testEffect(Layer.mergeAll(Question.defaultLayer, CrossSpawnSpawner.defaultLayer))
-
-const pending = Effect.fn("QuestionToolTest.pending")(function* (question: Question.Interface) {
+async function poll() {
   for (;;) {
-    const items = yield* question.list()
-    const item = items[0]
-    if (item) return item
-    yield* Effect.sleep("10 millis")
+    const items = await Question.list()
+    if (items[0]) return items[0]
+    await new Promise((r) => setTimeout(r, 10))
   }
-})
+}
 
 describe("tool.question", () => {
-  it.live("should successfully execute with valid question parameters", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const question = yield* Question.Service
-        const toolInfo = yield* QuestionTool
-        const tool = yield* Effect.promise(() => toolInfo.init())
+  test("should successfully execute with valid question parameters", async () => {
+    await using dir = await tmpdir()
+    await Instance.provide({
+      directory: dir.path,
+      fn: async () => {
+        const tool = await QuestionTool.init()
         const questions = [
           {
             question: "What is your favorite color?",
@@ -49,22 +43,22 @@ describe("tool.question", () => {
           },
         ]
 
-        const fiber = yield* Effect.promise(() => tool.execute({ questions }, ctx)).pipe(Effect.forkScoped)
-        const item = yield* pending(question)
-        yield* question.reply({ requestID: item.id, answers: [["Red"]] })
+        const promise = tool.execute({ questions }, ctx)
+        const item = await poll()
+        await Question.reply({ requestID: item.id, answers: [["Red"]] })
 
-        const result = yield* Fiber.join(fiber)
+        const result = await promise
         expect(result.title).toBe("Asked 1 question")
-      }),
-    ),
-  )
+      },
+    })
+  })
 
-  it.live("should now pass with a header longer than 12 but less than 30 chars", () =>
-    provideTmpdirInstance(() =>
-      Effect.gen(function* () {
-        const question = yield* Question.Service
-        const toolInfo = yield* QuestionTool
-        const tool = yield* Effect.promise(() => toolInfo.init())
+  test("should now pass with a header longer than 12 but less than 30 chars", async () => {
+    await using dir = await tmpdir()
+    await Instance.provide({
+      directory: dir.path,
+      fn: async () => {
+        const tool = await QuestionTool.init()
         const questions = [
           {
             question: "What is your favorite animal?",
@@ -73,15 +67,15 @@ describe("tool.question", () => {
           },
         ]
 
-        const fiber = yield* Effect.promise(() => tool.execute({ questions }, ctx)).pipe(Effect.forkScoped)
-        const item = yield* pending(question)
-        yield* question.reply({ requestID: item.id, answers: [["Dog"]] })
+        const promise = tool.execute({ questions }, ctx)
+        const item = await poll()
+        await Question.reply({ requestID: item.id, answers: [["Dog"]] })
 
-        const result = yield* Fiber.join(fiber)
+        const result = await promise
         expect(result.output).toContain(`"What is your favorite animal?"="Dog"`)
-      }),
-    ),
-  )
+      },
+    })
+  })
 
   // intentionally removed the zod validation due to tool call errors, hoping prompting is gonna be good enough
   //   test("should throw an Error for header exceeding 30 characters", async () => {

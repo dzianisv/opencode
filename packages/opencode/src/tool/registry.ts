@@ -7,7 +7,7 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { TodoWriteTool, TodoReadTool } from "./todo"
+import { TodoWriteTool } from "./todo"
 import { RenameTool } from "./rename"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -34,6 +34,7 @@ import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
 import { existsSync } from "fs"
 import { Effect, Layer, ServiceMap } from "effect"
+import { isEffect } from "effect/Effect"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -136,7 +137,7 @@ export namespace ToolRegistry {
   }
 
   export async function ids() {
-    return all().then((x) => x.map((t) => t.id))
+    return all().then((x) => x.filter((t) => !isEffect(t) && typeof (t as any)?.id === "string").map((t) => t.id))
   }
 
   export async function tools(
@@ -150,6 +151,12 @@ export namespace ToolRegistry {
     const result = await Promise.all(
       tools
         .filter((t) => {
+          if (isEffect(t)) {
+            log.error("tool is an unresolved Effect — defineEffect tools must be resolved before registration", {
+              id: (t as any)?.id ?? "unknown",
+            })
+            return false
+          }
           if (typeof (t as any)?.init !== "function") {
             log.warn("skipping invalid tool", { id: (t as any)?.id ?? "unknown" })
             return false

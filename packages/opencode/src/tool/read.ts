@@ -1,7 +1,6 @@
 import z from "zod"
-import { Effect, Scope } from "effect"
 import { createReadStream } from "fs"
-import { open } from "fs/promises"
+import { open, readdir, stat as fsStat } from "fs/promises"
 import * as path from "path"
 import { createInterface } from "readline"
 import { Tool } from "./tool"
@@ -10,8 +9,9 @@ import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import DESCRIPTION from "./read.txt"
 import { Instance } from "../project/instance"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertExternalDirectory } from "./external-directory"
 import { Instruction } from "../session/instruction"
+import { Filesystem } from "../util/filesystem"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -19,213 +19,167 @@ const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 
-const parameters = z.object({
-  filePath: z.string().describe("The absolute path to the file or directory to read"),
-  offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
-  limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
-})
+export const ReadTool = Tool.define("read", {
+  description: DESCRIPTION,
+  parameters: z.object({
+    filePath: z.string().describe("The absolute path to the file or directory to read"),
+    offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
+    limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
+  }),
+  async execute(params, ctx) {
+    if (params.offset !== undefined && params.offset < 1) {
+      throw new Error("offset must be greater than or equal to 1")
+    }
 
-export const ReadTool = Tool.defineEffect(
-  "read",
-  Effect.gen(function* () {
-    const fs = yield* AppFileSystem.Service
-    const instruction = yield* Instruction.Service
-    const lsp = yield* LSP.Service
-    const time = yield* FileTime.Service
-    const scope = yield* Scope.Scope
+    let filepath = params.filePath
+    if (!path.isAbsolute(filepath)) {
+      filepath = path.resolve(Instance.directory, filepath)
+    }
+    if (process.platform === "win32") {
+      filepath = AppFileSystem.normalizePath(filepath)
+    }
+    const title = path.relative(Instance.worktree, filepath)
+    const stat = Filesystem.stat(filepath)
 
-    const miss = Effect.fn("ReadTool.miss")(function* (filepath: string) {
+    await assertExternalDirectory(ctx, filepath, {
+      bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
+      kind: stat?.isDirectory() ? "directory" : "file",
+    })
+
+    await ctx.ask({
+      permission: "read",
+      patterns: [filepath],
+      always: ["*"],
+      metadata: {},
+    })
+
+    if (!stat) {
       const dir = path.dirname(filepath)
       const base = path.basename(filepath)
-      const items = yield* fs.readDirectory(dir).pipe(
-        Effect.map((items) =>
-          items
+      const suggestions = await readdir(dir)
+        .then((entries) =>
+          entries
             .filter(
-              (item) =>
-                item.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(item.toLowerCase()),
+              (entry) =>
+                entry.toLowerCase().includes(base.toLowerCase()) || base.toLowerCase().includes(entry.toLowerCase()),
             )
-            .map((item) => path.join(dir, item))
+            .map((entry) => path.join(dir, entry))
             .slice(0, 3),
-        ),
-        Effect.catch(() => Effect.succeed([] as string[])),
-      )
-
-      if (items.length > 0) {
-        return yield* Effect.fail(
-          new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${items.join("\n")}`),
         )
+        .catch(() => [])
+      if (suggestions.length > 0) {
+        throw new Error(`File not found: ${filepath}\n\nDid you mean one of these?\n${suggestions.join("\n")}`)
       }
+      throw new Error(`File not found: ${filepath}`)
+    }
 
-      return yield* Effect.fail(new Error(`File not found: ${filepath}`))
-    })
-
-    const list = Effect.fn("ReadTool.list")(function* (filepath: string) {
-      const items = yield* fs.readDirectoryEntries(filepath)
-      return yield* Effect.forEach(
-        items,
-        Effect.fnUntraced(function* (item) {
-          if (item.type === "directory") return item.name + "/"
-          if (item.type !== "symlink") return item.name
-
-          const target = yield* fs
-            .stat(path.join(filepath, item.name))
-            .pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (target?.type === "Directory") return item.name + "/"
-          return item.name
-        }),
-        { concurrency: "unbounded" },
-      ).pipe(Effect.map((items: string[]) => items.sort((a, b) => a.localeCompare(b))))
-    })
-
-    const warm = Effect.fn("ReadTool.warm")(function* (filepath: string, sessionID: Tool.Context["sessionID"]) {
-      yield* lsp.touchFile(filepath, false).pipe(Effect.ignore, Effect.forkIn(scope))
-      yield* time.read(sessionID, filepath)
-    })
-
-    const run = Effect.fn("ReadTool.execute")(function* (params: z.infer<typeof parameters>, ctx: Tool.Context) {
-      if (params.offset !== undefined && params.offset < 1) {
-        return yield* Effect.fail(new Error("offset must be greater than or equal to 1"))
-      }
-
-      let filepath = params.filePath
-      if (!path.isAbsolute(filepath)) {
-        filepath = path.resolve(Instance.directory, filepath)
-      }
-      if (process.platform === "win32") {
-        filepath = AppFileSystem.normalizePath(filepath)
-      }
-      const title = path.relative(Instance.worktree, filepath)
-
-      const stat = yield* fs.stat(filepath).pipe(
-        Effect.catchIf(
-          (err) => "reason" in err && err.reason._tag === "NotFound",
-          () => Effect.succeed(undefined),
-        ),
-      )
-
-      yield* assertExternalDirectoryEffect(ctx, filepath, {
-        bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
-        kind: stat?.type === "Directory" ? "directory" : "file",
-      })
-
-      yield* Effect.promise(() =>
-        ctx.ask({
-          permission: "read",
-          patterns: [filepath],
-          always: ["*"],
-          metadata: {},
+    if (stat.isDirectory()) {
+      const dirents = await readdir(filepath, { withFileTypes: true })
+      const entries = await Promise.all(
+        dirents.map(async (dirent) => {
+          if (dirent.isDirectory()) return dirent.name + "/"
+          if (dirent.isSymbolicLink()) {
+            const target = await fsStat(path.join(filepath, dirent.name)).catch(() => undefined)
+            if (target?.isDirectory()) return dirent.name + "/"
+          }
+          return dirent.name
         }),
       )
+      entries.sort((a, b) => a.localeCompare(b))
 
-      if (!stat) return yield* miss(filepath)
-
-      if (stat.type === "Directory") {
-        const items = yield* list(filepath)
-        const limit = params.limit ?? DEFAULT_READ_LIMIT
-        const offset = params.offset ?? 1
-        const start = offset - 1
-        const sliced = items.slice(start, start + limit)
-        const truncated = start + sliced.length < items.length
-
-        return {
-          title,
-          output: [
-            `<path>${filepath}</path>`,
-            `<type>directory</type>`,
-            `<entries>`,
-            sliced.join("\n"),
-            truncated
-              ? `\n(Showing ${sliced.length} of ${items.length} entries. Use 'offset' parameter to read beyond entry ${offset + sliced.length})`
-              : `\n(${items.length} entries)`,
-            `</entries>`,
-          ].join("\n"),
-          metadata: {
-            preview: sliced.slice(0, 20).join("\n"),
-            truncated,
-            loaded: [] as string[],
-          },
-        }
-      }
-
-      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
-
-      const mime = AppFileSystem.mimeType(filepath)
-      const isImage = mime.startsWith("image/") && mime !== "image/svg+xml" && mime !== "image/vnd.fastbidsheet"
-      const isPdf = mime === "application/pdf"
-      if (isImage || isPdf) {
-        const msg = `${isImage ? "Image" : "PDF"} read successfully`
-        return {
-          title,
-          output: msg,
-          metadata: {
-            preview: msg,
-            truncated: false,
-            loaded: loaded.map((item) => item.filepath),
-          },
-          attachments: [
-            {
-              type: "file" as const,
-              mime,
-              url: `data:${mime};base64,${Buffer.from(yield* fs.readFile(filepath)).toString("base64")}`,
-            },
-          ],
-        }
-      }
-
-      if (yield* Effect.promise(() => isBinaryFile(filepath, Number(stat.size)))) {
-        return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
-      }
-
-      const file = yield* Effect.promise(() =>
-        lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset ?? 1 }),
-      )
-      if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
-        return yield* Effect.fail(
-          new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`),
-        )
-      }
-
-      let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>" + "\n"].join("\n")
-      output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
-
-      const last = file.offset + file.raw.length - 1
-      const next = last + 1
-      const truncated = file.more || file.cut
-      if (file.cut) {
-        output += `\n\n(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${file.offset}-${last}. Use offset=${next} to continue.)`
-      } else if (file.more) {
-        output += `\n\n(Showing lines ${file.offset}-${last} of ${file.count}. Use offset=${next} to continue.)`
-      } else {
-        output += `\n\n(End of file - total ${file.count} lines)`
-      }
-      output += "\n</content>"
-
-      yield* warm(filepath, ctx.sessionID)
-
-      if (loaded.length > 0) {
-        output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
-      }
+      const limit = params.limit ?? DEFAULT_READ_LIMIT
+      const offset = params.offset ?? 1
+      const start = offset - 1
+      const sliced = entries.slice(start, start + limit)
+      const truncated = start + sliced.length < entries.length
 
       return {
         title,
-        output,
+        output: [
+          `<path>${filepath}</path>`,
+          `<type>directory</type>`,
+          `<entries>`,
+          sliced.join("\n"),
+          truncated
+            ? `\n(Showing ${sliced.length} of ${entries.length} entries. Use 'offset' parameter to read beyond entry ${offset + sliced.length})`
+            : `\n(${entries.length} entries)`,
+          `</entries>`,
+        ].join("\n"),
         metadata: {
-          preview: file.raw.slice(0, 20).join("\n"),
+          preview: sliced.slice(0, 20).join("\n"),
           truncated,
-          loaded: loaded.map((item) => item.filepath),
+          loaded: [] as string[],
         },
       }
-    })
+    }
+
+    const loaded = await Instruction.resolve(ctx.messages, filepath, ctx.messageID)
+
+    const mime = AppFileSystem.mimeType(filepath)
+    const isImage = mime.startsWith("image/") && mime !== "image/svg+xml" && mime !== "image/vnd.fastbidsheet"
+    const isPdf = mime === "application/pdf"
+    if (isImage || isPdf) {
+      const msg = `${isImage ? "Image" : "PDF"} read successfully`
+      return {
+        title,
+        output: msg,
+        metadata: {
+          preview: msg,
+          truncated: false,
+          loaded: loaded.map((item) => item.filepath),
+        },
+        attachments: [
+          {
+            type: "file" as const,
+            mime,
+            url: `data:${mime};base64,${Buffer.from(await Filesystem.readBytes(filepath)).toString("base64")}`,
+          },
+        ],
+      }
+    }
+
+    if (await isBinaryFile(filepath, Number(stat.size))) {
+      throw new Error(`Cannot read binary file: ${filepath}`)
+    }
+
+    const file = await lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset ?? 1 })
+    if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
+      throw new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`)
+    }
+
+    let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>" + "\n"].join("\n")
+    output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
+
+    const last = file.offset + file.raw.length - 1
+    const next = last + 1
+    const truncated = file.more || file.cut
+    if (file.cut) {
+      output += `\n\n(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${file.offset}-${last}. Use offset=${next} to continue.)`
+    } else if (file.more) {
+      output += `\n\n(Showing lines ${file.offset}-${last} of ${file.count}. Use offset=${next} to continue.)`
+    } else {
+      output += `\n\n(End of file - total ${file.count} lines)`
+    }
+    output += "\n</content>"
+
+    void LSP.touchFile(filepath, false).catch(() => {})
+    await FileTime.read(ctx.sessionID, filepath)
+
+    if (loaded.length > 0) {
+      output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
+    }
 
     return {
-      description: DESCRIPTION,
-      parameters,
-      async execute(params: z.infer<typeof parameters>, ctx) {
-        return Effect.runPromise(run(params, ctx).pipe(Effect.orDie))
+      title,
+      output,
+      metadata: {
+        preview: file.raw.slice(0, 20).join("\n"),
+        truncated,
+        loaded: loaded.map((item) => item.filepath),
       },
     }
-  }),
-)
+  },
+})
 
 async function lines(filepath: string, opts: { limit: number; offset: number }) {
   const stream = createReadStream(filepath, { encoding: "utf8" })
