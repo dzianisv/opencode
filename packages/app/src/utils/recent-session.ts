@@ -88,14 +88,6 @@ export function organizeRecentSessions(list: GlobalSession[], now: Clock = DateT
       return rank(a, b)
     })
 
-  const orphans = list
-    .filter((session) => session.parentID && !lookup.has(session.parentID))
-    .sort((a, b) => {
-      const diff = visit(b) - visit(a)
-      if (diff) return diff
-      return rank(a, b)
-    })
-
   const sections: RecentSection[] = []
   for (const session of roots) {
     const label = section(visit(session), now)
@@ -107,16 +99,11 @@ export function organizeRecentSessions(list: GlobalSession[], now: Clock = DateT
     last.items.push(session)
   }
 
-  if (orphans.length) {
-    sections.push({ label: "Subagent Sessions", items: orphans })
-  }
-
   return {
     lookup,
     children,
     prefixes,
     roots,
-    orphans,
     sections,
   }
 }
