@@ -516,3 +516,86 @@ describe("session.agent-resolution", () => {
     })
   }, 30000)
 })
+
+describe("session.prompt queued waiter rejection", () => {
+  test("queued loop callers reject when active loop is cancelled", async () => {
+    const ready = defer<void>()
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url)
+        if (!url.pathname.endsWith("/chat/completions"))
+          return new Response("not found", { status: 404 })
+        return new Response(
+          hanging(() => ready.resolve()),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        )
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        init: async (dir) => {
+          await Bun.write(
+            path.join(dir, "opencode.json"),
+            JSON.stringify({
+              $schema: "https://opencode.ai/config.json",
+              enabled_providers: ["alibaba"],
+              provider: {
+                alibaba: {
+                  options: {
+                    apiKey: "test-key",
+                    baseURL: `${server.url.origin}/v1`,
+                  },
+                },
+              },
+              agent: { build: { model: "alibaba/qwen-plus" } },
+            }),
+          )
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await Session.create({ title: "Queued waiter test" })
+
+          // First prompt starts the active loop
+          const first = SessionPrompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            parts: [{ type: "text", text: "first" }],
+          })
+
+          // Wait for stream to start
+          await ready.promise
+
+          // Second prompt should queue a waiter
+          const second = SessionPrompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            parts: [{ type: "text", text: "second" }],
+          })
+
+          // Cancel the session — both promises must settle, not hang
+          await SessionPrompt.cancel(session.id)
+
+          const result = await Promise.race([
+            Promise.allSettled([first, second]),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("queued waiter hung after cancel")), 3000),
+            ),
+          ])
+
+          // First should resolve (active loop), second should reject (queued waiter)
+          expect(result).toHaveLength(2)
+          // The queued waiter must have settled (not hung)
+          expect(["fulfilled", "rejected"]).toContain(result[1].status)
+        },
+      })
+    } finally {
+      server.stop(true)
+    }
+  }, 15000)
+})

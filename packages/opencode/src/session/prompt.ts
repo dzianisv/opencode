@@ -96,6 +96,10 @@ export namespace SessionPrompt {
     async (current) => {
       for (const item of Object.values(current)) {
         item.abort.abort()
+        for (const cb of item.callbacks) {
+          cb.reject(new Error("instance disposed"))
+        }
+        item.callbacks.length = 0
       }
     },
   )
@@ -279,6 +283,10 @@ export namespace SessionPrompt {
       return
     }
     match.abort.abort()
+    for (const cb of match.callbacks) {
+      cb.reject(new Session.BusyError(sessionID))
+    }
+    match.callbacks.length = 0
     delete s[sessionID]
     await SessionStatus.set(sessionID, { type: "idle" })
     return
@@ -1558,17 +1566,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       throw new Session.BusyError(input.sessionID)
     }
 
-    using _ = defer(() => {
+    await using _ = defer(() => {
       // If no queued callbacks, cancel (the default)
       const callbacks = state()[input.sessionID]?.callbacks ?? []
       if (callbacks.length === 0) {
-        cancel(input.sessionID)
-      } else {
-        // Otherwise, trigger the session loop to process queued items
-        loop({ sessionID: input.sessionID, resume_existing: true }).catch((error) => {
-          log.error("session loop failed to resume after shell command", { sessionID: input.sessionID, error })
-        })
+        return cancel(input.sessionID)
       }
+      // Otherwise, trigger the session loop to process queued items
+      loop({ sessionID: input.sessionID, resume_existing: true }).catch((error) => {
+        log.error("session loop failed to resume after shell command", { sessionID: input.sessionID, error })
+      })
     })
 
     const session = await Session.get(input.sessionID)
@@ -1799,11 +1806,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     abort.addEventListener("abort", abortHandler, { once: true })
 
     await new Promise<void>((resolve) => {
-      proc.on("close", () => {
+      const safety = setTimeout(() => {
+        log.warn("shell process did not close within safety timeout, forcing resolve", {
+          sessionID: input.sessionID,
+          pid: proc.pid,
+        })
+        exited = true
+        abort.removeEventListener("abort", abortHandler)
+        void kill()
+        resolve()
+      }, 5 * 60 * 1000)
+
+      const done = () => {
+        clearTimeout(safety)
         exited = true
         abort.removeEventListener("abort", abortHandler)
         resolve()
-      })
+      }
+      proc.on("close", done)
+      proc.on("error", done)
     })
 
     if (timer) clearTimeout(timer)
