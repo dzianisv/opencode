@@ -125,7 +125,46 @@ export namespace SessionSummary {
     messageID: MessageID.zod.optional(),
   })
 
-  export async function diff(input: z.infer<typeof DiffInput>) {
-    return runPromise((svc) => svc.diff(input))
+  export const diff = fn(
+    DiffInput,
+    async (input) => {
+      const diffs = await Storage.read<Snapshot.FileDiff[]>(["session_diff", input.sessionID]).catch(() => [])
+      const next = diffs.map((item) => {
+        const file = unquoteGitPath(item.file)
+        if (file === item.file) return item
+        return {
+          ...item,
+          file,
+        }
+      })
+      const changed = next.some((item, i) => item.file !== diffs[i]?.file)
+      if (changed) Storage.write(["session_diff", input.sessionID], next).catch(() => {})
+      return next
+    },
+  )
+
+  export async function computeDiff(input: { messages: MessageV2.WithParts[] }) {
+    let from: string | undefined
+    let to: string | undefined
+
+    for (const item of input.messages) {
+      if (!from) {
+        for (const part of item.parts) {
+          if (part.type === "step-start" && part.snapshot) {
+            from = part.snapshot
+            break
+          }
+        }
+      }
+
+      for (const part of item.parts) {
+        if (part.type === "step-finish" && part.snapshot) {
+          to = part.snapshot
+        }
+      }
+    }
+
+    if (from && to) return Snapshot.diffFull(from, to)
+    return []
   }
 }
