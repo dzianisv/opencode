@@ -476,6 +476,7 @@ export namespace SessionProcessor {
                   next: Date.now() + delay,
                 })
                 await SessionRetry.sleep(delay, input.abort).catch(() => {})
+                if (input.abort.aborted) break
                 continue
               }
               input.assistantMessage.error = error
