@@ -7,6 +7,7 @@ import {
   Show,
   Match,
   Switch,
+  createSignal,
   createMemo,
   createEffect,
   createComputed,
@@ -72,6 +73,8 @@ import { same } from "@/utils/same"
 import { formatServerError } from "@/utils/server-errors"
 
 const emptyUserMessages: UserMessage[] = []
+const healMs = 2_500
+const retryMs = 5_000
 type QueuedFollowup = FollowupDraft & { id: string; autoReviewSource?: string; autoReviewPhase?: ReviewKind }
 const emptyFollowups: QueuedFollowup[] = []
 type ReviewModel = { providerID: string; modelID: string }
@@ -1582,6 +1585,80 @@ export default function Page() {
       (item) => item.role === "assistant" && typeof item.time.completed !== "number",
     )
   }
+
+  const attempt = new Map<string, number>()
+  const [pulse, setPulse] = createSignal(0)
+  let healTimer: number | undefined
+  let healID: string | undefined
+
+  onCleanup(() => {
+    if (healTimer !== undefined) window.clearTimeout(healTimer)
+  })
+
+  createEffect(
+    on(
+      [
+        () => params.id,
+        () => sync.data.session_status[params.id ?? ""]?.type,
+        () => sync.data.message[params.id ?? ""],
+        pulse,
+      ] as const,
+      ([id, status, list]) => {
+        if (healTimer !== undefined) {
+          window.clearTimeout(healTimer)
+          healTimer = undefined
+        }
+        if (!id) {
+          healID = undefined
+          attempt.clear()
+          return
+        }
+        if (healID !== id) {
+          healID = id
+          attempt.clear()
+        }
+        if (status !== "idle") return
+
+        const pending = (list ?? []).filter(
+          (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
+        )
+        if (!pending.length) {
+          attempt.clear()
+          return
+        }
+
+        const set = new Set(pending.map((item) => item.id))
+        attempt.forEach((_at, mid) => {
+          if (set.has(mid)) return
+          attempt.delete(mid)
+        })
+
+        const edge = pending.length === 1 ? [pending[0]] : [pending[0], pending[pending.length - 1]]
+        const now = Date.now()
+        const when = (item: AssistantMessage) => {
+          const at = attempt.get(item.id)
+          if (typeof at === "number") return at + retryMs
+          return item.time.created + healMs
+        }
+
+        const dues = edge.map((item) => ({ item, due: when(item) }))
+        const hit = dues.find((d) => d.due <= now)
+        if (hit) {
+          attempt.set(hit.item.id, now)
+          untrack(() => void sync.session.sync(id, { force: true }))
+        }
+
+        const times = dues.map((d) => (d.due <= now ? now + retryMs : d.due))
+        const next = Math.min(...times)
+        const delay = Math.max(0, next - now)
+        healTimer = window.setTimeout(() => {
+          healTimer = undefined
+          setPulse((v) => v + 1)
+        }, delay)
+      },
+      { defer: true },
+    ),
+  )
 
   const queuedFollowups = createMemo(() => {
     const id = params.id
