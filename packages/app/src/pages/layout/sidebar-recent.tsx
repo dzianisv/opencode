@@ -167,7 +167,7 @@ export const RecentSidebarPanel = (props: {
           <SessionSkeleton />
         </Show>
 
-        <Show when={store.booted && data().roots.length === 0 && !store.loading}>
+        <Show when={store.booted && data().sections.length === 0 && !store.loading}>
           <div class="flex items-center justify-center py-8 text-text-weak text-14-regular">
             {language.t("common.noResults")}
           </div>

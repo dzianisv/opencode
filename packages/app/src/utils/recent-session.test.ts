@@ -88,4 +88,48 @@ describe("recent session helpers", () => {
       { session: child, depth: 1 },
     ])
   })
+
+  test("orphan children appear in Subagent Sessions section", () => {
+    const now = DateTime.local(2026, 3, 28, 10, 0, 0)
+    const orphan = session({
+      id: "orphan",
+      title: "Orphan",
+      directory: "/repo/app",
+      parentID: "missing-parent",
+      project: { id: "p1", name: "App", worktree: "/repo/app" },
+      time: { created: 1, updated: DateTime.local(2026, 3, 28, 9, 0, 0).toMillis() },
+    })
+    const root = session({
+      id: "root",
+      title: "Root",
+      directory: "/repo/app",
+      project: { id: "p1", name: "App", worktree: "/repo/app" },
+      time: { created: 1, updated: DateTime.local(2026, 3, 27, 8, 0, 0).toMillis() },
+    })
+
+    const data = organizeRecentSessions([orphan, root], now)
+
+    expect(data.roots.map((s) => s.id)).toEqual(["root"])
+    expect(data.orphans.map((s) => s.id)).toEqual(["orphan"])
+    expect(data.sections.map((s) => s.label)).toEqual(["Yesterday", "Subagent Sessions"])
+    expect(data.sections[1]?.items.map((s) => s.id)).toEqual(["orphan"])
+  })
+
+  test("orphan-only list still produces sections", () => {
+    const now = DateTime.local(2026, 3, 28, 10, 0, 0)
+    const orphan = session({
+      id: "orphan",
+      title: "Orphan",
+      directory: "/repo/app",
+      parentID: "missing",
+      project: { id: "p1", name: "App", worktree: "/repo/app" },
+      time: { created: 1, updated: now.toMillis() },
+    })
+
+    const data = organizeRecentSessions([orphan], now)
+
+    expect(data.roots).toEqual([])
+    expect(data.sections.length).toBe(1)
+    expect(data.sections[0]?.label).toBe("Subagent Sessions")
+  })
 })
