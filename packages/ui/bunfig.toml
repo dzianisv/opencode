@@ -1,0 +1,6 @@
+jsx = "react-jsx"
+jsxImportSource = "solid-js"
+conditions = ["browser"]
+
+[test]
+preload = ["./happydom.ts"]

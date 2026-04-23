@@ -619,7 +619,8 @@ export default function Page() {
       .diff({ mode })
       .then((result) => {
         if (vcsRun.get(mode) !== run) return
-        setVcs("diff", mode, result.data ?? [])
+        const safe = Array.isArray(result.data) ? result.data : []
+        setVcs("diff", mode, safe)
         setVcs("ready", mode, true)
       })
       .catch((error) => {
@@ -676,10 +677,15 @@ export default function Page() {
     if (store.changes === "git" || store.changes === "branch") return store.changes
   })
   const reviewDiffs = createMemo(() => {
-    if (store.changes === "git") return vcs.diff.git
-    if (store.changes === "branch") return vcs.diff.branch
-    if (store.changes === "session") return diffs()
-    return turnDiffs()
+    const pick =
+      store.changes === "git"
+        ? vcs.diff.git
+        : store.changes === "branch"
+          ? vcs.diff.branch
+          : store.changes === "session"
+            ? diffs()
+            : turnDiffs()
+    return Array.isArray(pick) ? pick : []
   })
   const reviewCount = createMemo(() => {
     if (store.changes === "git") return vcs.diff.git.length

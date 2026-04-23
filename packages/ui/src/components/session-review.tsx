@@ -154,9 +154,10 @@ export const SessionReview = (props: SessionReviewProps) => {
   const commenting = () => store.commenting
   const opened = () => store.opened
 
+  const safe = () => (Array.isArray(props.diffs) ? props.diffs : [])
   const open = () => props.open ?? store.open
-  const files = createMemo(() => props.diffs.map((diff) => diff.file))
-  const diffs = createMemo(() => new Map(props.diffs.map((diff) => [diff.file, diff] as const)))
+  const files = createMemo(() => safe().map((diff) => diff.file))
+  const diffs = createMemo(() => new Map(safe().map((diff) => [diff.file, diff] as const)))
   const grouped = createMemo(() => {
     const next = new Map<string, SessionReviewComment[]>()
     for (const comment of props.comments ?? []) {
@@ -359,7 +360,7 @@ export const SessionReview = (props: SessionReviewProps) => {
           <Show when={hasDiffs()} fallback={props.empty}>
             <div class="pb-6">
               <Accordion multiple value={open()} onChange={handleChange}>
-                <For each={props.diffs}>
+                <For each={safe()}>
                   {(diff) => {
                     let wrapper: HTMLDivElement | undefined
                     const file = diff.file
