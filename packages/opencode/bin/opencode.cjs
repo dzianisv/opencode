@@ -53,6 +53,11 @@ if (!arch) {
 const base = "opencode-" + platform + "-" + arch
 const binary = platform === "windows" ? "opencode.exe" : "opencode"
 
+const distBinary = path.join(scriptDir, "..", "dist", base, "bin", binary)
+if (fs.existsSync(distBinary)) {
+  run(distBinary)
+}
+
 function supportsAvx2() {
   if (arch !== "x64") return false
 
