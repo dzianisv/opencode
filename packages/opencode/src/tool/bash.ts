@@ -22,6 +22,7 @@ import { ToolID } from "./schema"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const HEARTBEAT_MS = 10_000
 const MAX_OUTPUT_LINES = Truncate.MAX_LINES
 const MAX_OUTPUT_BYTES = Truncate.MAX_BYTES
 
@@ -193,6 +194,7 @@ export const BashTool = Tool.define("bash", async () => {
       let streamError: Error | undefined
       let paused = false
       let timer: ReturnType<typeof setTimeout> | undefined
+      let beat: ReturnType<typeof setInterval> | undefined
       let dirty = false
 
       const out: string[] = []
@@ -219,6 +221,16 @@ export const BashTool = Tool.define("bash", async () => {
         timer = undefined
         if (!dirty) return
         dirty = false
+        ctx.metadata({
+          metadata: {
+            output: renderPreview(),
+            description: params.description,
+            truncated: over || cut,
+          },
+        })
+      }
+
+      const pulse = () => {
         ctx.metadata({
           metadata: {
             output: renderPreview(),
@@ -304,6 +316,11 @@ export const BashTool = Tool.define("bash", async () => {
         timedOut = true
         void kill()
       }, timeout + 100)
+      beat = setInterval(() => {
+        if (exited) return
+        pulse()
+      }, HEARTBEAT_MS)
+      beat.unref?.()
 
       try {
         await new Promise<void>((resolve, reject) => {
@@ -325,6 +342,7 @@ export const BashTool = Tool.define("bash", async () => {
           })
         })
       } finally {
+        if (beat) clearInterval(beat)
         await new Promise<void>((resolve) => file.end(() => resolve()))
       }
 
