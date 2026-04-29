@@ -63,6 +63,7 @@ import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
+import { PromptSuggestions } from "./prompt-input/suggestions"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 
@@ -375,6 +376,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return text.trim().length === 0 && imageAttachments().length === 0 && commentCount() === 0
   })
   const stopping = createMemo(() => working() && blank())
+  const insertSuggestion = (text: string) => {
+    editorRef.textContent = text
+    editorRef.dispatchEvent(new Event("input", { bubbles: true }))
+    editorRef.focus()
+    const range = document.createRange()
+    const sel = window.getSelection()
+    range.selectNodeContents(editorRef)
+    range.collapse(false)
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+  }
   const tip = () => {
     if (stopping()) {
       return (
@@ -1785,6 +1797,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             </div>
           </div>
         </div>
+        <PromptSuggestions
+          visible={blank() && store.mode === "normal"}
+          onSelect={insertSuggestion}
+        />
       </DockShellForm>
       <Show when={store.mode === "normal" || store.mode === "shell"}>
         <DockTray attach="top">

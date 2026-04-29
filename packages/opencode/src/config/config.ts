@@ -509,6 +509,12 @@ export namespace Config {
   })
   export type Command = z.infer<typeof Command>
 
+  export const Prompt = z.object({
+    label: z.string().describe("Short display label for the prompt suggestion chip"),
+    text: z.string().describe("The full prompt text to insert when clicked"),
+  })
+  export type Prompt = z.infer<typeof Prompt>
+
   export const Skills = z.object({
     paths: z.array(z.string()).optional().describe("Additional paths to skill folders"),
     urls: z
@@ -879,6 +885,10 @@ export namespace Config {
         .record(z.string(), Command)
         .optional()
         .describe("Command configuration, see https://opencode.ai/docs/commands"),
+      prompts: z
+        .array(Prompt)
+        .optional()
+        .describe("Saved prompt templates shown as suggestions below the input field"),
       skills: Skills.optional().describe("Additional skill folder paths"),
       watcher: z
         .object({

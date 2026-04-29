@@ -83,6 +83,158 @@ export type EventLspUpdated = {
   }
 }
 
+export type EventMessagePartDelta = {
+  type: "message.part.delta"
+  properties: {
+    sessionID: string
+    messageID: string
+    partID: string
+    field: string
+    delta: string
+  }
+}
+
+export type PermissionRequest = {
+  id: string
+  sessionID: string
+  permission: string
+  patterns: Array<string>
+  metadata: {
+    [key: string]: unknown
+  }
+  always: Array<string>
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventPermissionAsked = {
+  type: "permission.asked"
+  properties: PermissionRequest
+}
+
+export type EventPermissionReplied = {
+  type: "permission.replied"
+  properties: {
+    sessionID: string
+    requestID: string
+    reply: "once" | "always" | "reject"
+  }
+}
+
+export type SessionStatus =
+  | {
+      type: "idle"
+    }
+  | {
+      type: "retry"
+      attempt: number
+      message: string
+      next: number
+    }
+  | {
+      type: "busy"
+    }
+  | {
+      type: "fallback"
+      from: string
+      to: string
+    }
+
+export type EventSessionStatus = {
+  type: "session.status"
+  properties: {
+    sessionID: string
+    status: SessionStatus
+  }
+}
+
+export type EventSessionIdle = {
+  type: "session.idle"
+  properties: {
+    sessionID: string
+  }
+}
+
+export type QuestionOption = {
+  /**
+   * Display text (1-5 words, concise)
+   */
+  label: string
+  /**
+   * Explanation of choice
+   */
+  description: string
+}
+
+export type QuestionInfo = {
+  /**
+   * Complete question
+   */
+  question: string
+  /**
+   * Very short label (max 30 chars)
+   */
+  header: string
+  /**
+   * Available choices
+   */
+  options: Array<QuestionOption>
+  /**
+   * Allow selecting multiple choices
+   */
+  multiple?: boolean
+  /**
+   * Allow typing a custom answer (default: true)
+   */
+  custom?: boolean
+}
+
+export type QuestionRequest = {
+  id: string
+  sessionID: string
+  /**
+   * Questions to ask
+   */
+  questions: Array<QuestionInfo>
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventQuestionAsked = {
+  type: "question.asked"
+  properties: QuestionRequest
+}
+
+export type QuestionAnswer = Array<string>
+
+export type EventQuestionReplied = {
+  type: "question.replied"
+  properties: {
+    sessionID: string
+    requestID: string
+    answers: Array<QuestionAnswer>
+  }
+}
+
+export type EventQuestionRejected = {
+  type: "question.rejected"
+  properties: {
+    sessionID: string
+    requestID: string
+  }
+}
+
+export type EventSessionCompacted = {
+  type: "session.compacted"
+  properties: {
+    sessionID: string
+  }
+}
+
 export type EventFileEdited = {
   type: "file.edited"
   properties: {
@@ -90,21 +242,115 @@ export type EventFileEdited = {
   }
 }
 
-export type OutputFormatText = {
-  type: "text"
+export type EventFileWatcherUpdated = {
+  type: "file.watcher.updated"
+  properties: {
+    file: string
+    event: "add" | "change" | "unlink"
+  }
 }
 
-export type JsonSchema = {
-  [key: string]: unknown
+export type Todo = {
+  /**
+   * Brief description of the task
+   */
+  content: string
+  /**
+   * Current status of the task: pending, in_progress, completed, cancelled
+   */
+  status: string
+  /**
+   * Priority level of the task: high, medium, low
+   */
+  priority: string
 }
 
-export type OutputFormatJsonSchema = {
-  type: "json_schema"
-  schema: JsonSchema
-  retryCount?: number
+export type EventTodoUpdated = {
+  type: "todo.updated"
+  properties: {
+    sessionID: string
+    todos: Array<Todo>
+  }
 }
 
-export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
+export type EventTuiPromptAppend = {
+  type: "tui.prompt.append"
+  properties: {
+    text: string
+  }
+}
+
+export type EventTuiCommandExecute = {
+  type: "tui.command.execute"
+  properties: {
+    command:
+      | "session.list"
+      | "session.new"
+      | "session.share"
+      | "session.interrupt"
+      | "session.compact"
+      | "session.page.up"
+      | "session.page.down"
+      | "session.line.up"
+      | "session.line.down"
+      | "session.half.page.up"
+      | "session.half.page.down"
+      | "session.first"
+      | "session.last"
+      | "prompt.clear"
+      | "prompt.submit"
+      | "agent.cycle"
+      | string
+  }
+}
+
+export type EventTuiToastShow = {
+  type: "tui.toast.show"
+  properties: {
+    title?: string
+    message: string
+    variant: "info" | "success" | "warning" | "error"
+    /**
+     * Duration in milliseconds
+     */
+    duration?: number
+  }
+}
+
+export type EventTuiSessionSelect = {
+  type: "tui.session.select"
+  properties: {
+    /**
+     * Session ID to navigate to
+     */
+    sessionID: string
+  }
+}
+
+export type EventMcpToolsChanged = {
+  type: "mcp.tools.changed"
+  properties: {
+    server: string
+  }
+}
+
+export type EventMcpBrowserOpenFailed = {
+  type: "mcp.browser.open.failed"
+  properties: {
+    mcpName: string
+    url: string
+  }
+}
+
+export type EventCommandExecuted = {
+  type: "command.executed"
+  properties: {
+    name: string
+    sessionID: string
+    arguments: string
+    messageID: string
+  }
+}
 
 export type FileDiff = {
   file: string
@@ -115,29 +361,76 @@ export type FileDiff = {
   status?: "added" | "deleted" | "modified"
 }
 
-export type UserMessage = {
+export type PermissionAction = "allow" | "deny" | "ask"
+
+export type PermissionRule = {
+  permission: string
+  pattern: string
+  action: PermissionAction
+}
+
+export type PermissionRuleset = Array<PermissionRule>
+
+export type Session = {
   id: string
-  sessionID: string
-  role: "user"
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<FileDiff>
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  version: string
   time: {
     created: number
+    updated: number
+    compacting?: number
+    archived?: number
   }
-  format?: OutputFormat
-  summary?: {
-    title?: string
-    body?: string
-    diffs: Array<FileDiff>
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
   }
-  agent: string
-  model: {
-    providerID: string
-    modelID: string
+}
+
+export type EventSessionCreated = {
+  type: "session.created"
+  properties: {
+    info: Session
   }
-  system?: string
-  tools?: {
-    [key: string]: boolean
+}
+
+export type EventSessionUpdated = {
+  type: "session.updated"
+  properties: {
+    info: Session
   }
-  variant?: string
+}
+
+export type EventSessionDeleted = {
+  type: "session.deleted"
+  properties: {
+    info: Session
+  }
+}
+
+export type EventSessionDiff = {
+  type: "session.diff"
+  properties: {
+    sessionID: string
+    diff: Array<FileDiff>
+  }
 }
 
 export type ProviderAuthError = {
@@ -201,6 +494,979 @@ export type ApiError = {
   }
 }
 
+export type EventSessionError = {
+  type: "session.error"
+  properties: {
+    sessionID?: string
+    error?:
+      | ProviderAuthError
+      | UnknownError
+      | MessageOutputLengthError
+      | MessageAbortedError
+      | StructuredOutputError
+      | ContextOverflowError
+      | ApiError
+  }
+}
+
+export type EventVcsBranchUpdated = {
+  type: "vcs.branch.updated"
+  properties: {
+    branch?: string
+  }
+}
+
+export type EventWorkspaceReady = {
+  type: "workspace.ready"
+  properties: {
+    name: string
+  }
+}
+
+export type EventWorkspaceFailed = {
+  type: "workspace.failed"
+  properties: {
+    message: string
+  }
+}
+
+export type Pty = {
+  id: string
+  title: string
+  command: string
+  args: Array<string>
+  cwd: string
+  status: "running" | "exited"
+  pid: number
+}
+
+export type EventPtyCreated = {
+  type: "pty.created"
+  properties: {
+    info: Pty
+  }
+}
+
+export type EventPtyUpdated = {
+  type: "pty.updated"
+  properties: {
+    info: Pty
+  }
+}
+
+export type EventPtyExited = {
+  type: "pty.exited"
+  properties: {
+    id: string
+    exitCode: number
+  }
+}
+
+export type EventPtyDeleted = {
+  type: "pty.deleted"
+  properties: {
+    id: string
+  }
+}
+
+export type EventWorktreeReady = {
+  type: "worktree.ready"
+  properties: {
+    name: string
+    branch: string
+  }
+}
+
+export type EventWorktreeFailed = {
+  type: "worktree.failed"
+  properties: {
+    message: string
+  }
+}
+
+export type Event =
+  | EventInstallationUpdated
+  | EventInstallationUpdateAvailable
+  | EventProjectUpdated
+  | EventServerInstanceDisposed
+  | EventServerConnected
+  | EventGlobalDisposed
+  | EventLspClientDiagnostics
+  | EventLspUpdated
+  | EventMessagePartDelta
+  | EventPermissionAsked
+  | EventPermissionReplied
+  | EventSessionStatus
+  | EventSessionIdle
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected
+  | EventSessionCompacted
+  | EventFileEdited
+  | EventFileWatcherUpdated
+  | EventTodoUpdated
+  | EventTuiPromptAppend
+  | EventTuiCommandExecute
+  | EventTuiToastShow
+  | EventTuiSessionSelect
+  | EventMcpToolsChanged
+  | EventMcpBrowserOpenFailed
+  | EventCommandExecuted
+  | EventSessionCreated
+  | EventSessionUpdated
+  | EventSessionDeleted
+  | EventSessionDiff
+  | EventSessionError
+  | EventVcsBranchUpdated
+  | EventWorkspaceReady
+  | EventWorkspaceFailed
+  | EventPtyCreated
+  | EventPtyUpdated
+  | EventPtyExited
+  | EventPtyDeleted
+  | EventWorktreeReady
+  | EventWorktreeFailed
+
+export type GlobalEvent = {
+  directory: string
+  payload: Event
+}
+
+/**
+ * Log level
+ */
+export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
+
+/**
+ * Server configuration for opencode serve and web commands
+ */
+export type ServerConfig = {
+  /**
+   * Port to listen on
+   */
+  port?: number
+  /**
+   * Hostname to listen on
+   */
+  hostname?: string
+  /**
+   * Enable mDNS service discovery
+   */
+  mdns?: boolean
+  /**
+   * Custom domain name for mDNS service (default: opencode.local)
+   */
+  mdnsDomain?: string
+  /**
+   * Additional domains to allow for CORS
+   */
+  cors?: Array<string>
+}
+
+/**
+ * Auto-review configuration
+ */
+export type AutoReviewConfig = {
+  /**
+   * Model to use for auto-review follow-ups in the format provider/model
+   */
+  model?: string
+}
+
+export type PermissionActionConfig = "ask" | "allow" | "deny"
+
+export type PermissionObjectConfig = {
+  [key: string]: PermissionActionConfig
+}
+
+export type PermissionRuleConfig = PermissionActionConfig | PermissionObjectConfig
+
+export type PermissionConfig =
+  | {
+      __originalKeys?: Array<string>
+      read?: PermissionRuleConfig
+      edit?: PermissionRuleConfig
+      glob?: PermissionRuleConfig
+      grep?: PermissionRuleConfig
+      list?: PermissionRuleConfig
+      bash?: PermissionRuleConfig
+      task?: PermissionRuleConfig
+      external_directory?: PermissionRuleConfig
+      todowrite?: PermissionActionConfig
+      question?: PermissionActionConfig
+      webfetch?: PermissionActionConfig
+      websearch?: PermissionActionConfig
+      codesearch?: PermissionActionConfig
+      lsp?: PermissionRuleConfig
+      doom_loop?: PermissionActionConfig
+      skill?: PermissionRuleConfig
+      [key: string]: PermissionRuleConfig | Array<string> | PermissionActionConfig | undefined
+    }
+  | PermissionActionConfig
+
+export type AgentConfig = {
+  model?: string | Array<string>
+  /**
+   * Default model variant for this agent (applies only when using the agent's configured model).
+   */
+  variant?: string
+  temperature?: number
+  top_p?: number
+  prompt?: string
+  /**
+   * @deprecated Use 'permission' field instead
+   */
+  tools?: {
+    [key: string]: boolean
+  }
+  disable?: boolean
+  /**
+   * Description of when to use the agent
+   */
+  description?: string
+  mode?: "subagent" | "primary" | "all"
+  /**
+   * Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)
+   */
+  hidden?: boolean
+  options?: {
+    [key: string]: unknown
+  }
+  /**
+   * Hex color code (e.g., #FF5733) or theme color (e.g., primary)
+   */
+  color?: string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
+  /**
+   * Maximum number of agentic iterations before forcing text-only response
+   */
+  steps?: number
+  /**
+   * @deprecated Use 'steps' field instead.
+   */
+  maxSteps?: number
+  /**
+   * Ordered list of fallback models (provider/model format) to try when the primary model exhausts retries
+   */
+  fallback_models?: Array<string>
+  /**
+   * Number of retry attempts on the current model before falling back to the next one (default: 3)
+   */
+  max_retries_before_fallback?: number
+  permission?: PermissionConfig
+  [key: string]:
+    | unknown
+    | string
+    | Array<string>
+    | string
+    | number
+    | {
+        [key: string]: boolean
+      }
+    | boolean
+    | "subagent"
+    | "primary"
+    | "all"
+    | {
+        [key: string]: unknown
+      }
+    | string
+    | "primary"
+    | "secondary"
+    | "accent"
+    | "success"
+    | "warning"
+    | "error"
+    | "info"
+    | number
+    | Array<string>
+    | PermissionConfig
+    | undefined
+}
+
+export type ProviderConfig = {
+  api?: string
+  name?: string
+  env?: Array<string>
+  id?: string
+  npm?: string
+  models?: {
+    [key: string]: {
+      id?: string
+      name?: string
+      family?: string
+      release_date?: string
+      attachment?: boolean
+      reasoning?: boolean
+      temperature?: boolean
+      tool_call?: boolean
+      interleaved?:
+        | true
+        | {
+            field: "reasoning_content" | "reasoning_details"
+          }
+      cost?: {
+        input: number
+        output: number
+        cache_read?: number
+        cache_write?: number
+        context_over_200k?: {
+          input: number
+          output: number
+          cache_read?: number
+          cache_write?: number
+        }
+      }
+      limit?: {
+        context: number
+        input?: number
+        output: number
+      }
+      modalities?: {
+        input: Array<"text" | "audio" | "image" | "video" | "pdf">
+        output: Array<"text" | "audio" | "image" | "video" | "pdf">
+      }
+      experimental?: boolean
+      status?: "alpha" | "beta" | "deprecated"
+      options?: {
+        [key: string]: unknown
+      }
+      headers?: {
+        [key: string]: string
+      }
+      provider?: {
+        npm?: string
+        api?: string
+      }
+      /**
+       * Variant-specific configuration
+       */
+      variants?: {
+        [key: string]: {
+          /**
+           * Disable this variant for the model
+           */
+          disabled?: boolean
+          [key: string]: unknown | boolean | undefined
+        }
+      }
+    }
+  }
+  whitelist?: Array<string>
+  blacklist?: Array<string>
+  options?: {
+    apiKey?: string
+    baseURL?: string
+    /**
+     * GitHub Enterprise URL for copilot authentication
+     */
+    enterpriseUrl?: string
+    /**
+     * Enable promptCacheKey for this provider (default false)
+     */
+    setCacheKey?: boolean
+    /**
+     * Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.
+     */
+    timeout?: number | false
+    /**
+     * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.
+     */
+    chunkTimeout?: number
+    [key: string]: unknown | string | boolean | number | false | number | undefined
+  }
+}
+
+export type McpLocalConfig = {
+  /**
+   * Type of MCP server connection
+   */
+  type: "local"
+  /**
+   * Command and arguments to run the MCP server
+   */
+  command: Array<string>
+  /**
+   * Environment variables to set when running the MCP server
+   */
+  environment?: {
+    [key: string]: string
+  }
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+}
+
+export type McpOAuthConfig = {
+  /**
+   * OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted.
+   */
+  clientId?: string
+  /**
+   * OAuth client secret (if required by the authorization server)
+   */
+  clientSecret?: string
+  /**
+   * OAuth scopes to request during authorization
+   */
+  scope?: string
+}
+
+export type McpRemoteConfig = {
+  /**
+   * Type of MCP server connection
+   */
+  type: "remote"
+  /**
+   * URL of the remote MCP server
+   */
+  url: string
+  /**
+   * Enable or disable the MCP server on startup
+   */
+  enabled?: boolean
+  /**
+   * Headers to send with the request
+   */
+  headers?: {
+    [key: string]: string
+  }
+  /**
+   * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
+   */
+  oauth?: McpOAuthConfig | false
+  /**
+   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
+   */
+  timeout?: number
+}
+
+/**
+ * @deprecated Always uses stretch layout.
+ */
+export type LayoutConfig = "auto" | "stretch"
+
+export type Config = {
+  /**
+   * JSON schema reference for configuration validation
+   */
+  $schema?: string
+  logLevel?: LogLevel
+  server?: ServerConfig
+  /**
+   * Command configuration, see https://opencode.ai/docs/commands
+   */
+  command?: {
+    [key: string]: {
+      template: string
+      description?: string
+      agent?: string
+      model?: string
+      subtask?: boolean
+    }
+  }
+  /**
+   * Saved prompt templates shown as suggestions below the input field
+   */
+  prompts?: Array<{
+    /**
+     * Short display label for the prompt suggestion chip
+     */
+    label: string
+    /**
+     * The full prompt text to insert when clicked
+     */
+    text: string
+  }>
+  /**
+   * Additional skill folder paths
+   */
+  skills?: {
+    /**
+     * Additional paths to skill folders
+     */
+    paths?: Array<string>
+    /**
+     * URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)
+     */
+    urls?: Array<string>
+  }
+  watcher?: {
+    ignore?: Array<string>
+  }
+  /**
+   * Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.
+   */
+  snapshot?: boolean
+  plugin?: Array<
+    | string
+    | [
+        string,
+        {
+          [key: string]: unknown
+        },
+      ]
+  >
+  /**
+   * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
+   */
+  share?: "manual" | "auto" | "disabled"
+  /**
+   * @deprecated Use 'share' field instead. Share newly created sessions automatically
+   */
+  autoshare?: boolean
+  /**
+   * Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications
+   */
+  autoupdate?: boolean | "notify"
+  /**
+   * Disable providers that are loaded automatically
+   */
+  disabled_providers?: Array<string>
+  /**
+   * When set, ONLY these providers will be enabled. All other providers will be ignored
+   */
+  enabled_providers?: Array<string>
+  /**
+   * Model to use in the format of provider/model, eg anthropic/claude-2
+   */
+  model?: string
+  /**
+   * Small model to use for tasks like title generation in the format of provider/model
+   */
+  small_model?: string
+  auto_review?: AutoReviewConfig
+  /**
+   * Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.
+   */
+  default_agent?: string
+  /**
+   * Custom username to display in conversations instead of system username
+   */
+  username?: string
+  /**
+   * @deprecated Use `agent` field instead.
+   */
+  mode?: {
+    build?: AgentConfig
+    plan?: AgentConfig
+    [key: string]: AgentConfig | undefined
+  }
+  /**
+   * Agent configuration, see https://opencode.ai/docs/agents
+   */
+  agent?: {
+    plan?: AgentConfig
+    build?: AgentConfig
+    general?: AgentConfig
+    explore?: AgentConfig
+    title?: AgentConfig
+    summary?: AgentConfig
+    compaction?: AgentConfig
+    [key: string]: AgentConfig | undefined
+  }
+  /**
+   * Custom provider configurations and model overrides
+   */
+  provider?: {
+    [key: string]: ProviderConfig
+  }
+  /**
+   * MCP (Model Context Protocol) server configurations
+   */
+  mcp?: {
+    [key: string]:
+      | McpLocalConfig
+      | McpRemoteConfig
+      | {
+          enabled: boolean
+        }
+  }
+  formatter?:
+    | false
+    | {
+        [key: string]: {
+          disabled?: boolean
+          command?: Array<string>
+          environment?: {
+            [key: string]: string
+          }
+          extensions?: Array<string>
+        }
+      }
+  lsp?:
+    | false
+    | {
+        [key: string]:
+          | {
+              disabled: true
+            }
+          | {
+              command: Array<string>
+              extensions?: Array<string>
+              disabled?: boolean
+              env?: {
+                [key: string]: string
+              }
+              initialization?: {
+                [key: string]: unknown
+              }
+            }
+      }
+  /**
+   * Additional instruction files or patterns to include
+   */
+  instructions?: Array<string>
+  layout?: LayoutConfig
+  permission?: PermissionConfig
+  /**
+   * Voice playback configuration
+   */
+  voice?: {
+    edge?: {
+      /**
+       * Enable server-backed Edge TTS playback
+       */
+      enabled?: boolean
+      /**
+       * Edge neural voice name
+       */
+      voice?: string
+      /**
+       * Edge TTS language code
+       */
+      lang?: string
+      /**
+       * Edge TTS output format
+       */
+      output_format?: string
+      /**
+       * Edge TTS pitch percent string
+       */
+      pitch?: string
+      /**
+       * Edge TTS rate percent string
+       */
+      rate?: string
+      /**
+       * Edge TTS volume percent string
+       */
+      volume?: string
+      /**
+       * Edge TTS timeout in milliseconds
+       */
+      timeout_ms?: number
+    }
+  }
+  tools?: {
+    [key: string]: boolean
+  }
+  enterprise?: {
+    /**
+     * Enterprise URL
+     */
+    url?: string
+  }
+  compaction?: {
+    /**
+     * Enable automatic compaction when context is full (default: true)
+     */
+    auto?: boolean
+    /**
+     * Enable pruning of old tool outputs (default: true)
+     */
+    prune?: boolean
+    /**
+     * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
+     */
+    reserved?: number
+  }
+  experimental?: {
+    disable_paste_summary?: boolean
+    /**
+     * Enable the batch tool
+     */
+    batch_tool?: boolean
+    /**
+     * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
+     */
+    openTelemetry?: boolean
+    /**
+     * Tools that should only be available to primary agents.
+     */
+    primary_tools?: Array<string>
+    /**
+     * Continue the agent loop when a tool call is denied
+     */
+    continue_loop_on_deny?: boolean
+    /**
+     * Timeout in milliseconds for model context protocol (MCP) requests
+     */
+    mcp_timeout?: number
+    /**
+     * Timeout in milliseconds between stream chunks from LLM. If no data is received within this period, the request will be retried. Default is 60000 (60 seconds). Set to 0 to disable.
+     */
+    stream_idle_timeout?: number
+  }
+}
+
+export type BadRequestError = {
+  data: unknown
+  errors: Array<{
+    [key: string]: unknown
+  }>
+  success: false
+}
+
+export type ProjectSummary = {
+  id: string
+  name?: string
+  worktree: string
+}
+
+export type GlobalSession = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<FileDiff>
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  version: string
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+  project: ProjectSummary | null
+}
+
+export type OAuth = {
+  type: "oauth"
+  refresh: string
+  access: string
+  expires: number
+  accountId?: string
+  enterpriseUrl?: string
+}
+
+export type ApiAuth = {
+  type: "api"
+  key: string
+}
+
+export type WellKnownAuth = {
+  type: "wellknown"
+  key: string
+  token: string
+}
+
+export type Auth = OAuth | ApiAuth | WellKnownAuth
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
+export type Model = {
+  id: string
+  providerID: string
+  api: {
+    id: string
+    url: string
+    npm: string
+  }
+  name: string
+  family?: string
+  capabilities: {
+    temperature: boolean
+    reasoning: boolean
+    attachment: boolean
+    toolcall: boolean
+    input: {
+      text: boolean
+      audio: boolean
+      image: boolean
+      video: boolean
+      pdf: boolean
+    }
+    output: {
+      text: boolean
+      audio: boolean
+      image: boolean
+      video: boolean
+      pdf: boolean
+    }
+    interleaved:
+      | boolean
+      | {
+          field: "reasoning_content" | "reasoning_details"
+        }
+  }
+  cost: {
+    input: number
+    output: number
+    cache: {
+      read: number
+      write: number
+    }
+    experimentalOver200K?: {
+      input: number
+      output: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+  }
+  limit: {
+    context: number
+    input?: number
+    output: number
+  }
+  status: "alpha" | "beta" | "deprecated" | "active"
+  options: {
+    [key: string]: unknown
+  }
+  headers: {
+    [key: string]: string
+  }
+  release_date: string
+  variants?: {
+    [key: string]: {
+      [key: string]: unknown
+    }
+  }
+}
+
+export type Provider = {
+  id: string
+  name: string
+  source: "env" | "config" | "custom" | "api"
+  env: Array<string>
+  key?: string
+  options: {
+    [key: string]: unknown
+  }
+  models: {
+    [key: string]: Model
+  }
+}
+
+export type ToolIds = Array<string>
+
+export type ToolListItem = {
+  id: string
+  description: string
+  parameters: unknown
+}
+
+export type ToolList = Array<ToolListItem>
+
+export type Workspace = {
+  id: string
+  type: string
+  branch: string | null
+  name: string | null
+  directory: string | null
+  extra: unknown | null
+  projectID: string
+}
+
+export type Worktree = {
+  name: string
+  branch: string
+  directory: string
+}
+
+export type WorktreeCreateInput = {
+  name?: string
+  /**
+   * Additional startup script to run after the project's start command
+   */
+  startCommand?: string
+}
+
+export type WorktreeRemoveInput = {
+  directory: string
+}
+
+export type WorktreeResetInput = {
+  directory: string
+}
+
+export type McpResource = {
+  name: string
+  uri: string
+  description?: string
+  mimeType?: string
+  client: string
+}
+
+export type OutputFormatText = {
+  type: "text"
+}
+
+export type JsonSchema = {
+  [key: string]: unknown
+}
+
+export type OutputFormatJsonSchema = {
+  type: "json_schema"
+  schema: JsonSchema
+  retryCount?: number
+}
+
+export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
+
+export type UserMessage = {
+  id: string
+  sessionID: string
+  role: "user"
+  time: {
+    created: number
+  }
+  format?: OutputFormat
+  summary?: {
+    title?: string
+    body?: string
+    diffs: Array<FileDiff>
+  }
+  agent: string
+  model: {
+    providerID: string
+    modelID: string
+  }
+  system?: string
+  tools?: {
+    [key: string]: boolean
+  }
+  variant?: string
+}
+
 export type AssistantMessage = {
   id: string
   sessionID: string
@@ -244,21 +1510,6 @@ export type AssistantMessage = {
 }
 
 export type Message = UserMessage | AssistantMessage
-
-export type EventMessageUpdated = {
-  type: "message.updated"
-  properties: {
-    info: Message
-  }
-}
-
-export type EventMessageRemoved = {
-  type: "message.removed"
-  properties: {
-    sessionID: string
-    messageID: string
-  }
-}
 
 export type TextPart = {
   id: string
@@ -522,1254 +1773,6 @@ export type Part =
   | RetryPart
   | CompactionPart
 
-export type EventMessagePartUpdated = {
-  type: "message.part.updated"
-  properties: {
-    sessionID: string
-    time: number
-    part: Part
-  }
-}
-
-export type EventMessagePartDelta = {
-  type: "message.part.delta"
-  properties: {
-    sessionID: string
-    messageID: string
-    partID: string
-    field: string
-    delta: string
-  }
-}
-
-export type EventMessagePartRemoved = {
-  type: "message.part.removed"
-  properties: {
-    sessionID: string
-    messageID: string
-    partID: string
-  }
-}
-
-export type PermissionRequest = {
-  id: string
-  sessionID: string
-  permission: string
-  patterns: Array<string>
-  metadata: {
-    [key: string]: unknown
-  }
-  always: Array<string>
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type EventPermissionAsked = {
-  type: "permission.asked"
-  properties: PermissionRequest
-}
-
-export type EventPermissionReplied = {
-  type: "permission.replied"
-  properties: {
-    sessionID: string
-    requestID: string
-    reply: "once" | "always" | "reject"
-  }
-}
-
-export type SessionStatus =
-  | {
-      type: "idle"
-    }
-  | {
-      type: "retry"
-      attempt: number
-      message: string
-      next: number
-    }
-  | {
-      type: "busy"
-    }
-
-export type EventSessionStatus = {
-  type: "session.status"
-  properties: {
-    sessionID: string
-    status: SessionStatus
-  }
-}
-
-export type EventSessionIdle = {
-  type: "session.idle"
-  properties: {
-    sessionID: string
-  }
-}
-
-export type QuestionOption = {
-  /**
-   * Display text (1-5 words, concise)
-   */
-  label: string
-  /**
-   * Explanation of choice
-   */
-  description: string
-}
-
-export type QuestionInfo = {
-  /**
-   * Complete question
-   */
-  question: string
-  /**
-   * Very short label (max 30 chars)
-   */
-  header: string
-  /**
-   * Available choices
-   */
-  options: Array<QuestionOption>
-  /**
-   * Allow selecting multiple choices
-   */
-  multiple?: boolean
-  /**
-   * Allow typing a custom answer (default: true)
-   */
-  custom?: boolean
-}
-
-export type QuestionRequest = {
-  id: string
-  sessionID: string
-  /**
-   * Questions to ask
-   */
-  questions: Array<QuestionInfo>
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type EventQuestionAsked = {
-  type: "question.asked"
-  properties: QuestionRequest
-}
-
-export type QuestionAnswer = Array<string>
-
-export type EventQuestionReplied = {
-  type: "question.replied"
-  properties: {
-    sessionID: string
-    requestID: string
-    answers: Array<QuestionAnswer>
-  }
-}
-
-export type EventQuestionRejected = {
-  type: "question.rejected"
-  properties: {
-    sessionID: string
-    requestID: string
-  }
-}
-
-export type EventSessionCompacted = {
-  type: "session.compacted"
-  properties: {
-    sessionID: string
-  }
-}
-
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
-  }
-}
-
-export type Todo = {
-  /**
-   * Brief description of the task
-   */
-  content: string
-  /**
-   * Current status of the task: pending, in_progress, completed, cancelled
-   */
-  status: string
-  /**
-   * Priority level of the task: high, medium, low
-   */
-  priority: string
-}
-
-export type EventTodoUpdated = {
-  type: "todo.updated"
-  properties: {
-    sessionID: string
-    todos: Array<Todo>
-  }
-}
-
-export type EventTuiPromptAppend = {
-  type: "tui.prompt.append"
-  properties: {
-    text: string
-  }
-}
-
-export type EventTuiCommandExecute = {
-  type: "tui.command.execute"
-  properties: {
-    command:
-      | "session.list"
-      | "session.new"
-      | "session.share"
-      | "session.interrupt"
-      | "session.compact"
-      | "session.page.up"
-      | "session.page.down"
-      | "session.line.up"
-      | "session.line.down"
-      | "session.half.page.up"
-      | "session.half.page.down"
-      | "session.first"
-      | "session.last"
-      | "prompt.clear"
-      | "prompt.submit"
-      | "agent.cycle"
-      | string
-  }
-}
-
-export type EventTuiToastShow = {
-  type: "tui.toast.show"
-  properties: {
-    title?: string
-    message: string
-    variant: "info" | "success" | "warning" | "error"
-    /**
-     * Duration in milliseconds
-     */
-    duration?: number
-  }
-}
-
-export type EventTuiSessionSelect = {
-  type: "tui.session.select"
-  properties: {
-    /**
-     * Session ID to navigate to
-     */
-    sessionID: string
-  }
-}
-
-export type EventMcpToolsChanged = {
-  type: "mcp.tools.changed"
-  properties: {
-    server: string
-  }
-}
-
-export type EventMcpBrowserOpenFailed = {
-  type: "mcp.browser.open.failed"
-  properties: {
-    mcpName: string
-    url: string
-  }
-}
-
-export type EventCommandExecuted = {
-  type: "command.executed"
-  properties: {
-    name: string
-    sessionID: string
-    arguments: string
-    messageID: string
-  }
-}
-
-export type PermissionAction = "allow" | "deny" | "ask"
-
-export type PermissionRule = {
-  permission: string
-  pattern: string
-  action: PermissionAction
-}
-
-export type PermissionRuleset = Array<PermissionRule>
-
-export type Session = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  version: string
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type EventSessionCreated = {
-  type: "session.created"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionUpdated = {
-  type: "session.updated"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionDeleted = {
-  type: "session.deleted"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionDiff = {
-  type: "session.diff"
-  properties: {
-    sessionID: string
-    diff: Array<FileDiff>
-  }
-}
-
-export type EventSessionError = {
-  type: "session.error"
-  properties: {
-    sessionID?: string
-    error?:
-      | ProviderAuthError
-      | UnknownError
-      | MessageOutputLengthError
-      | MessageAbortedError
-      | StructuredOutputError
-      | ContextOverflowError
-      | ApiError
-  }
-}
-
-export type EventVcsBranchUpdated = {
-  type: "vcs.branch.updated"
-  properties: {
-    branch?: string
-  }
-}
-
-export type EventWorkspaceReady = {
-  type: "workspace.ready"
-  properties: {
-    name: string
-  }
-}
-
-export type EventWorkspaceFailed = {
-  type: "workspace.failed"
-  properties: {
-    message: string
-  }
-}
-
-export type Pty = {
-  id: string
-  title: string
-  command: string
-  args: Array<string>
-  cwd: string
-  status: "running" | "exited"
-  pid: number
-}
-
-export type EventPtyCreated = {
-  type: "pty.created"
-  properties: {
-    info: Pty
-  }
-}
-
-export type EventPtyUpdated = {
-  type: "pty.updated"
-  properties: {
-    info: Pty
-  }
-}
-
-export type EventPtyExited = {
-  type: "pty.exited"
-  properties: {
-    id: string
-    exitCode: number
-  }
-}
-
-export type EventPtyDeleted = {
-  type: "pty.deleted"
-  properties: {
-    id: string
-  }
-}
-
-export type EventWorktreeReady = {
-  type: "worktree.ready"
-  properties: {
-    name: string
-    branch: string
-  }
-}
-
-export type EventWorktreeFailed = {
-  type: "worktree.failed"
-  properties: {
-    message: string
-  }
-}
-
-export type Event =
-  | EventInstallationUpdated
-  | EventInstallationUpdateAvailable
-  | EventProjectUpdated
-  | EventServerInstanceDisposed
-  | EventServerConnected
-  | EventGlobalDisposed
-  | EventLspClientDiagnostics
-  | EventLspUpdated
-  | EventFileEdited
-  | EventMessageUpdated
-  | EventMessageRemoved
-  | EventMessagePartUpdated
-  | EventMessagePartDelta
-  | EventMessagePartRemoved
-  | EventPermissionAsked
-  | EventPermissionReplied
-  | EventSessionStatus
-  | EventSessionIdle
-  | EventQuestionAsked
-  | EventQuestionReplied
-  | EventQuestionRejected
-  | EventSessionCompacted
-  | EventFileWatcherUpdated
-  | EventTodoUpdated
-  | EventTuiPromptAppend
-  | EventTuiCommandExecute
-  | EventTuiToastShow
-  | EventTuiSessionSelect
-  | EventMcpToolsChanged
-  | EventMcpBrowserOpenFailed
-  | EventCommandExecuted
-  | EventSessionCreated
-  | EventSessionUpdated
-  | EventSessionDeleted
-  | EventSessionDiff
-  | EventSessionError
-  | EventVcsBranchUpdated
-  | EventWorkspaceReady
-  | EventWorkspaceFailed
-  | EventPtyCreated
-  | EventPtyUpdated
-  | EventPtyExited
-  | EventPtyDeleted
-  | EventWorktreeReady
-  | EventWorktreeFailed
-
-export type GlobalEvent = {
-  directory: string
-  payload: Event
-}
-
-/**
- * Log level
- */
-export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
-
-/**
- * Server configuration for opencode serve and web commands
- */
-export type ServerConfig = {
-  /**
-   * Port to listen on
-   */
-  port?: number
-  /**
-   * Hostname to listen on
-   */
-  hostname?: string
-  /**
-   * Enable mDNS service discovery
-   */
-  mdns?: boolean
-  /**
-   * Custom domain name for mDNS service (default: opencode.local)
-   */
-  mdnsDomain?: string
-  /**
-   * Additional domains to allow for CORS
-   */
-  cors?: Array<string>
-}
-
-/**
- * Auto-review configuration
- */
-export type AutoReviewConfig = {
-  /**
-   * Model to use for auto-review follow-ups in the format provider/model
-   */
-  model?: string
-}
-
-export type PermissionActionConfig = "ask" | "allow" | "deny"
-
-export type PermissionObjectConfig = {
-  [key: string]: PermissionActionConfig
-}
-
-export type PermissionRuleConfig = PermissionActionConfig | PermissionObjectConfig
-
-export type PermissionConfig =
-  | {
-      __originalKeys?: Array<string>
-      read?: PermissionRuleConfig
-      edit?: PermissionRuleConfig
-      glob?: PermissionRuleConfig
-      grep?: PermissionRuleConfig
-      list?: PermissionRuleConfig
-      bash?: PermissionRuleConfig
-      task?: PermissionRuleConfig
-      external_directory?: PermissionRuleConfig
-      todowrite?: PermissionActionConfig
-      todoread?: PermissionActionConfig
-      question?: PermissionActionConfig
-      webfetch?: PermissionActionConfig
-      websearch?: PermissionActionConfig
-      codesearch?: PermissionActionConfig
-      lsp?: PermissionRuleConfig
-      doom_loop?: PermissionActionConfig
-      skill?: PermissionRuleConfig
-      [key: string]: PermissionRuleConfig | Array<string> | PermissionActionConfig | undefined
-    }
-  | PermissionActionConfig
-
-export type AgentConfig = {
-  model?: string
-  /**
-   * Default model variant for this agent (applies only when using the agent's configured model).
-   */
-  variant?: string
-  temperature?: number
-  top_p?: number
-  prompt?: string
-  /**
-   * @deprecated Use 'permission' field instead
-   */
-  tools?: {
-    [key: string]: boolean
-  }
-  disable?: boolean
-  /**
-   * Description of when to use the agent
-   */
-  description?: string
-  mode?: "subagent" | "primary" | "all"
-  /**
-   * Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)
-   */
-  hidden?: boolean
-  options?: {
-    [key: string]: unknown
-  }
-  /**
-   * Hex color code (e.g., #FF5733) or theme color (e.g., primary)
-   */
-  color?: string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
-  /**
-   * Maximum number of agentic iterations before forcing text-only response
-   */
-  steps?: number
-  /**
-   * @deprecated Use 'steps' field instead.
-   */
-  maxSteps?: number
-  permission?: PermissionConfig
-  [key: string]:
-    | unknown
-    | string
-    | number
-    | {
-        [key: string]: boolean
-      }
-    | boolean
-    | "subagent"
-    | "primary"
-    | "all"
-    | {
-        [key: string]: unknown
-      }
-    | string
-    | "primary"
-    | "secondary"
-    | "accent"
-    | "success"
-    | "warning"
-    | "error"
-    | "info"
-    | number
-    | PermissionConfig
-    | undefined
-}
-
-export type ProviderConfig = {
-  api?: string
-  name?: string
-  env?: Array<string>
-  id?: string
-  npm?: string
-  models?: {
-    [key: string]: {
-      id?: string
-      name?: string
-      family?: string
-      release_date?: string
-      attachment?: boolean
-      reasoning?: boolean
-      temperature?: boolean
-      tool_call?: boolean
-      interleaved?:
-        | true
-        | {
-            field: "reasoning_content" | "reasoning_details"
-          }
-      cost?: {
-        input: number
-        output: number
-        cache_read?: number
-        cache_write?: number
-        context_over_200k?: {
-          input: number
-          output: number
-          cache_read?: number
-          cache_write?: number
-        }
-      }
-      limit?: {
-        context: number
-        input?: number
-        output: number
-      }
-      modalities?: {
-        input: Array<"text" | "audio" | "image" | "video" | "pdf">
-        output: Array<"text" | "audio" | "image" | "video" | "pdf">
-      }
-      experimental?: boolean
-      status?: "alpha" | "beta" | "deprecated"
-      options?: {
-        [key: string]: unknown
-      }
-      headers?: {
-        [key: string]: string
-      }
-      provider?: {
-        npm?: string
-        api?: string
-      }
-      /**
-       * Variant-specific configuration
-       */
-      variants?: {
-        [key: string]: {
-          /**
-           * Disable this variant for the model
-           */
-          disabled?: boolean
-          [key: string]: unknown | boolean | undefined
-        }
-      }
-    }
-  }
-  whitelist?: Array<string>
-  blacklist?: Array<string>
-  options?: {
-    apiKey?: string
-    baseURL?: string
-    /**
-     * GitHub Enterprise URL for copilot authentication
-     */
-    enterpriseUrl?: string
-    /**
-     * Enable promptCacheKey for this provider (default false)
-     */
-    setCacheKey?: boolean
-    /**
-     * Timeout in milliseconds for requests to this provider. Default is 300000 (5 minutes). Set to false to disable timeout.
-     */
-    timeout?: number | false
-    /**
-     * Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.
-     */
-    chunkTimeout?: number
-    [key: string]: unknown | string | boolean | number | false | number | undefined
-  }
-}
-
-export type McpLocalConfig = {
-  /**
-   * Type of MCP server connection
-   */
-  type: "local"
-  /**
-   * Command and arguments to run the MCP server
-   */
-  command: Array<string>
-  /**
-   * Environment variables to set when running the MCP server
-   */
-  environment?: {
-    [key: string]: string
-  }
-  /**
-   * Enable or disable the MCP server on startup
-   */
-  enabled?: boolean
-  /**
-   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
-   */
-  timeout?: number
-}
-
-export type McpOAuthConfig = {
-  /**
-   * OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted.
-   */
-  clientId?: string
-  /**
-   * OAuth client secret (if required by the authorization server)
-   */
-  clientSecret?: string
-  /**
-   * OAuth scopes to request during authorization
-   */
-  scope?: string
-}
-
-export type McpRemoteConfig = {
-  /**
-   * Type of MCP server connection
-   */
-  type: "remote"
-  /**
-   * URL of the remote MCP server
-   */
-  url: string
-  /**
-   * Enable or disable the MCP server on startup
-   */
-  enabled?: boolean
-  /**
-   * Headers to send with the request
-   */
-  headers?: {
-    [key: string]: string
-  }
-  /**
-   * OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.
-   */
-  oauth?: McpOAuthConfig | false
-  /**
-   * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
-   */
-  timeout?: number
-}
-
-/**
- * @deprecated Always uses stretch layout.
- */
-export type LayoutConfig = "auto" | "stretch"
-
-export type Config = {
-  /**
-   * JSON schema reference for configuration validation
-   */
-  $schema?: string
-  logLevel?: LogLevel
-  server?: ServerConfig
-  /**
-   * Command configuration, see https://opencode.ai/docs/commands
-   */
-  command?: {
-    [key: string]: {
-      template: string
-      description?: string
-      agent?: string
-      model?: string
-      subtask?: boolean
-    }
-  }
-  /**
-   * Additional skill folder paths
-   */
-  skills?: {
-    /**
-     * Additional paths to skill folders
-     */
-    paths?: Array<string>
-    /**
-     * URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)
-     */
-    urls?: Array<string>
-  }
-  watcher?: {
-    ignore?: Array<string>
-  }
-  plugin?: Array<string>
-  /**
-   * Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.
-   */
-  snapshot?: boolean
-  /**
-   * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
-   */
-  share?: "manual" | "auto" | "disabled"
-  /**
-   * @deprecated Use 'share' field instead. Share newly created sessions automatically
-   */
-  autoshare?: boolean
-  /**
-   * Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications
-   */
-  autoupdate?: boolean | "notify"
-  /**
-   * Disable providers that are loaded automatically
-   */
-  disabled_providers?: Array<string>
-  /**
-   * When set, ONLY these providers will be enabled. All other providers will be ignored
-   */
-  enabled_providers?: Array<string>
-  /**
-   * Model to use in the format of provider/model, eg anthropic/claude-2
-   */
-  model?: string
-  /**
-   * Small model to use for tasks like title generation in the format of provider/model
-   */
-  small_model?: string
-  auto_review?: AutoReviewConfig
-  /**
-   * Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.
-   */
-  default_agent?: string
-  /**
-   * Custom username to display in conversations instead of system username
-   */
-  username?: string
-  /**
-   * @deprecated Use `agent` field instead.
-   */
-  mode?: {
-    build?: AgentConfig
-    plan?: AgentConfig
-    [key: string]: AgentConfig | undefined
-  }
-  /**
-   * Agent configuration, see https://opencode.ai/docs/agents
-   */
-  agent?: {
-    plan?: AgentConfig
-    build?: AgentConfig
-    general?: AgentConfig
-    explore?: AgentConfig
-    title?: AgentConfig
-    summary?: AgentConfig
-    compaction?: AgentConfig
-    [key: string]: AgentConfig | undefined
-  }
-  /**
-   * Custom provider configurations and model overrides
-   */
-  provider?: {
-    [key: string]: ProviderConfig
-  }
-  /**
-   * MCP (Model Context Protocol) server configurations
-   */
-  mcp?: {
-    [key: string]:
-      | McpLocalConfig
-      | McpRemoteConfig
-      | {
-          enabled: boolean
-        }
-  }
-  formatter?:
-    | false
-    | {
-        [key: string]: {
-          disabled?: boolean
-          command?: Array<string>
-          environment?: {
-            [key: string]: string
-          }
-          extensions?: Array<string>
-        }
-      }
-  lsp?:
-    | false
-    | {
-        [key: string]:
-          | {
-              disabled: true
-            }
-          | {
-              command: Array<string>
-              extensions?: Array<string>
-              disabled?: boolean
-              env?: {
-                [key: string]: string
-              }
-              initialization?: {
-                [key: string]: unknown
-              }
-            }
-      }
-  /**
-   * Additional instruction files or patterns to include
-   */
-  instructions?: Array<string>
-  layout?: LayoutConfig
-  permission?: PermissionConfig
-  /**
-   * Voice playback configuration
-   */
-  voice?: {
-    edge?: {
-      /**
-       * Enable server-backed Edge TTS playback
-       */
-      enabled?: boolean
-      /**
-       * Edge neural voice name
-       */
-      voice?: string
-      /**
-       * Edge TTS language code
-       */
-      lang?: string
-      /**
-       * Edge TTS output format
-       */
-      output_format?: string
-      /**
-       * Edge TTS pitch percent string
-       */
-      pitch?: string
-      /**
-       * Edge TTS rate percent string
-       */
-      rate?: string
-      /**
-       * Edge TTS volume percent string
-       */
-      volume?: string
-      /**
-       * Edge TTS timeout in milliseconds
-       */
-      timeout_ms?: number
-    }
-  }
-  tools?: {
-    [key: string]: boolean
-  }
-  enterprise?: {
-    /**
-     * Enterprise URL
-     */
-    url?: string
-  }
-  compaction?: {
-    /**
-     * Enable automatic compaction when context is full (default: true)
-     */
-    auto?: boolean
-    /**
-     * Enable pruning of old tool outputs (default: true)
-     */
-    prune?: boolean
-    /**
-     * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
-     */
-    reserved?: number
-  }
-  experimental?: {
-    disable_paste_summary?: boolean
-    /**
-     * Enable the batch tool
-     */
-    batch_tool?: boolean
-    /**
-     * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
-     */
-    openTelemetry?: boolean
-    /**
-     * Tools that should only be available to primary agents.
-     */
-    primary_tools?: Array<string>
-    /**
-     * Continue the agent loop when a tool call is denied
-     */
-    continue_loop_on_deny?: boolean
-    /**
-     * Timeout in milliseconds for model context protocol (MCP) requests
-     */
-    mcp_timeout?: number
-  }
-}
-
-export type BadRequestError = {
-  data: unknown
-  errors: Array<{
-    [key: string]: unknown
-  }>
-  success: false
-}
-
-export type ProjectSummary = {
-  id: string
-  name?: string
-  worktree: string
-}
-
-export type GlobalSession = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  version: string
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-  project: ProjectSummary | null
-}
-
-export type OAuth = {
-  type: "oauth"
-  refresh: string
-  access: string
-  expires: number
-  accountId?: string
-  enterpriseUrl?: string
-}
-
-export type ApiAuth = {
-  type: "api"
-  key: string
-}
-
-export type WellKnownAuth = {
-  type: "wellknown"
-  key: string
-  token: string
-}
-
-export type Auth = OAuth | ApiAuth | WellKnownAuth
-
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
-  }
-}
-
-export type Model = {
-  id: string
-  providerID: string
-  api: {
-    id: string
-    url: string
-    npm: string
-  }
-  name: string
-  family?: string
-  capabilities: {
-    temperature: boolean
-    reasoning: boolean
-    attachment: boolean
-    toolcall: boolean
-    input: {
-      text: boolean
-      audio: boolean
-      image: boolean
-      video: boolean
-      pdf: boolean
-    }
-    output: {
-      text: boolean
-      audio: boolean
-      image: boolean
-      video: boolean
-      pdf: boolean
-    }
-    interleaved:
-      | boolean
-      | {
-          field: "reasoning_content" | "reasoning_details"
-        }
-  }
-  cost: {
-    input: number
-    output: number
-    cache: {
-      read: number
-      write: number
-    }
-    experimentalOver200K?: {
-      input: number
-      output: number
-      cache: {
-        read: number
-        write: number
-      }
-    }
-  }
-  limit: {
-    context: number
-    input?: number
-    output: number
-  }
-  status: "alpha" | "beta" | "deprecated" | "active"
-  options: {
-    [key: string]: unknown
-  }
-  headers: {
-    [key: string]: string
-  }
-  release_date: string
-  variants?: {
-    [key: string]: {
-      [key: string]: unknown
-    }
-  }
-}
-
-export type Provider = {
-  id: string
-  name: string
-  source: "env" | "config" | "custom" | "api"
-  env: Array<string>
-  key?: string
-  options: {
-    [key: string]: unknown
-  }
-  models: {
-    [key: string]: Model
-  }
-}
-
-export type ToolIds = Array<string>
-
-export type ToolListItem = {
-  id: string
-  description: string
-  parameters: unknown
-}
-
-export type ToolList = Array<ToolListItem>
-
-export type Workspace = {
-  id: string
-  type: string
-  branch: string | null
-  name: string | null
-  directory: string | null
-  extra: unknown | null
-  projectID: string
-}
-
-export type Worktree = {
-  name: string
-  branch: string
-  directory: string
-}
-
-export type WorktreeCreateInput = {
-  name?: string
-  /**
-   * Additional startup script to run after the project's start command
-   */
-  startCommand?: string
-}
-
-export type WorktreeRemoveInput = {
-  directory: string
-}
-
-export type WorktreeResetInput = {
-  directory: string
-}
-
-export type McpResource = {
-  name: string
-  uri: string
-  description?: string
-  mimeType?: string
-  client: string
-}
-
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -1976,6 +1979,11 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+  fallbackModels?: Array<{
+    modelID: string
+    providerID: string
+  }>
+  maxRetriesBeforeFallback?: number
 }
 
 export type LspStatus = {
@@ -3838,7 +3846,6 @@ export type SessionCommandResponse = SessionCommandResponses[keyof SessionComman
 
 export type SessionShellData = {
   body?: {
-    messageID?: string
     agent: string
     model?: {
       providerID: string
@@ -5087,26 +5094,6 @@ export type VcsGetResponses = {
 }
 
 export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
-
-export type VcsDiffData = {
-  body?: never
-  path?: never
-  query: {
-    directory?: string
-    workspace?: string
-    mode: "git" | "branch"
-  }
-  url: "/vcs/diff"
-}
-
-export type VcsDiffResponses = {
-  /**
-   * VCS diff
-   */
-  200: Array<FileDiff>
-}
-
-export type VcsDiffResponse = VcsDiffResponses[keyof VcsDiffResponses]
 
 export type CommandListData = {
   body?: never
