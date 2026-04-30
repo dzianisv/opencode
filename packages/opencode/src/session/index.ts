@@ -1019,13 +1019,57 @@ export namespace Session {
 
   /**
    * Recover orphaned assistant messages left incomplete after a server crash or restart.
-   * Finds assistant messages with no `time.completed`, forces their non-terminal tool
-   * parts to error status, marks the messages as completed, and emits bus events so
+   * Finds non-terminal assistant tool parts and forces them to error status, then
+   * marks assistant messages with no `time.completed` as completed, and emits bus events so
    * connected frontends update.
    *
    * @see https://github.com/anomalyco/opencode/issues/19023
    */
   export async function recover() {
+    const now = Date.now()
+    const stale = Database.use((db) =>
+      db
+        .select({
+          id: PartTable.id,
+          message_id: PartTable.message_id,
+          session_id: PartTable.session_id,
+          data: PartTable.data,
+        })
+        .from(PartTable)
+        .innerJoin(MessageTable, eq(PartTable.message_id, MessageTable.id))
+        .where(
+          and(
+            sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
+            sql`json_extract(${PartTable.data}, '$.state.status') in ('pending', 'running')`,
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+          ),
+        )
+        .all(),
+    )
+    if (stale.length > 0) {
+      log.info("recovering non-terminal tool parts", { count: stale.length })
+      for (const row of stale) {
+        const part = {
+          ...row.data,
+          id: row.id,
+          messageID: row.message_id,
+          sessionID: row.session_id,
+        } as MessageV2.ToolPart
+        await updatePart({
+          ...part,
+          state: {
+            ...part.state,
+            status: "error",
+            error: "Tool execution was interrupted by server restart",
+            time: {
+              start: part.state.status === "running" ? part.state.time.start : now,
+              end: now,
+            },
+          },
+        })
+      }
+    }
+
     const rows = Database.use((db) =>
       db
         .select()
@@ -1040,27 +1084,8 @@ export namespace Session {
     )
     if (rows.length === 0) return
     log.info("recovering orphaned assistant messages", { count: rows.length })
-    const now = Date.now()
     for (const row of rows) {
       const msg = { ...row.data, id: row.id, sessionID: row.session_id } as MessageV2.Assistant
-      // Fix non-terminal tool parts
-      const parts = await MessageV2.parts(row.id)
-      for (const part of parts) {
-        if (part.type !== "tool") continue
-        if (part.state.status === "completed" || part.state.status === "error") continue
-        await updatePart({
-          ...part,
-          state: {
-            ...part.state,
-            status: "error",
-            error: "Tool execution was interrupted by server restart",
-            time: {
-              start: part.state.status === "running" ? part.state.time.start : now,
-              end: now,
-            },
-          },
-        })
-      }
       // Mark message completed
       msg.time.completed = now
       await updateMessage(msg)
