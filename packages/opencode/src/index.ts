@@ -37,6 +37,7 @@ import { Database } from "./storage/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { Instance } from "./project/instance"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -55,7 +56,7 @@ const graceful = async (signal: string) => {
   if (disposing) return
   disposing = true
   Log.Default.info("received signal, disposing", { signal })
-  await Instance.disposeAll().catch((error) => {
+  await Instance.disposeAll().catch((error: unknown) => {
     Log.Default.warn("disposeAll failed", { error })
   })
   process.exit(0)
@@ -226,7 +227,7 @@ try {
   }
   process.exitCode = 1
 } finally {
-  await Instance.disposeAll().catch((error) => {
+  await Instance.disposeAll().catch((error: unknown) => {
     Log.Default.warn("disposeAll failed", { error })
   })
   // Some subprocesses don't react properly to SIGTERM and similar signals.
