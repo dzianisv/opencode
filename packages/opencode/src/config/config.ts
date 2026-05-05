@@ -1031,6 +1031,18 @@ export namespace Config {
           },
         ),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
+      scheduler: z
+        .object({
+          enabled: z.boolean().default(false),
+          heartbeat: z
+            .object({
+              enabled: z.boolean().default(true),
+              interval: z.string().default("30m"),
+            })
+            .default({ enabled: true, interval: "30m" }),
+          maxConcurrent: z.number().int().positive().default(1),
+        })
+        .optional(),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
       voice: z

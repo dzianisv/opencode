@@ -15,6 +15,7 @@ import { SessionRevert } from "../../session/revert"
 import { pickAction, ResumePrompt } from "../../session/auto-resume"
 import { WorkspaceContext } from "../../control-plane/workspace-context"
 import { InstanceBootstrap } from "../../project/bootstrap"
+import { Scheduler } from "../../scheduler"
 
 const log = Log.create({ service: "serve" })
 
@@ -131,10 +132,25 @@ export const ServeCommand = cmd({
       log.error("auto resume process failed", { error })
     })
     Session.startSweep()
+    const scheduler = Instance.provide({
+      directory: process.cwd(),
+      init: InstanceBootstrap,
+      fn: () => Scheduler.start(),
+    }).catch((error) => {
+      log.error("scheduler start failed", { error })
+    })
 
     const shutdown = async (signal: string) => {
       log.warn("received signal, shutting down", { signal })
       Session.stopSweep()
+      await scheduler
+      await Instance.provide({
+        directory: process.cwd(),
+        init: InstanceBootstrap,
+        fn: () => Scheduler.stop(),
+      }).catch((e) => {
+        log.error("scheduler stop failed", { error: e })
+      })
       await Memory.snapshot({ reason: `shutdown:${signal}` }).catch((e) => {
         log.error("shutdown snapshot failed", { error: e })
       })
