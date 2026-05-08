@@ -63,6 +63,21 @@ export const Default = lazy(() => {
   return { app }
 })
 
+/**
+ * Generate the OpenAPI document used by the SDK build.
+ *
+ * Since the Effect HttpApi backend now covers every Hono route (plus the new
+ * `/api/session/*` v2 routes — see `httpapi-bridge.test.ts` for the parity
+ * audit), `Server.openapi()` derives the spec from `OpenApi.fromApi(PublicApi)`.
+ * `PublicApi` is `OpenCodeHttpApi` annotated with the `matchLegacyOpenApi`
+ * transform that injects instance query parameters, strips Effect's optional
+ * null arms, normalizes component names, and patches SSE response schemas so
+ * the generated SDK keeps the legacy Hono shape.
+ *
+ * The Hono-derived spec is still reachable via `openapiHono()` so reviewers
+ * can diff the two outputs while the Hono backend lingers; once the Hono
+ * backend is deleted that helper goes with it.
+ */
 export async function openapi() {
   return OpenApi.fromApi(PublicApi)
 }
