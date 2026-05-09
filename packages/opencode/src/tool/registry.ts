@@ -114,6 +114,7 @@ export const layer: Layer.Layer<
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
+    const cron = yield* Effect.promise(() => import("./cron")).pipe(Effect.map((mod) => mod.CronTool), Effect.flatten)
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
@@ -219,6 +220,7 @@ export const layer: Layer.Layer<
           task: Tool.init(task),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
+          cron: Tool.init(cron),
           search: Tool.init(websearch),
           code: Tool.init(codesearch),
           repo_clone: Tool.init(repoClone),
@@ -244,6 +246,7 @@ export const layer: Layer.Layer<
             tool.task,
             tool.fetch,
             tool.todo,
+            tool.cron,
             tool.search,
             ...(Flag.OPENCODE_EXPERIMENTAL_SCOUT ? [tool.code, tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
