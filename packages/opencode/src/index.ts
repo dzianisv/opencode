@@ -26,6 +26,11 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { CronCommand } from "./cli/cmd/cron"
+import path from "path"
+import { Global } from "@opencode-ai/core/global"
+import { JsonMigration } from "@/storage/json-migration"
+import { Database } from "@/storage/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
@@ -101,6 +106,7 @@ const cli = yargs(args)
   .command(SessionCommand)
   .command(PluginCommand)
   .command(DbCommand)
+  .command(CronCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

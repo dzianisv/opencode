@@ -14,7 +14,14 @@ import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
 
-function extract(messages: SessionV1.WithParts[]) {
+const FILES = [
+  "AGENTS.md",
+  "HEARTBEAT.md",
+  ...(Flag.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT ? [] : ["CLAUDE.md"]),
+  "CONTEXT.md",
+]
+
+function extract(messages: MessageV2.WithParts[]) {
   const paths = new Set<string>()
   for (const msg of messages) {
     for (const part of msg.parts) {

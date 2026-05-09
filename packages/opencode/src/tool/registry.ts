@@ -95,6 +95,7 @@ export const layer = Layer.effect(
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
+    const cron = yield* Effect.promise(() => import("./cron")).pipe(Effect.map((mod) => mod.CronTool), Effect.flatten)
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const autopilot = yield* AutopilotExitTool
@@ -208,6 +209,7 @@ export const layer = Layer.effect(
           task: Tool.init(task),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
+          cron: Tool.init(cron),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
@@ -231,6 +233,7 @@ export const layer = Layer.effect(
             tool.task,
             tool.fetch,
             tool.todo,
+            tool.cron,
             tool.search,
             tool.skill,
             tool.patch,
