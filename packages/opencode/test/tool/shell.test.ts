@@ -117,6 +117,11 @@ const fill = (mode: "lines" | "bytes", n: number) => {
   if (PS.has(sh())) return `& ${text}`
   return text
 }
+const wait = (ms: number) => {
+  const text = `${bin} -e ${evalarg(`setTimeout(() => process.exit(0), ${ms})`)}`
+  if (PS.has(sh())) return `& ${text}`
+  return text
+}
 const glob = (p: string) =>
   process.platform === "win32" ? Filesystem.normalizePathPattern(p) : p.replaceAll("\\", "/")
 
@@ -1161,9 +1166,38 @@ describe("tool.shell abort", () => {
         expect(result.output).toContain("first")
         expect(result.output).toContain("second")
         expect(updates.length).toBeGreaterThan(1)
-      }),
-    ),
-  )
+      },
+    })
+  })
+
+  test("emits metadata heartbeat while command is quiet", async () => {
+    await WithInstance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const ticks: number[] = []
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: wait(11_500),
+              description: "Heartbeat test",
+              timeout: 25_000,
+            },
+            {
+              ...ctx,
+              metadata: (input) =>
+                Effect.sync(() => {
+                  if ((input.metadata as { output?: string })?.output !== "") return
+                  ticks.push(Date.now())
+                }),
+            },
+          ),
+        )
+        expect(ticks.length).toBeGreaterThanOrEqual(2)
+        expect(ticks[ticks.length - 1]! - ticks[0]!).toBeGreaterThanOrEqual(9_000)
+      },
+    })
+  }, 30_000)
 })
 
 describe("tool.shell truncation", () => {

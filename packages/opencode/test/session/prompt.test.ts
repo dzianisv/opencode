@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "bun:test"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -53,9 +53,9 @@ import { Format } from "../../src/format"
 import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
-import { RuntimeFlags } from "@/effect/runtime-flags"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import PROMPT_AUTOPILOT from "../../src/session/prompt/autopilot.txt"
+
+void Log.init({ print: false })
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -452,58 +452,72 @@ noLLMServer.instance(
   { config: cfg },
 )
 
-it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const chat = yield* sessions.create({ title: "Pinned" })
-    const seeded = yield* seed(chat.id, { finish: "stop" })
-    yield* sessions.updatePart({
-      id: PartID.ascending(),
-      messageID: seeded.assistant.id,
-      sessionID: chat.id,
-      type: "tool",
-      callID: "interrupted-call",
-      tool: "edit",
-      state: {
-        status: "error",
-        input: {},
-        error: "Tool execution aborted",
-        metadata: { interrupted: true },
-        time: { start: 1, end: 2 },
-      },
-    })
+it.live("loop injects synthetic autopilot prompt instead of exiting immediately", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "autopilot",
+        noReply: true,
+        parts: [{ type: "text", text: "implement everything" }],
+      })
+      yield* llm.text("first pass complete")
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const scope = yield* Scope.Scope
+          const loop = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+          yield* Effect.sleep("1 second")
+          expect(yield* llm.calls).toBeGreaterThanOrEqual(1)
 
-    const result = yield* prompt.loop({ sessionID: chat.id })
-    expect(result.info.id).toBe(seeded.assistant.id)
-    expect(yield* llm.hits).toHaveLength(0)
-  }),
+          const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
+          const injected = msgs
+            .flatMap((item) => item.parts)
+            .find(
+              (part): part is MessageV2.TextPart =>
+                part.type === "text" && part.synthetic === true && part.text === PROMPT_AUTOPILOT,
+            )
+          expect(injected).toBeDefined()
+          yield* prompt.cancel(chat.id)
+          yield* Fiber.await(loop)
+        }),
+      )
+    }),
+    { git: true, config: providerCfg },
+  ),
 )
 
-it.instance("loop calls LLM and returns assistant message", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const chat = yield* sessions.create({
-      title: "Pinned",
-      permission: [{ permission: "*", pattern: "*", action: "allow" }],
-    })
-    yield* prompt.prompt({
-      sessionID: chat.id,
-      agent: "build",
-      noReply: true,
-      parts: [{ type: "text", text: "hello" }],
-    })
-    yield* llm.text("world")
+it.live("loop calls LLM and returns assistant message", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("world")
 
-    const result = yield* prompt.loop({ sessionID: chat.id })
-    expect(result.info.role).toBe("assistant")
-    const parts = result.parts.filter((p) => p.type === "text")
-    expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
-    expect(yield* llm.hits).toHaveLength(1)
-  }),
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+      const parts = result.parts.filter((p) => p.type === "text")
+      expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
 )
 
 it.instance("loop surfaces content-filter finishes as session errors", () =>

@@ -488,7 +488,20 @@ export const ShellTool = Tool.define(
 
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
-          yield* Effect.addFinalizer(closeSink)
+          yield* Effect.forkScoped(
+            Effect.forever(
+              Effect.sleep("10 seconds").pipe(
+                Effect.andThen(
+                  ctx.metadata({
+                    metadata: {
+                      output: last,
+                      description: input.description,
+                    },
+                  }),
+                ),
+              ),
+            ),
+          )
           const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
 
           yield* Effect.forkScoped(
