@@ -47,6 +47,9 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  voice: {
+    autoSpeak: boolean
+  }
 }
 
 export const monoDefault = "System Mono"
@@ -141,6 +144,9 @@ const defaultSettings: Settings = {
     permissions: "staplebops-02",
     errorsEnabled: true,
     errors: "nope-03",
+  },
+  voice: {
+    autoSpeak: false,
   },
 }
 
@@ -341,6 +347,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      voice: {
+        autoSpeak: withFallback(() => store.voice?.autoSpeak, defaultSettings.voice.autoSpeak),
+        setAutoSpeak(value: boolean) {
+          setStore("voice", "autoSpeak", value)
         },
       },
     }

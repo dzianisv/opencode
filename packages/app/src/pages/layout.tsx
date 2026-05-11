@@ -2040,6 +2040,10 @@ export default function Layout(props: ParentProps) {
       archiveSession,
     },
   }
+  const recentSessionProps = {
+    ...projectSidebarCtx.sessionProps,
+    collapsible: true,
+  }
 
   const SidebarPanel = (panelProps: {
     project: Accessor<LocalProject | undefined>
@@ -2379,7 +2383,7 @@ export default function Layout(props: ParentProps) {
           mobile ? (
             <RecentSidebarPanel
               mobile
-              sessionProps={projectSidebarCtx.sessionProps}
+              sessionProps={recentSessionProps}
               sidebarWidth={() => layout.sidebar.width()}
               sidebarOpened={() => layout.sidebar.opened()}
               sidebarHovering={sidebarHovering}
@@ -2387,7 +2391,7 @@ export default function Layout(props: ParentProps) {
           ) : (
             <RecentSidebarPanel
               merged
-              sessionProps={projectSidebarCtx.sessionProps}
+              sessionProps={recentSessionProps}
               sidebarWidth={() => layout.sidebar.width()}
               sidebarOpened={() => layout.sidebar.opened()}
               sidebarHovering={sidebarHovering}
