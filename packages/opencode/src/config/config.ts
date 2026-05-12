@@ -108,6 +108,110 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }
   return config
 }
 
+export const Server = ConfigServer.Server.zod
+export const Layout = ConfigLayout.Layout.zod
+export type Layout = ConfigLayout.Layout
+
+const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate({
+  identifier: "LogLevel",
+  description: "Log level",
+})
+
+// The Effect Schema is the canonical source of truth. The `.zod` compatibility
+// surface is derived so existing Hono validators keep working without a parallel
+// Zod definition.
+//
+// The walker emits `z.object({...})` which is non-strict by default. Config
+// historically uses `.strict()` (additionalProperties: false in openapi.json),
+// so layer that on after derivation.  Re-apply the Config ref afterward
+// since `.strict()` strips the walker's meta annotation.
+export const Info = Schema.Struct({
+  $schema: Schema.optional(Schema.String).annotate({
+    description: "JSON schema reference for configuration validation",
+  }),
+  shell: Schema.optional(Schema.String).annotate({
+    description: "Default shell to use for terminal and bash tool",
+  }),
+  logLevel: Schema.optional(LogLevelRef).annotate({ description: "Log level" }),
+  server: Schema.optional(ConfigServer.Server).annotate({
+    description: "Server configuration for opencode serve and web commands",
+  }),
+  command: Schema.optional(Schema.Record(Schema.String, ConfigCommand.Info)).annotate({
+    description: "Command configuration, see https://opencode.ai/docs/commands",
+  }),
+  skills: Schema.optional(ConfigSkills.Info).annotate({ description: "Additional skill folder paths" }),
+  reference: Schema.optional(ConfigReference.Info).annotate({
+    description: "Named git or local directory references that can be @ mentioned as Scout-backed subagents",
+  }),
+  watcher: Schema.optional(
+    Schema.Struct({
+      ignore: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+    }),
+  ),
+  snapshot: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
+  }),
+  // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
+  plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
+  share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
+    description:
+      "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
+  }),
+  autoshare: Schema.optional(Schema.Boolean).annotate({
+    description: "@deprecated Use 'share' field instead. Share newly created sessions automatically",
+  }),
+  autoupdate: Schema.optional(Schema.Union([Schema.Boolean, Schema.Literal("notify")])).annotate({
+    description:
+      "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications",
+  }),
+  plugins: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))).annotate({
+    description: "Plugin configuration array. Each entry can be an npm package, file path, or inline plugin.",
+  }),
+  analytics: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      telemetry: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  proxy: Schema.optional(ConfigProxy.Info),
+  themes: Schema.optional(
+    Schema.Struct({
+      directory: Schema.optional(Schema.String).annotate({ description: "Directory to load themes from" }),
+    }),
+  ),
+  autoReview: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable automatic code review on file changes",
+      }),
+      autoCommit: Schema.optional(Schema.Boolean).annotate({
+        description: "Automatically commit changes that pass review",
+      }),
+      model: Schema.optional(Schema.String).annotate({
+        description: "Model to use for code review",
+      }),
+      scopes: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description: "File patterns or scopes to include in review",
+      }),
+      instructions: Schema.optional(Schema.String).annotate({
+        description: "Custom instructions for the reviewer",
+      }),
+    }),
+  ),
+})
+  .annotate({ identifier: "Config" })
+  .pipe(
+    withStatics((s) => ({
+      zod: (zod(s) as unknown as z.ZodObject<any>).strict().meta({ ref: "Config" }) as unknown as z.ZodType<
+        DeepMutable<Schema.Schema.Type<typeof s>>
+      >,
+    })),
+  )
+
+// Uses the shared `DeepMutable` from `@/util/schema`. See the definition
+// there for why the local variant is needed over `Types.DeepMutable` from
+// effect-smol (the upstream version collapses `unknown` to `{}`).
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>> & {
   // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
