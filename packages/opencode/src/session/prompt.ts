@@ -2131,6 +2131,42 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   }
 
   // ---------------------------------------------------------------------------
+  // Status reconciliation
+  // ---------------------------------------------------------------------------
+
+  const reconciler: { timer?: ReturnType<typeof setInterval> } = {}
+
+  export function startReconciler() {
+    if (reconciler.timer) return
+    const ms = 30_000
+    log.info("status reconciler started", { interval_ms: ms })
+    reconciler.timer = setInterval(() => {
+      void reconcile().catch((e) => {
+        log.error("status reconciliation failed", { error: e })
+      })
+    }, ms)
+    reconciler.timer.unref?.()
+  }
+
+  export function stopReconciler() {
+    if (!reconciler.timer) return
+    clearInterval(reconciler.timer)
+    reconciler.timer = undefined
+  }
+
+  export async function reconcile() {
+    const statuses = await SessionStatus.list()
+    const active = state()
+    for (const [sessionID, info] of statuses) {
+      if (info.type === "idle") continue
+      if (!active[sessionID]) {
+        log.info("reconciling stale busy session", { sessionID, status: info.type })
+        await SessionStatus.set(sessionID, { type: "idle" })
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Effect-based service
   // ---------------------------------------------------------------------------
 

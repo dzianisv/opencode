@@ -131,10 +131,12 @@ export const ServeCommand = cmd({
       log.error("auto resume process failed", { error })
     })
     Session.startSweep()
+    SessionPrompt.startReconciler()
 
     const shutdown = async (signal: string) => {
       log.warn("received signal, shutting down", { signal })
       Session.stopSweep()
+      SessionPrompt.stopReconciler()
       await Memory.snapshot({ reason: `shutdown:${signal}` }).catch((e) => {
         log.error("shutdown snapshot failed", { error: e })
       })
