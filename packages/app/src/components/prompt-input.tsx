@@ -41,6 +41,8 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Select } from "@opencode-ai/ui/select"
+import { Popover } from "@opencode-ai/ui/popover"
+import { Switch } from "@opencode-ai/ui/switch"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { useCommand } from "@/context/command"
@@ -1497,6 +1499,10 @@ const transcriptInsert = (input: { transcript: string; before: string; after: st
   const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
+  const plugins = local.plugin.list
+  const pluginCount = createMemo(() => plugins().length)
+  const activePluginCount = createMemo(() => plugins().filter((plugin) => local.plugin.enabled(plugin)).length)
+  const hasPartialPlugins = createMemo(() => activePluginCount() < pluginCount())
   const accepting = createMemo(() => {
     const id = props.controls.session.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
@@ -1528,6 +1534,7 @@ const transcriptInsert = (input: { transcript: string; before: string; after: st
       onQueue: props.onQueue,
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,
+      disabledPlugins: local.plugin.disabled,
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -2508,10 +2515,64 @@ const transcriptInsert = (input: { transcript: string; before: string; after: st
                             </TooltipKeybind>
                           </div>
                         </Show>
+                        <Show when={plugins().length > 0}>
+                          <div
+                            data-component="prompt-plugin-control"
+                            style={providersShouldFadeIn() ? { animation: "fade-in 0.3s" } : undefined}
+                          >
+                            <Popover
+                              triggerAs={Button}
+                              triggerProps={{
+                                variant: "ghost",
+                                size: "normal",
+                                style: control(),
+                                class: `min-w-0 px-2 gap-1 text-text-base ${hasPartialPlugins() ? "text-icon-warning-base" : ""}`,
+                                "data-action": "prompt-plugins",
+                                "aria-label": language.t("status.popover.tab.plugins"),
+                              }}
+                              trigger={
+                                <Tooltip placement="top" gutter={4} value={language.t("status.popover.tab.plugins")}>
+                                  <>
+                                    <Icon name="checklist" size="small" />
+                                    <span class="text-12-medium tabular-nums">{activePluginCount()}/{pluginCount()}</span>
+                                  </>
+                                </Tooltip>
+                              }
+                              class="w-72 border border-border-base rounded-md bg-surface-raised-stronger-non-alpha shadow-md z-50"
+                              placement="top-start"
+                              gutter={4}
+                            >
+                              <div class="p-1 max-h-64 overflow-auto">
+                                <For each={plugins()}>
+                                  {(plugin) => (
+                                    <div
+                                      role="button"
+                                      tabindex={0}
+                                      class="flex items-center gap-2 w-full h-8 pl-2 pr-2 rounded-md hover:bg-surface-raised-base-hover transition-colors text-left"
+                                      onClick={() => local.plugin.toggle(plugin)}
+                                      onKeyDown={(event) => {
+                                        if (event.target !== event.currentTarget) return
+                                        if (event.key !== "Enter" && event.key !== " ") return
+                                        event.preventDefault()
+                                        local.plugin.toggle(plugin)
+                                      }}
+                                    >
+                                      <span class="text-13-regular text-text-base truncate flex-1">{plugin}</span>
+                                      <div onClick={(event) => event.stopPropagation()}>
+                                        <Switch
+                                          checked={local.plugin.enabled(plugin)}
+                                          onChange={(enabled) => local.plugin.set(plugin, enabled)}
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                </For>
+                              </div>
+                            </Popover>
+                          </div>
+                        </Show>
                       </Show>
                     </Show>
-                  </div>
-                </div>
               </div>
             </DockTray>
           </Show>

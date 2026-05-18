@@ -51,7 +51,6 @@ export interface Settings {
     autoSpeak: boolean
   }
   models: {
-    autoReview: boolean
     defaultModel?: { providerID: string; modelID: string }
     reviewModel?: { providerID: string; modelID: string }
   }
@@ -154,7 +153,6 @@ const defaultSettings: Settings = {
     autoSpeak: false,
   },
   models: {
-    autoReview: false,
     defaultModel: undefined,
     reviewModel: undefined,
   },
@@ -366,10 +364,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       models: {
-        autoReview: withFallback(() => store.models?.autoReview, defaultSettings.models.autoReview),
-        setAutoReview(value: boolean) {
-          setStore("models", "autoReview", value)
-        },
         defaultModel: createMemo(() => store.models?.defaultModel),
         setDefaultModel(value: { providerID: string; modelID: string } | undefined) {
           setStore("models", "defaultModel", value as any)

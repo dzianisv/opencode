@@ -66,16 +66,34 @@ async function substituteWellKnownRemoteConfig(input: {
   dir: string
   source: string
   env: Record<string, string>
+  wellknown_origin: string
 }) {
   if (!isRecord(input.value) || typeof input.value.url !== "string") return undefined
 
-  const url = await ConfigVariable.substitute({
-    text: input.value.url,
-    type: "virtual",
-    dir: input.dir,
-    source: input.source,
-    env: input.env,
-  })
+  const substitutedUrl = (
+    await ConfigVariable.substitute({
+      text: input.value.url,
+      type: "virtual",
+      dir: input.dir,
+      source: input.source,
+      env: input.env,
+    })
+  ).trim()
+  if (!substitutedUrl) throw new Error("wellknown remote_config.url must not be empty")
+  if (!URL.canParse(substitutedUrl))
+    throw new Error(`wellknown remote_config.url must be a valid URL: ${substitutedUrl}`)
+  const parsedUrl = new URL(substitutedUrl)
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error("wellknown remote_config.url must not include username/password credentials")
+  }
+  if (parsedUrl.origin !== input.wellknown_origin) {
+    throw new Error(
+      `wellknown remote_config.url origin must match ${input.wellknown_origin}; got ${parsedUrl.origin}`,
+    )
+  }
+  parsedUrl.hash = ""
+
+  const url = parsedUrl.toString()
   const headers = isRecord(input.value.headers)
     ? Object.fromEntries(
         await Promise.all(
@@ -462,6 +480,7 @@ export const layer = Layer.effect(
             authEnv[value.key] = value.token
             const wellknownURL = `${url}/.well-known/opencode`
             yield* Effect.logDebug("fetching remote config", { url: wellknownURL })
+            const wellknownOrigin = new URL(url).origin
             const wellknown = yield* fetchRemoteJson(wellknownURL, undefined, ConfigV1.WellKnown, url)
             const remote = yield* Effect.promise(() =>
               substituteWellKnownRemoteConfig({
@@ -469,6 +488,7 @@ export const layer = Layer.effect(
                 dir: url,
                 source: wellknownURL,
                 env: authEnv,
+                wellknown_origin: wellknownOrigin,
               }),
             )
             const fetchedConfig = remote

@@ -1664,7 +1664,6 @@ loginPageWellKnown.it.instance(
       expect((error as { data?: { url?: string } }).data?.url).toBe("https://example.com")
     }),
 )
-
 describe("resolvePluginSpec", () => {
   test("keeps package specs unchanged", async () => {
     await using tmp = await tmpdir()

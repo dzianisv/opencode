@@ -18,6 +18,7 @@ type State = {
   agent?: string
   model?: ModelKey
   variant?: string | null
+  plugin_disabled?: string[]
 }
 
 type Saved = {
@@ -50,6 +51,7 @@ const clone = (value: State | undefined) => {
   return {
     ...value,
     model: value.model ? { ...value.model } : undefined,
+    plugin_disabled: value.plugin_disabled ? [...value.plugin_disabled] : undefined,
   } satisfies State
 }
 
@@ -253,6 +255,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         agent: agent.current()?.name,
         model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
         variant: selected(),
+        plugin_disabled: scope()?.plugin_disabled,
       } satisfies State
     }
 
@@ -363,10 +366,36 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const plugin = {
+      list: createMemo(() => (sync.data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0]))),
+      disabled() {
+        const installed = new Set(plugin.list())
+        return (scope()?.plugin_disabled ?? []).filter((item) => installed.has(item))
+      },
+      enabled(name: string) {
+        if (!plugin.list().includes(name)) return false
+        return !plugin.disabled().includes(name)
+      },
+      set(name: string, enabled: boolean) {
+        if (!plugin.list().includes(name)) return
+        const disabled = plugin.disabled()
+        if (enabled) {
+          write({ plugin_disabled: disabled.filter((item) => item !== name) })
+          return
+        }
+        if (disabled.includes(name)) return
+        write({ plugin_disabled: [...disabled, name] })
+      },
+      toggle(name: string) {
+        plugin.set(name, !plugin.enabled(name))
+      },
+    }
+
     const result = {
       slug: createMemo(() => base64Encode(sdk().directory)),
       model,
       agent,
+      plugin,
       session: {
         reset() {
           setStore("draft", undefined)
