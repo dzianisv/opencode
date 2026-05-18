@@ -781,6 +781,7 @@ export const dict = {
   "settings.general.row.releaseNotes.title": "Release notes",
   "settings.general.row.releaseNotes.description": "Show What's New popups after updates",
 
+
   "settings.updates.row.startup.title": "Check for updates on startup",
   "settings.updates.row.startup.description": "Automatically check for updates when OpenCode launches",
   "settings.updates.row.check.title": "Check for updates",

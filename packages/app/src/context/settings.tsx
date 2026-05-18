@@ -51,6 +51,10 @@ export interface Settings {
   voice: {
     autoSpeak: boolean
   }
+  models: {
+    defaultModel?: { providerID: string; modelID: string }
+    reviewModel?: { providerID: string; modelID: string }
+  }
 }
 
 export const monoDefault = "System Mono"
@@ -149,6 +153,10 @@ const defaultSettings: Settings = {
   },
   voice: {
     autoSpeak: false,
+  },
+  models: {
+    defaultModel: undefined,
+    reviewModel: undefined,
   },
 }
 
@@ -337,6 +345,16 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         autoSpeak: withFallback(() => store.voice?.autoSpeak, defaultSettings.voice.autoSpeak),
         setAutoSpeak(value: boolean) {
           setStore("voice", "autoSpeak", value)
+        },
+      },
+      models: {
+        defaultModel: createMemo(() => store.models?.defaultModel),
+        setDefaultModel(value: { providerID: string; modelID: string } | undefined) {
+          setStore("models", "defaultModel", value as any)
+        },
+        reviewModel: createMemo(() => store.models?.reviewModel),
+        setReviewModel(value: { providerID: string; modelID: string } | undefined) {
+          setStore("models", "reviewModel", value as any)
         },
       },
     }
