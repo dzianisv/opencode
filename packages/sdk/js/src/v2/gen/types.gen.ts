@@ -75,6 +75,8 @@ export type Event =
   | EventTuiSessionSelect2
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
+  | EventWorkflowRunUpdated
+  | EventWorkflowRunFinished
   | EventCommandExecuted
   | EventProjectUpdated
   | EventSessionStatus
@@ -173,6 +175,8 @@ export type Session = {
   directory: string
   path?: string
   parentID?: string
+  depth?: number
+  rootID?: string
   summary?: {
     additions: number
     deletions: number
@@ -1478,6 +1482,42 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "workflow.run.updated"
+        properties: {
+          id: string
+          workflow: string
+          status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "paused"
+          current_phase: string
+          directory: string
+          agents: {
+            total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            running: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            failed: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+          pending_question: boolean
+          error: string
+        }
+      }
+    | {
+        id: string
+        type: "workflow.run.finished"
+        properties: {
+          id: string
+          workflow: string
+          status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "paused"
+          current_phase: string
+          directory: string
+          agents: {
+            total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            running: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            failed: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+          pending_question: boolean
+          error: string
+        }
+      }
+    | {
+        id: string
         type: "command.executed"
         properties: {
           name: string
@@ -2035,6 +2075,16 @@ export type Config = {
     preserve_recent_tokens?: number
     reserved?: number
   }
+  workflows?: {
+    ultracode_keyword?: boolean
+    approval?: "always" | "first-run" | "never"
+    approved?: Array<string>
+    foreground_grace_ms?: number
+    budget_directive?: boolean
+    shell_permission?: boolean
+    lint?: "off" | "warn" | "deny"
+    lazy_mcp?: boolean
+  }
   experimental?: {
     disable_paste_summary?: boolean
     batch_tool?: boolean
@@ -2042,6 +2092,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    subagent_max_depth?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2213,6 +2264,8 @@ export type GlobalSession = {
   directory: string
   path?: string
   parentID?: string
+  depth: number
+  rootID?: string
   summary?: {
     additions: number
     deletions: number
@@ -2354,7 +2407,7 @@ export type Command = {
   description?: string
   agent?: string
   model?: string
-  source?: "command" | "mcp" | "skill"
+  source?: "command" | "mcp" | "skill" | "workflow"
   template: string
   subtask?: boolean
   hints: Array<string>
@@ -2566,10 +2619,395 @@ export type ProviderAuthError1 = {
   }
 }
 
+export type Session1 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session2 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
     message: string
+  }
+}
+
+export type Session3 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session4 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session5 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session6 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session7 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
   }
 }
 
@@ -2625,6 +3063,116 @@ export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
   message: string
+}
+
+export type Session8 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session9 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  depth: number
+  rootID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
 }
 
 export type EventTuiPromptAppend = {
@@ -2703,6 +3251,167 @@ export type WorkspaceWarpError = {
   }
 }
 
+export type WorkflowPhase = {
+  title: string
+  detail?: string
+  model?: string
+}
+
+export type WorkflowArgument = {
+  type?: string
+  default?: unknown
+  description?: string
+}
+
+export type WorkflowMeta = {
+  name: string
+  description?: string
+  whenToUse?: string
+  phases?: Array<string | WorkflowPhase>
+  arguments?: {
+    [key: string]: WorkflowArgument
+  }
+}
+
+export type WorkflowInfo = {
+  name: string
+  path: string
+  meta: WorkflowMeta
+  valid: boolean
+  error?: string
+  source_kind?: "builtin"
+}
+
+export type WorkflowDefinition = {
+  name: string
+  path: string
+  meta: WorkflowMeta
+  source?: string
+  temporary?: boolean
+}
+
+export type WorkflowLogEntry = {
+  time: number
+  phase?: string
+  message: string
+}
+
+export type WorkflowAgentRun = {
+  id: string
+  status: "running" | "completed" | "failed" | "skipped"
+  started_at: number
+  completed_at?: number
+  phase?: string
+  agent?: string
+  label?: string
+  model?: string
+  session_id?: string
+  message_id?: string
+  worktree?: string
+  prompt: string
+  output?: string
+  cost?: number
+  tokens?: {
+    total?: number
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  error?: string
+  cached?: boolean
+  kind?: "agent" | "question"
+  answer?: string
+}
+
+export type WorkflowRun = {
+  id: string
+  session_id?: string
+  workflow: string
+  args?: {
+    [key: string]: unknown
+  }
+  definition?: WorkflowDefinition
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "paused"
+  started_at: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  completed_at?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  current_phase?: string
+  logs: Array<WorkflowLogEntry>
+  agents: Array<WorkflowAgentRun>
+  result?: unknown
+  error?: string
+  resume_of?: string
+  pending_question?: {
+    question: string
+    options?: Array<string>
+    asked_at: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+}
+
+export type WorkflowSavePayload = {
+  /**
+   * Workflow file base name (becomes /<name>); letters, numbers, underscores, and dashes only.
+   */
+  name: string
+  /**
+   * The complete TypeScript/JavaScript workflow module source.
+   */
+  source: string
+  scope?: "project" | "global"
+}
+
+export type WorkflowSaveResult = {
+  path: string
+}
+
+export type WorkflowApiError = {
+  _tag: "WorkflowApiError"
+  message: string
+  workflow?: string
+  path?: string
+}
+
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
+export type WorkflowSource = {
+  name: string
+  path: string
+  source: string
+  source_kind?: "builtin"
+}
+
+export type WorkflowStartPayload = {
+  args?: {
+    [key: string]: unknown
+  }
+  budget?: number
+  budget_tokens?: number
+  permissionSessionID?: string
+  resume_of?: string
+  invalidate_agents?: Array<number>
+  replay?: "prefix" | "keyed"
+}
+
+export type WorkflowAnswerPayload = {
+  /**
+   * The human answer to the run's open question.
+   */
+  answer: string
+  permissionSessionID?: string
+}
+
+export type WorkflowExportResult = {
+  path: string
+  files: Array<string>
+}
+
 export type UnauthorizedError = {
   _tag: "UnauthorizedError"
   message: string
@@ -2725,12 +3434,6 @@ export type SessionNotFoundError = {
   _tag: "SessionNotFoundError"
   sessionID: string
   message: string
-}
-
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
 }
 
 export type ServiceUnavailableError = {
@@ -3748,6 +4451,8 @@ export type AgentV2Info = {
 export type SessionV2Info = {
   id: string
   parentID?: string
+  depth: number
+  rootID?: string
   projectID: string
   agent?: string
   model?: {
@@ -5081,6 +5786,44 @@ export type EventMcpBrowserOpenFailed = {
   properties: {
     mcpName: string
     url: string
+  }
+}
+
+export type EventWorkflowRunUpdated = {
+  id: string
+  type: "workflow.run.updated"
+  properties: {
+    id: string
+    workflow: string
+    status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "paused"
+    current_phase: string
+    directory: string
+    agents: {
+      total: number | "NaN" | "Infinity" | "-Infinity"
+      running: number | "NaN" | "Infinity" | "-Infinity"
+      failed: number | "NaN" | "Infinity" | "-Infinity"
+    }
+    pending_question: boolean
+    error: string
+  }
+}
+
+export type EventWorkflowRunFinished = {
+  id: string
+  type: "workflow.run.finished"
+  properties: {
+    id: string
+    workflow: string
+    status: "running" | "completed" | "failed" | "cancelled" | "interrupted" | "paused"
+    current_phase: string
+    directory: string
+    agents: {
+      total: number | "NaN" | "Infinity" | "-Infinity"
+      running: number | "NaN" | "Infinity" | "-Infinity"
+      failed: number | "NaN" | "Infinity" | "-Infinity"
+    }
+    pending_question: boolean
+    error: string
   }
 }
 
@@ -7608,7 +8351,7 @@ export type SessionListResponses = {
   /**
    * List of sessions
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionListResponse = SessionListResponses[keyof SessionListResponses]
@@ -7650,7 +8393,7 @@ export type SessionCreateResponses = {
   /**
    * Successfully created session
    */
-  200: Session
+  200: Session3
 }
 
 export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
@@ -7748,7 +8491,7 @@ export type SessionGetResponses = {
   /**
    * Get session
    */
-  200: Session
+  200: Session2
 }
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
@@ -7791,7 +8534,7 @@ export type SessionUpdateResponses = {
   /**
    * Successfully updated session
    */
-  200: Session
+  200: Session4
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
@@ -7804,6 +8547,7 @@ export type SessionChildrenData = {
   query?: {
     directory?: string
     workspace?: string
+    recursive?: "true" | "false"
   }
   url: "/session/{sessionID}/children"
 }
@@ -7825,7 +8569,7 @@ export type SessionChildrenResponses = {
   /**
    * List of children
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
@@ -7936,6 +8680,7 @@ export type SessionMessagesResponse2 = SessionMessagesResponses[keyof SessionMes
 
 export type SessionPromptData = {
   body?: {
+    permissionSessionID?: string
     messageID?: string
     model?: {
       providerID: string
@@ -7949,6 +8694,11 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    turnBudget?: {
+      usd?: number
+      tokens?: number
+    }
+    mcp?: "eager" | "lazy"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -8094,7 +8844,7 @@ export type SessionForkResponses = {
   /**
    * 200
    */
-  200: Session
+  200: Session5
 }
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
@@ -8200,7 +8950,7 @@ export type SessionUnshareResponses = {
   /**
    * Successfully unshared session
    */
-  200: Session
+  200: Session7
 }
 
 export type SessionUnshareResponse = SessionUnshareResponses[keyof SessionUnshareResponses]
@@ -8238,7 +8988,7 @@ export type SessionShareResponses = {
   /**
    * Successfully shared session
    */
-  200: Session
+  200: Session6
 }
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
@@ -8283,6 +9033,7 @@ export type SessionSummarizeResponse = SessionSummarizeResponses[keyof SessionSu
 
 export type SessionPromptAsyncData = {
   body?: {
+    permissionSessionID?: string
     messageID?: string
     model?: {
       providerID: string
@@ -8296,6 +9047,11 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    turnBudget?: {
+      usd?: number
+      tokens?: number
+    }
+    mcp?: "eager" | "lazy"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -8467,7 +9223,7 @@ export type SessionRevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session8
 }
 
 export type SessionRevertResponse = SessionRevertResponses[keyof SessionRevertResponses]
@@ -8505,7 +9261,7 @@ export type SessionUnrevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session9
 }
 
 export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnrevertResponses]
@@ -9372,6 +10128,405 @@ export type ExperimentalWorkspaceWarpResponses = {
 
 export type ExperimentalWorkspaceWarpResponse =
   ExperimentalWorkspaceWarpResponses[keyof ExperimentalWorkspaceWarpResponses]
+
+export type WorkflowListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow"
+}
+
+export type WorkflowListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type WorkflowListError = WorkflowListErrors[keyof WorkflowListErrors]
+
+export type WorkflowListResponses = {
+  /**
+   * List of workflows
+   */
+  200: Array<WorkflowInfo>
+}
+
+export type WorkflowListResponse = WorkflowListResponses[keyof WorkflowListResponses]
+
+export type WorkflowRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run"
+}
+
+export type WorkflowRunsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type WorkflowRunsError = WorkflowRunsErrors[keyof WorkflowRunsErrors]
+
+export type WorkflowRunsResponses = {
+  /**
+   * List of workflow runs
+   */
+  200: Array<WorkflowRun>
+}
+
+export type WorkflowRunsResponse = WorkflowRunsResponses[keyof WorkflowRunsResponses]
+
+export type WorkflowSaveData = {
+  body?: WorkflowSavePayload
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/save"
+}
+
+export type WorkflowSaveErrors = {
+  /**
+   * WorkflowApiError | InvalidRequestError
+   */
+  400: WorkflowApiError | InvalidRequestError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type WorkflowSaveError = WorkflowSaveErrors[keyof WorkflowSaveErrors]
+
+export type WorkflowSaveResponses = {
+  /**
+   * Workflow saved to disk
+   */
+  200: WorkflowSaveResult
+}
+
+export type WorkflowSaveResponse = WorkflowSaveResponses[keyof WorkflowSaveResponses]
+
+export type WorkflowDeleteData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}"
+}
+
+export type WorkflowDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type WorkflowDeleteError = WorkflowDeleteErrors[keyof WorkflowDeleteErrors]
+
+export type WorkflowDeleteResponses = {
+  /**
+   * Workflow run deleted
+   */
+  200: boolean
+}
+
+export type WorkflowDeleteResponse = WorkflowDeleteResponses[keyof WorkflowDeleteResponses]
+
+export type WorkflowGetData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}"
+}
+
+export type WorkflowGetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowGetError = WorkflowGetErrors[keyof WorkflowGetErrors]
+
+export type WorkflowGetResponses = {
+  /**
+   * Workflow run
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowGetResponse = WorkflowGetResponses[keyof WorkflowGetResponses]
+
+export type WorkflowSourceData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{name}/source"
+}
+
+export type WorkflowSourceErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowSourceError = WorkflowSourceErrors[keyof WorkflowSourceErrors]
+
+export type WorkflowSourceResponses = {
+  /**
+   * Workflow source
+   */
+  200: WorkflowSource
+}
+
+export type WorkflowSourceResponse = WorkflowSourceResponses[keyof WorkflowSourceResponses]
+
+export type WorkflowStartData = {
+  body?: WorkflowStartPayload
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/{name}/start"
+}
+
+export type WorkflowStartErrors = {
+  /**
+   * WorkflowApiError | InvalidRequestError
+   */
+  400: WorkflowApiError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowStartError = WorkflowStartErrors[keyof WorkflowStartErrors]
+
+export type WorkflowStartResponses = {
+  /**
+   * Workflow run started
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowStartResponse = WorkflowStartResponses[keyof WorkflowStartResponses]
+
+export type WorkflowCancelData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}/cancel"
+}
+
+export type WorkflowCancelErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowCancelError = WorkflowCancelErrors[keyof WorkflowCancelErrors]
+
+export type WorkflowCancelResponses = {
+  /**
+   * Workflow run cancelled
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowCancelResponse = WorkflowCancelResponses[keyof WorkflowCancelResponses]
+
+export type WorkflowPauseData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}/pause"
+}
+
+export type WorkflowPauseErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowPauseError = WorkflowPauseErrors[keyof WorkflowPauseErrors]
+
+export type WorkflowPauseResponses = {
+  /**
+   * Workflow run paused
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowPauseResponse = WorkflowPauseResponses[keyof WorkflowPauseResponses]
+
+export type WorkflowSkipData = {
+  body?: never
+  path: {
+    id: string
+    agentId: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}/agent/{agentId}/skip"
+}
+
+export type WorkflowSkipErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type WorkflowSkipError = WorkflowSkipErrors[keyof WorkflowSkipErrors]
+
+export type WorkflowSkipResponses = {
+  /**
+   * Workflow run after requesting the skip
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowSkipResponse = WorkflowSkipResponses[keyof WorkflowSkipResponses]
+
+export type WorkflowAnswerData = {
+  body?: WorkflowAnswerPayload
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}/answer"
+}
+
+export type WorkflowAnswerErrors = {
+  /**
+   * BadRequest | WorkflowApiError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | WorkflowApiError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type WorkflowAnswerError = WorkflowAnswerErrors[keyof WorkflowAnswerErrors]
+
+export type WorkflowAnswerResponses = {
+  /**
+   * Workflow run after answering its open question
+   */
+  200: WorkflowRun
+}
+
+export type WorkflowAnswerResponse = WorkflowAnswerResponses[keyof WorkflowAnswerResponses]
+
+export type WorkflowExportData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/workflow/run/{id}/export"
+}
+
+export type WorkflowExportErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type WorkflowExportError = WorkflowExportErrors[keyof WorkflowExportErrors]
+
+export type WorkflowExportResponses = {
+  /**
+   * Workflow run transcripts exported
+   */
+  200: WorkflowExportResult
+}
+
+export type WorkflowExportResponse = WorkflowExportResponses[keyof WorkflowExportResponses]
 
 export type V2HealthGetData = {
   body?: never

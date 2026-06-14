@@ -52,6 +52,9 @@ import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Workflow } from "@/workflow/workflow"
+import { WorkflowTool, workflowDescription } from "./workflow"
+import { SubagentLimits } from "@/session/subagent-limits"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
@@ -75,6 +78,23 @@ export interface Interface {
     providerID: ProviderV2.ID
     modelID: ModelV2.ID
     agent: Agent.Info
+    /**
+     * Item 13: session.metadata.ultracode === true. Swaps the workflow tool's
+     * anti-default gate sentence for the standing "quality over cost" opt-in.
+     * Runs per prompt (descriptions are baked at Tool.init, so this is the
+     * only seam that can vary by session).
+     */
+    ultracode?: boolean
+    /**
+     * Nesting depth of the requesting session (root = 1), derived from the
+     * real parent chain by SessionTools.resolve. At depth >= maxDepth the
+     * task and workflow tools are filtered from the list (design-final §4.1,
+     * defense line 2); on levels 2..max−1 the task description carries a
+     * depth hint. Infinity marks an unresolvable lineage (treated as
+     * at-limit). Callers that don't know their depth (debug/HTTP listings)
+     * default to the root's depth 1.
+     */
+    depth?: number
   }) => Effect.Effect<Tool.Def[]>
 }
 
@@ -105,6 +125,7 @@ export const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const workflow = yield* WorkflowTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -212,6 +233,7 @@ export const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          workflow: Tool.init(workflow),
         })
 
         return {
@@ -228,6 +250,7 @@ export const layer = Layer.effect(
             tool.task,
             tool.fetch,
             tool.todo,
+            tool.workflow,
             tool.search,
             tool.skill,
             tool.patch,
@@ -265,7 +288,19 @@ export const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      // Resolve-time depth gate (design-final §4.1, defense line 2):
+      // config-aware on purpose — it also covers the kill switch
+      // (`subagent_max_depth: 1` removes task from the ROOT, which has no
+      // persisted deny) and a later LOWERING of max_depth for existing
+      // sessions whose ruleset predates the change.
+      const depthLimit = SubagentLimits.maxDepth(yield* config.get())
+      const depth = input.depth ?? 1
       const filtered = (yield* all()).filter((tool) => {
+        // At the maximum nesting depth the task and workflow tools are not in
+        // the tool list at all (Claude-Code parity: the model plans without
+        // delegation instead of burning turns on refused calls).
+        if ((tool.id === TaskTool.id || tool.id === WorkflowTool.id) && depth >= depthLimit) return false
+
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
@@ -291,9 +326,25 @@ export const layer = Layer.effect(
             output.parameters === tool.parameters || output.jsonSchema !== tool.jsonSchema
               ? output.jsonSchema
               : undefined
+          // Item 13: ultracode sessions swap the workflow tool's gate sentence
+          // (after plugin.trigger, like the task-roster append below). A plugin
+          // that overrode the description via tool.definition wins — the swap
+          // only applies while the description is still the built-in default.
+          const description =
+            tool.id === WorkflowTool.id && input.ultracode && output.description === workflowDescription(false)
+              ? workflowDescription(true)
+              : output.description
+          // Depth hint (design-final Ü5): sub-agents on levels 2..max−1 are
+          // told their remaining delegation budget instead of discovering it
+          // by failed calls. Applied after plugin.trigger like the roster
+          // below; the root's description stays byte-identical.
+          const depthHint =
+            tool.id === TaskTool.id && depth >= 2 && depth < depthLimit
+              ? SubagentLimits.depthHint(depth, depthLimit)
+              : undefined
           return {
             id: tool.id,
-            description: [output.description, tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined]
+            description: [description, depthHint, tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined]
               .filter(Boolean)
               .join("\n"),
             parameters: output.parameters,
@@ -336,7 +387,11 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(CrossSpawnSpawner.defaultLayer),
       Layer.provide(Truncate.defaultLayer),
     )
-    .pipe(Layer.provide(Database.defaultLayer), Layer.provide(RuntimeFlags.defaultLayer)),
+    .pipe(
+      Layer.provide(Database.defaultLayer),
+      Layer.provide(Workflow.defaultLayer),
+      Layer.provide(RuntimeFlags.defaultLayer),
+    ),
 )
 
 function isZodType(value: unknown): value is z.ZodType {
@@ -435,6 +490,7 @@ export const node = LayerNode.make(layer.pipe(Layer.provide(Ripgrep.defaultLayer
   Truncate.node,
   RuntimeFlags.node,
   Database.node,
+  Workflow.node,
 ])
 
 export * as ToolRegistry from "./registry"

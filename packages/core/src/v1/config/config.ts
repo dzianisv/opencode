@@ -163,6 +163,41 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  workflows: Schema.optional(
+    Schema.Struct({
+      ultracode_keyword: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Detect the standalone `ultracode` keyword in the prompt and highlight it; on submit it opts the turn into workflow orchestration (default: true)",
+      }),
+      approval: Schema.optional(Schema.Literals(["always", "first-run", "never"])).annotate({
+        description:
+          "When to ask before an interactive workflow start. 'first-run' (default) asks once per workflow until approved, 'always' asks every time, 'never' starts without asking.",
+      }),
+      approved: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+        description: "Workflow names that have been approved via 'Yes, always' in the interactive start dialog.",
+      }),
+      foreground_grace_ms: Schema.optional(NonNegativeInt).annotate({
+        description:
+          "How long a workflow start waits in the foreground before switching the run to the background (milliseconds, default 45000). Only applies when neither background nor timeout is set explicitly.",
+      }),
+      budget_directive: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Detect the `+$N` budget directive in the prompt and highlight it; on submit it reserves that budget for workflow orchestration in the turn (default: true)",
+      }),
+      shell_permission: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Gate workflow ctx.shell commands through the caller's bash permission ruleset, exactly like the bash tool (default: true). Set to false to restore the ungated behavior.",
+      }),
+      lint: Schema.optional(Schema.Literals(["off", "warn", "deny"])).annotate({
+        description:
+          "Static source lint for workflow scripts on create/inline start (node builtins, Bun.spawn, process.env, fetch, dynamic import). 'warn' (default) surfaces findings non-blocking, 'deny' fails create/start on findings, 'off' disables the lint.",
+      }),
+      lazy_mcp: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Load MCP tools lazily in workflow subagent sessions via the tool_search meta-tool instead of registering every MCP schema eagerly (default: true).",
+      }),
+    }),
+  ).annotate({ description: "Workflow orchestration options" }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),
@@ -178,6 +213,18 @@ export const Info = Schema.Struct({
       }),
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
+      }),
+      subagent_max_depth: Schema.optional(PositiveInt).annotate({
+        description:
+          "Maximum subagent nesting depth (the root session is depth 1; clamped to 1..10). Default 5. Set 2 to restore the previous spawn behavior (the root spawns, subagents do not) — additionally the workflow tool is removed at the limit (security fix) and custom agents that previously nested without limit are bounded; 1 is the kill switch that removes the task and workflow tools entirely.",
+      }),
+      subagent_tree_limit: Schema.optional(PositiveInt).annotate({
+        description:
+          "In-memory lifetime cap on subagents started per session tree, a per-process safety ceiling against runaway delegation (clamped to 1..10000). Default 200. Resumes and workflow dispatches do not count against it; the counter is not persisted, so it resets each process run.",
+      }),
+      subagent_task_timeout: Schema.optional(PositiveInt).annotate({
+        description:
+          "Default timeout in milliseconds for foreground subagent tasks (the `task` tool). When it elapses the subtree is aborted via the same cancel path as an explicit cancel (no orphan job) and the spawn fails with a typed timeout error in the parent's transcript. Overridable per call via the task tool's `timeout` parameter. Unset (default) means no timeout.",
       }),
       policies: Schema.optional(Schema.mutable(Schema.Array(ConfigExperimental.Policy))).annotate({
         description: "Policy statements applied to supported resources, such as provider access",

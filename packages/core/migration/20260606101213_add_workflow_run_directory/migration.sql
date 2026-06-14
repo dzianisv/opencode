@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_run` ADD `directory` text DEFAULT '' NOT NULL;

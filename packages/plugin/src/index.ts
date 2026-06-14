@@ -16,6 +16,7 @@ import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
 
 export * from "./tool.js"
+export * from "./workflow.js"
 
 export type ProviderContext = {
   source: "env" | "config" | "custom" | "api"

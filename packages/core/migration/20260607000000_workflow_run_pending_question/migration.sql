@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_run` ADD `pending_question` text;

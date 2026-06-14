@@ -23,6 +23,14 @@ import { Filesystem } from "@/util/filesystem"
 import { createOpencodeClient, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
+import {
+  detectUltracodeKeyword,
+  formatParkedQuestion,
+  parseHeadlessWorkflowArgs,
+  RUN_ULTRACODE_DIRECTIVE,
+  stripUltracodeKeyword,
+  workflowExitCode,
+} from "./run/workflow.shared"
 
 type ModelInput = Parameters<OpencodeClient["session"]["prompt"]>[0]["model"]
 
@@ -119,6 +127,84 @@ async function toolError(part: ToolPart) {
   }
 }
 
+/**
+ * Iteration cap for the client-side parent-chain walk. Mirrors the server's
+ * `SubagentLimits.LINEAGE_ITERATION_CAP`: legitimate chains are at most the
+ * hard max depth long; anything longer means corrupt or cyclic parent data and
+ * must terminate instead of looping forever.
+ */
+const LINEAGE_WALK_CAP = 32
+
+/**
+ * Walks a session's parent chain via `get` and returns the lineage as ids,
+ * starting at the session itself and ending at its tree root. Lookup failures
+ * and cycles end the walk with the chain collected so far — resolving lineage
+ * must never throw or hang inside the headless event loop.
+ */
+export async function sessionLineage(
+  get: (sessionID: string) => Promise<{ parentID?: string } | undefined>,
+  sessionID: string,
+): Promise<string[]> {
+  const chain: string[] = []
+  let cursor: string | undefined = sessionID
+  while (cursor !== undefined && chain.length < LINEAGE_WALK_CAP) {
+    if (chain.includes(cursor)) break
+    chain.push(cursor)
+    const info: { parentID?: string } | undefined = await get(cursor).catch(() => undefined)
+    cursor = info?.parentID
+  }
+  return chain
+}
+
+/**
+ * Tree-aware filter for headless `permission.asked` events. Nested subagents
+ * route their asks to the tree ROOT (design-final §4.3): the event's
+ * `sessionID` is the root session and the asking session travels in
+ * `metadata.originSessionID`. The previous `sessionID !== <driven session>`
+ * check therefore dropped every routed ask when `--session` pointed at a
+ * non-root (subagent) session — the server kept waiting on the unanswered ask
+ * and the run hung forever.
+ *
+ * Accept rules for driven session S with tree root R (resolved lazily, once):
+ *   1. ask.sessionID === S         → accept: S's own unrouted asks; when S is
+ *                                    the root this is byte-identical to the
+ *                                    old behavior and needs no lookups.
+ *   2. ask.sessionID !== R         → ignore: another session or another tree.
+ *   3. no metadata.originSessionID → accept: routed but unattributed; dropping
+ *                                    it would hang the run, so fail open.
+ *   4. otherwise                   → accept iff S is in the origin's parent
+ *                                    chain, i.e. the asker is in S's subtree.
+ *                                    Asks from foreign subtrees of the same
+ *                                    root belong to whoever drives them.
+ *
+ * Lineage walks are memoized per session id — sessions never re-parent, so a
+ * resolved chain stays valid for the lifetime of the run.
+ */
+export function createHeadlessPermissionFilter(input: {
+  sessionID: string
+  lineage: (sessionID: string) => Promise<string[]>
+}): (permission: { sessionID: string; metadata?: Record<string, unknown> }) => Promise<boolean> {
+  const cache = new Map<string, Promise<string[]>>()
+  const lineage = (sessionID: string) => {
+    let chain = cache.get(sessionID)
+    if (chain === undefined) {
+      chain = input.lineage(sessionID)
+      cache.set(sessionID, chain)
+    }
+    return chain
+  }
+  let root: Promise<string> | undefined
+  return async (permission) => {
+    if (permission.sessionID === input.sessionID) return true
+    root ??= lineage(input.sessionID).then((chain) => chain.at(-1) ?? input.sessionID)
+    if (permission.sessionID !== (await root)) return false
+    const origin = permission.metadata?.["originSessionID"]
+    if (typeof origin !== "string") return true
+    if (origin === input.sessionID) return true
+    return (await lineage(origin)).includes(input.sessionID)
+  }
+}
+
 export const RunCommand = effectCmd({
   command: "run [message..]",
   describe: "run opencode with a message",
@@ -138,6 +224,10 @@ export const RunCommand = effectCmd({
       })
       .option("command", {
         describe: "the command to run, use message for args",
+        type: "string",
+      })
+      .option("workflow", {
+        describe: "run a workflow by name instead of a prompt; positional message becomes key=value args",
         type: "string",
       })
       .option("continue", {
@@ -269,6 +359,16 @@ export const RunCommand = effectCmd({
         die("--interactive cannot be used with --command")
       }
 
+      // Delta 7a: --workflow is an orthogonal start path (not a session prompt),
+      // so it is mutually exclusive with the session/prompt flags.
+      if (args.workflow) {
+        if (args.command) die("--workflow cannot be used with --command")
+        if (args.interactive) die("--workflow cannot be used with --interactive")
+        if (args.continue) die("--workflow cannot be used with --continue")
+        if (args.session) die("--workflow cannot be used with --session")
+        if (args.fork) die("--workflow cannot be used with --fork")
+      }
+
       if (args.demo && !args.interactive) {
         die("--demo requires --interactive")
       }
@@ -352,7 +452,8 @@ export const RunCommand = effectCmd({
       message = resolveRunInput(message, piped) ?? ""
       const initialInput = resolveRunInput(rawMessage, piped)
 
-      if (message.trim().length === 0 && !args.command && !args.interactive) {
+      // Delta 7b: --workflow needs no prompt message (its positionals are args).
+      if (message.trim().length === 0 && !args.command && !args.interactive && !args.workflow) {
         UI.error("You must provide a message or a command")
         process.exit(1)
       }
@@ -602,6 +703,88 @@ export const RunCommand = effectCmd({
         return localAgent()
       }
 
+      // Headless --workflow path (Spec §5.2 (5), Delta 7): orthogonal to sessions.
+      // Start the workflow via the SDK (start/get ARE in the generated client;
+      // only `answer` is not — Delta 2), poll to a STOP status (robust in a
+      // short-lived headless process; the run.* events are not in the SDK either),
+      // print result/error, and exit with workflowExitCode. No permissionSessionID
+      // (no interactive session).
+      //
+      // Finding 6: `paused` is a NON-terminal status the engine parks to when a
+      // `ctx.question` step times out waiting for an answer. Headless mode has no
+      // interactive answerer, so polling for ONLY the terminal statuses would spin
+      // forever on such a run. We therefore stop polling on `paused` too and, when
+      // it carries a pending_question, print the question + the exact (resumable)
+      // answer command and exit with the distinct parked code (2) — we never
+      // auto-answer.
+      async function runWorkflow(sdk: OpencodeClient) {
+        const wfArgs = parseHeadlessWorkflowArgs([...args.message, ...(args["--"] || [])])
+        const started = await sdk.workflow
+          .start({ name: args.workflow!, workflowStartPayload: { args: wfArgs } })
+          .catch((error) => ({ error, data: undefined }) as { error: unknown; data: undefined })
+        if ((started as { error?: unknown }).error || !started.data) {
+          const error = (started as { error?: unknown }).error
+          UI.error(`Failed to start workflow ${args.workflow}: ${formatRunError(error) || "unknown error"}`)
+          process.exit(1)
+        }
+        const id = started.data.id
+        // `paused` is a stop status here even though the engine treats it as
+        // non-terminal: a headless run can never be answered, so we must not poll
+        // past it (Finding 6).
+        const stop = new Set(["completed", "failed", "cancelled", "interrupted", "paused"])
+        let final = started.data
+        while (!stop.has(final.status)) {
+          await Bun.sleep(500)
+          const polled = await sdk.workflow.get({ id }).catch(() => undefined)
+          if (polled?.data) final = polled.data
+        }
+        // A run that parked on an unanswerable question gets its own guidance +
+        // exit code; everything else falls through to the normal result print.
+        if (final.status === "paused" && final.pending_question) {
+          const guidance = formatParkedQuestion({
+            id,
+            question: final.pending_question.question,
+            options: final.pending_question.options,
+          })
+          if (args.format === "json") {
+            process.stdout.write(
+              JSON.stringify({
+                type: "workflow_parked",
+                timestamp: Date.now(),
+                id,
+                workflow: final.workflow,
+                status: final.status,
+                question: final.pending_question.question,
+                options: final.pending_question.options,
+              }) + EOL,
+            )
+          } else {
+            UI.error(guidance)
+          }
+          process.exitCode = workflowExitCode(final.status)
+          return
+        }
+        if (args.format === "json") {
+          process.stdout.write(
+            JSON.stringify({
+              type: "workflow_finished",
+              timestamp: Date.now(),
+              id,
+              workflow: final.workflow,
+              status: final.status,
+              result: final.result,
+              ...(final.error && { error: final.error }),
+            }) + EOL,
+          )
+        } else {
+          UI.println(`Workflow ${final.workflow} ${final.status}`)
+          if (final.result !== undefined)
+            UI.println(typeof final.result === "string" ? final.result : JSON.stringify(final.result, null, 2))
+          if (final.error) UI.error(final.error)
+        }
+        process.exitCode = workflowExitCode(final.status)
+      }
+
       async function execute(sdk: OpencodeClient) {
         const sess = await session(sdk)
         if (!sess?.id) {
@@ -632,6 +815,23 @@ export const RunCommand = effectCmd({
         async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
           let error: string | undefined
+
+          // Root routing (design-final §4.3) tags nested subagents' asks with
+          // the tree ROOT, not the driven session — match them tree-aware or a
+          // `--session <subagent-id>` run would drop its descendants' asks and
+          // hang on the server-side wait.
+          const permissionRelevant = createHeadlessPermissionFilter({
+            sessionID,
+            lineage: (id) =>
+              sessionLineage(
+                (target) =>
+                  client.session
+                    .get({ sessionID: target })
+                    .then((result) => result.data)
+                    .catch(() => undefined),
+                id,
+              ),
+          })
 
           for await (const event of events.stream) {
             if (
@@ -730,7 +930,7 @@ export const RunCommand = effectCmd({
 
             if (event.type === "permission.asked") {
               const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
+              if (!(await permissionRelevant(permission))) continue
 
               if (args["dangerously-skip-permissions"]) {
                 await client.permission.reply({
@@ -791,12 +991,25 @@ export const RunCommand = effectCmd({
           }
 
           const model = pick(args.model)
+          // Ultracode keyword in the headless prompt path (Spec §5.2 (5)): when a
+          // standalone `ultracode` keyword is present (non-interactive only),
+          // strip it from the visible prompt and PREPEND the directive as a
+          // synthetic text part, mirroring the TUI prompt submit. Default-on like
+          // the TUI (config.workflows.ultracode_keyword is not easily read here
+          // before the workflow loads — Delta 6a note); a non-matching message is
+          // untouched.
+          const ultracode = detectUltracodeKeyword(message)
+          const promptText = ultracode ? stripUltracodeKeyword(message) : message
           const result = await client.session.prompt({
             sessionID,
             agent,
             model,
             variant: args.variant,
-            parts: [...files, { type: "text", text: message }],
+            parts: [
+              ...(ultracode ? [{ type: "text" as const, text: RUN_ULTRACODE_DIRECTIVE }] : []),
+              ...files,
+              { type: "text" as const, text: promptText },
+            ],
           })
           if (result.error) {
             if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
@@ -872,7 +1085,7 @@ export const RunCommand = effectCmd({
 
       if (args.attach) {
         const sdk = attachSDK(directory)
-        return await execute(sdk)
+        return args.workflow ? await runWorkflow(sdk) : await execute(sdk)
       }
 
       const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -888,6 +1101,7 @@ export const RunCommand = effectCmd({
         fetch: fetchFn,
         directory,
       })
+      if (args.workflow) return await runWorkflow(sdk)
       await execute(sdk)
     })
   }),

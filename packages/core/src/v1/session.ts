@@ -56,15 +56,17 @@ export const ContentFilterError = NamedError.create("ContentFilterError", {
   message: Schema.String,
 })
 
-export class OutputFormatText extends Schema.Class<OutputFormatText>("OutputFormatText")({
+export const OutputFormatText = Schema.Struct({
   type: Schema.Literal("text"),
-}) {}
+}).annotate({ identifier: "OutputFormatText" })
+export type OutputFormatText = Schema.Schema.Type<typeof OutputFormatText>
 
-export class OutputFormatJsonSchema extends Schema.Class<OutputFormatJsonSchema>("OutputFormatJsonSchema")({
+export const OutputFormatJsonSchema = Schema.Struct({
   type: Schema.Literal("json_schema"),
   schema: Schema.Record(Schema.String, Schema.Any).annotate({ identifier: "JSONSchema" }),
   retryCount: NonNegativeInt.pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(2))),
-}) {}
+}).annotate({ identifier: "OutputFormatJsonSchema" })
+export type OutputFormatJsonSchema = Schema.Schema.Type<typeof OutputFormatJsonSchema>
 
 export const Format = Schema.Union([OutputFormatText, OutputFormatJsonSchema]).annotate({
   discriminator: "type",
@@ -550,6 +552,12 @@ export const SessionInfo = Schema.Struct({
   directory: Schema.String,
   path: optionalOmitUndefined(Schema.String),
   parentID: optionalOmitUndefined(SessionSchema.ID),
+  // Convenience wire fields derived from the parentID chain (nested-agents
+  // Issue 3, additive). `depth` is the 1-based nesting level (root = 1, always
+  // present). `rootID` is the topmost ancestor; omitted for roots/orphans
+  // (a root is its own root, so callers read `rootID ?? id`).
+  depth: optionalOmitUndefined(NonNegativeInt),
+  rootID: optionalOmitUndefined(SessionSchema.ID),
   summary: optionalOmitUndefined(SessionSummary),
   cost: optionalOmitUndefined(Schema.Finite),
   tokens: optionalOmitUndefined(SessionTokens),

@@ -1,9 +1,17 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "85d2086c-3c95-4706-90b0-f7480b73db5c",
-  "prevIds": ["fdfcccee-fb3a-481f-b801-b9835fa30d5d"],
+  "id": "d967929f-91c9-422a-b45a-0ce742200412",
+  "prevIds": ["d1bfa125-b81e-4c61-9b6e-e74abf6e488f", "f683cc08-90ea-4a47-ba9a-520940eecb53"],
   "ddl": [
+    {
+      "name": "workspace",
+      "entityType": "tables"
+    },
+    {
+      "name": "data_migration",
+      "entityType": "tables"
+    },
     {
       "name": "account_state",
       "entityType": "tables"
@@ -17,11 +25,19 @@
       "entityType": "tables"
     },
     {
-      "name": "workspace",
+      "name": "event_sequence",
       "entityType": "tables"
     },
     {
-      "name": "data_migration",
+      "name": "event",
+      "entityType": "tables"
+    },
+    {
+      "name": "permission",
+      "entityType": "tables"
+    },
+    {
+      "name": "project_directory",
       "entityType": "tables"
     },
     {
@@ -37,7 +53,11 @@
       "entityType": "tables"
     },
     {
-      "name": "permission",
+      "name": "session_context_epoch",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_input",
       "entityType": "tables"
     },
     {
@@ -57,12 +77,108 @@
       "entityType": "tables"
     },
     {
-      "name": "event_sequence",
+      "name": "workflow_run",
       "entityType": "tables"
     },
     {
-      "name": "event",
-      "entityType": "tables"
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "type",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "''",
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "branch",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "extra",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_used",
+      "entityType": "columns",
+      "table": "workspace"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "data_migration"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_completed",
+      "entityType": "columns",
+      "table": "data_migration"
     },
     {
       "type": "integer",
@@ -260,9 +376,59 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "aggregate_id",
+      "entityType": "columns",
+      "table": "event_sequence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seq",
+      "entityType": "columns",
+      "table": "event_sequence"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "owner_id",
+      "entityType": "columns",
+      "table": "event_sequence"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "id",
       "entityType": "columns",
-      "table": "workspace"
+      "table": "event"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "aggregate_id",
+      "entityType": "columns",
+      "table": "event"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seq",
+      "entityType": "columns",
+      "table": "event"
     },
     {
       "type": "text",
@@ -272,17 +438,17 @@
       "generated": null,
       "name": "type",
       "entityType": "columns",
-      "table": "workspace"
+      "table": "event"
     },
     {
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "''",
+      "default": null,
       "generated": null,
-      "name": "name",
+      "name": "data",
       "entityType": "columns",
-      "table": "workspace"
+      "table": "event"
     },
     {
       "type": "text",
@@ -290,29 +456,9 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "branch",
+      "name": "id",
       "entityType": "columns",
-      "table": "workspace"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "directory",
-      "entityType": "columns",
-      "table": "workspace"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "extra",
-      "entityType": "columns",
-      "table": "workspace"
+      "table": "permission"
     },
     {
       "type": "text",
@@ -322,27 +468,27 @@
       "generated": null,
       "name": "project_id",
       "entityType": "columns",
-      "table": "workspace"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "time_used",
-      "entityType": "columns",
-      "table": "workspace"
+      "table": "permission"
     },
     {
       "type": "text",
-      "notNull": false,
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "name",
+      "name": "action",
       "entityType": "columns",
-      "table": "data_migration"
+      "table": "permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource",
+      "entityType": "columns",
+      "table": "permission"
     },
     {
       "type": "integer",
@@ -350,9 +496,59 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "time_completed",
+      "name": "time_created",
       "entityType": "columns",
-      "table": "data_migration"
+      "table": "permission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "table": "project_directory"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "project_directory"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "type",
+      "entityType": "columns",
+      "table": "project_directory"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "project_directory"
     },
     {
       "type": "text",
@@ -590,9 +786,129 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "project_id",
+      "name": "session_id",
       "entityType": "columns",
-      "table": "permission"
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "baseline",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'build'",
+      "generated": null,
+      "name": "agent",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "snapshot",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "baseline_seq",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "replacement_seq",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "session_context_epoch"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "prompt",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "delivery",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "admitted_seq",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "promoted_seq",
+      "entityType": "columns",
+      "table": "session_input"
     },
     {
       "type": "integer",
@@ -602,27 +918,7 @@
       "generated": null,
       "name": "time_created",
       "entityType": "columns",
-      "table": "permission"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "time_updated",
-      "entityType": "columns",
-      "table": "permission"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "data",
-      "entityType": "columns",
-      "table": "permission"
+      "table": "session_input"
     },
     {
       "type": "text",
@@ -651,6 +947,16 @@
       "default": null,
       "generated": null,
       "name": "type",
+      "entityType": "columns",
+      "table": "session_message"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seq",
       "entityType": "columns",
       "table": "session_message"
     },
@@ -831,6 +1137,66 @@
       "default": null,
       "generated": null,
       "name": "metadata",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "cost",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_input",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_output",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_reasoning",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_cache_read",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_cache_write",
       "entityType": "columns",
       "table": "session"
     },
@@ -1050,39 +1416,29 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "aggregate_id",
-      "entityType": "columns",
-      "table": "event_sequence"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "seq",
-      "entityType": "columns",
-      "table": "event_sequence"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "owner_id",
-      "entityType": "columns",
-      "table": "event_sequence"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
       "name": "id",
       "entityType": "columns",
-      "table": "event"
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "''",
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "workflow_run"
     },
     {
       "type": "text",
@@ -1090,9 +1446,19 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "aggregate_id",
+      "name": "workflow",
       "entityType": "columns",
-      "table": "event"
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "workflow_run"
     },
     {
       "type": "integer",
@@ -1100,9 +1466,49 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "seq",
+      "name": "started_at",
       "entityType": "columns",
-      "table": "event"
+      "table": "workflow_run"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "current_phase",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "args",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "definition",
+      "entityType": "columns",
+      "table": "workflow_run"
     },
     {
       "type": "text",
@@ -1110,9 +1516,9 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "type",
+      "name": "logs",
       "entityType": "columns",
-      "table": "event"
+      "table": "workflow_run"
     },
     {
       "type": "text",
@@ -1120,9 +1526,60 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "data",
+      "name": "agents",
       "entityType": "columns",
-      "table": "event"
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "workflow_run"
+    },
+    {
+      "columns": ["project_id"],
+      "tableTo": "project",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_workspace_project_id_project_id_fk",
+      "entityType": "fks",
+      "table": "workspace"
     },
     {
       "columns": ["active_account_id"],
@@ -1136,15 +1593,37 @@
       "table": "account_state"
     },
     {
+      "columns": ["aggregate_id"],
+      "tableTo": "event_sequence",
+      "columnsTo": ["aggregate_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_event_aggregate_id_event_sequence_aggregate_id_fk",
+      "entityType": "fks",
+      "table": "event"
+    },
+    {
       "columns": ["project_id"],
       "tableTo": "project",
       "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
-      "name": "fk_workspace_project_id_project_id_fk",
+      "name": "fk_permission_project_id_project_id_fk",
       "entityType": "fks",
-      "table": "workspace"
+      "table": "permission"
+    },
+    {
+      "columns": ["project_id"],
+      "tableTo": "project",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_project_directory_project_id_project_id_fk",
+      "entityType": "fks",
+      "table": "project_directory"
     },
     {
       "columns": ["session_id"],
@@ -1169,15 +1648,26 @@
       "table": "part"
     },
     {
-      "columns": ["project_id"],
-      "tableTo": "project",
+      "columns": ["session_id"],
+      "tableTo": "session",
       "columnsTo": ["id"],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
-      "name": "fk_permission_project_id_project_id_fk",
+      "name": "fk_session_context_epoch_session_id_session_id_fk",
       "entityType": "fks",
-      "table": "permission"
+      "table": "session_context_epoch"
+    },
+    {
+      "columns": ["session_id"],
+      "tableTo": "session",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_input_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_input"
     },
     {
       "columns": ["session_id"],
@@ -1224,17 +1714,6 @@
       "table": "session_share"
     },
     {
-      "columns": ["aggregate_id"],
-      "tableTo": "event_sequence",
-      "columnsTo": ["aggregate_id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "nameExplicit": false,
-      "name": "fk_event_aggregate_id_event_sequence_aggregate_id_fk",
-      "entityType": "fks",
-      "table": "event"
-    },
-    {
       "columns": ["email", "url"],
       "nameExplicit": false,
       "name": "control_account_pk",
@@ -1242,11 +1721,32 @@
       "table": "control_account"
     },
     {
+      "columns": ["project_id", "directory"],
+      "nameExplicit": false,
+      "name": "project_directory_pk",
+      "entityType": "pks",
+      "table": "project_directory"
+    },
+    {
       "columns": ["session_id", "position"],
       "nameExplicit": false,
       "name": "todo_pk",
       "entityType": "pks",
       "table": "todo"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "workspace_pk",
+      "table": "workspace",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["name"],
+      "nameExplicit": false,
+      "name": "data_migration_pk",
+      "table": "data_migration",
+      "entityType": "pks"
     },
     {
       "columns": ["id"],
@@ -1263,17 +1763,24 @@
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
+      "columns": ["aggregate_id"],
       "nameExplicit": false,
-      "name": "workspace_pk",
-      "table": "workspace",
+      "name": "event_sequence_pk",
+      "table": "event_sequence",
       "entityType": "pks"
     },
     {
-      "columns": ["name"],
+      "columns": ["id"],
       "nameExplicit": false,
-      "name": "data_migration_pk",
-      "table": "data_migration",
+      "name": "event_pk",
+      "table": "event",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "permission_pk",
+      "table": "permission",
       "entityType": "pks"
     },
     {
@@ -1298,10 +1805,17 @@
       "entityType": "pks"
     },
     {
-      "columns": ["project_id"],
+      "columns": ["session_id"],
       "nameExplicit": false,
-      "name": "permission_pk",
-      "table": "permission",
+      "name": "session_context_epoch_pk",
+      "table": "session_context_epoch",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "session_input_pk",
+      "table": "session_input",
       "entityType": "pks"
     },
     {
@@ -1326,18 +1840,73 @@
       "entityType": "pks"
     },
     {
-      "columns": ["aggregate_id"],
+      "columns": ["id"],
       "nameExplicit": false,
-      "name": "event_sequence_pk",
-      "table": "event_sequence",
+      "name": "workflow_run_pk",
+      "table": "workflow_run",
       "entityType": "pks"
     },
     {
-      "columns": ["id"],
-      "nameExplicit": false,
-      "name": "event_pk",
-      "table": "event",
-      "entityType": "pks"
+      "columns": [
+        {
+          "value": "aggregate_id",
+          "isExpression": false
+        },
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "event_aggregate_seq_idx",
+      "entityType": "indexes",
+      "table": "event"
+    },
+    {
+      "columns": [
+        {
+          "value": "aggregate_id",
+          "isExpression": false
+        },
+        {
+          "value": "type",
+          "isExpression": false
+        },
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "event_aggregate_type_seq_idx",
+      "entityType": "indexes",
+      "table": "event"
+    },
+    {
+      "columns": [
+        {
+          "value": "project_id",
+          "isExpression": false
+        },
+        {
+          "value": "action",
+          "isExpression": false
+        },
+        {
+          "value": "resource",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "permission_project_action_resource_idx",
+      "entityType": "indexes",
+      "table": "permission"
     },
     {
       "columns": [
@@ -1398,12 +1967,78 @@
         {
           "value": "session_id",
           "isExpression": false
+        },
+        {
+          "value": "promoted_seq",
+          "isExpression": false
+        },
+        {
+          "value": "delivery",
+          "isExpression": false
+        },
+        {
+          "value": "admitted_seq",
+          "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
-      "name": "session_message_session_idx",
+      "name": "session_input_session_pending_delivery_seq_idx",
+      "entityType": "indexes",
+      "table": "session_input"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "admitted_seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "session_input_session_admitted_seq_idx",
+      "entityType": "indexes",
+      "table": "session_input"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "promoted_seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "session_input_session_promoted_seq_idx",
+      "entityType": "indexes",
+      "table": "session_input"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "session_message_session_seq_idx",
       "entityType": "indexes",
       "table": "session_message"
     },
@@ -1416,12 +2051,38 @@
         {
           "value": "type",
           "isExpression": false
+        },
+        {
+          "value": "seq",
+          "isExpression": false
         }
       ],
       "isUnique": false,
       "where": null,
       "origin": "manual",
-      "name": "session_message_session_type_idx",
+      "name": "session_message_session_type_seq_idx",
+      "entityType": "indexes",
+      "table": "session_message"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_created",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_message_session_time_created_id_idx",
       "entityType": "indexes",
       "table": "session_message"
     },
@@ -1494,6 +2155,38 @@
       "name": "todo_session_idx",
       "entityType": "indexes",
       "table": "todo"
+    },
+    {
+      "columns": [
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "workflow_run_started_at_idx",
+      "entityType": "indexes",
+      "table": "workflow_run"
+    },
+    {
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "workflow_run_status_started_at_idx",
+      "entityType": "indexes",
+      "table": "workflow_run"
     }
   ],
   "renames": []

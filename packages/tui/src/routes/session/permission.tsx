@@ -12,10 +12,12 @@ import { useProject } from "../../context/project"
 import { filetype } from "../../util/filetype"
 import { Locale } from "../../util/locale"
 import { webSearchProviderLabel } from "../../util/tool-display"
+import { formatOriginAttribution } from "../../util/lineage"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiConfig } from "../../config"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
+import { workflowPermissionDisplay } from "../../component/dialog-workflow-helpers"
 
 type PermissionStage = "permission" | "always" | "reject"
 
@@ -371,6 +373,36 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            // Item 9: an agent-initiated workflow start/create titles with the
+            // workflow's display name + description (the pure-literal meta exists
+            // for exactly this dialog) instead of the generic "Call tool workflow".
+            if (permission === "workflow") {
+              const d = workflowPermissionDisplay(props.request.metadata)
+              return {
+                icon: "❖",
+                title: d.title,
+                body: (
+                  <box paddingLeft={1} gap={1}>
+                    <Show when={d.description}>
+                      <text fg={theme.textMuted}>{d.description}</text>
+                    </Show>
+                    <Show when={d.commandName}>
+                      <text fg={theme.textMuted}>{"Workflow: " + d.commandName}</text>
+                    </Show>
+                    <Show when={d.args.length}>
+                      <box>
+                        <text fg={theme.textMuted}>Arguments</text>
+                        <For each={d.args}>{([key, value]) => <text fg={theme.text}>{`- ${key}=${value}`}</text>}</For>
+                      </box>
+                    </Show>
+                    <Show when={d.background}>
+                      <text fg={theme.textMuted}>Runs in background</text>
+                    </Show>
+                  </box>
+                ),
+              }
+            }
+
             return {
               icon: "⚙",
               title: `Call tool ${permission}`,
@@ -384,6 +416,13 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
 
           const current = info()
 
+          // Nested subagents route their asks to the root session; without this
+          // line the user would see "Permission required" with no idea WHO is
+          // asking. The origin (asking agent + its depth) is attached to the
+          // request metadata in session/tools.ts whenever the ask is routed away
+          // from the asking session, so it is absent for top-level asks.
+          const origin = formatOriginAttribution(props.request.metadata)
+
           const header = () => (
             <box flexDirection="column" gap={0}>
               <box flexDirection="row" gap={1} flexShrink={0}>
@@ -396,6 +435,11 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                 </text>
                 <text fg={theme.text}>{current.title}</text>
               </box>
+              <Show when={origin}>
+                <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
+                  <text fg={theme.textMuted}>{origin}</text>
+                </box>
+              </Show>
             </box>
           )
 
