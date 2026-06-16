@@ -64,12 +64,17 @@ const GlobalUpgradeResult = Schema.Union([
   }),
 ])
 
+const TtsEdgeInput = Schema.Struct({
+  text: Schema.String,
+})
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  ttsEdge: "/tts/edge",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -131,6 +136,17 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.upgrade",
           summary: "Upgrade opencode",
           description: "Upgrade opencode to the specified version or latest if not specified.",
+        }),
+      ),
+      HttpApiEndpoint.post("ttsEdge", GlobalPaths.ttsEdge, {
+        payload: TtsEdgeInput,
+        success: described(Schema.String, "TTS audio"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "tts.edge",
+          summary: "Convert text to speech with Edge TTS",
+          description: "Generate MP3 audio using the server-backed Edge TTS engine.",
         }),
       ),
     )
