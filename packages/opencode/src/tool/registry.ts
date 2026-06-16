@@ -13,7 +13,6 @@ import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { Database } from "@opencode-ai/core/database/database"
 import { TodoWriteTool } from "./todo"
-import { SessionTool } from "./session"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
@@ -96,7 +95,6 @@ export const layer = Layer.effect(
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
-    const session = yield* SessionTool
     const cron = yield* Effect.promise(() => import("./cron")).pipe(Effect.map((mod) => mod.CronTool), Effect.flatten)
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
@@ -211,7 +209,6 @@ export const layer = Layer.effect(
           task: Tool.init(task),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
-          session: Tool.init(session),
           cron: Tool.init(cron),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
@@ -236,7 +233,6 @@ export const layer = Layer.effect(
             tool.task,
             tool.fetch,
             tool.todo,
-            tool.session,
             tool.cron,
             tool.search,
             tool.skill,

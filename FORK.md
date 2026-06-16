@@ -1,9 +1,26 @@
 # Fork-Specific Features (dzianisv/opencode)
 
 This document tracks custom features added to this fork that are **not present upstream**.
-Use this as a checklist after every rebase on `upstream/dev` to verify nothing was lost.
+Use this as a checklist after every rebase on `upstream/production` or `upstream/dev` to verify nothing was lost.
 
 ---
+
+## ✅ Migrated to Plugin (2026-06-16)
+
+Auto-review (Item 14) extracted and published at **github.com/dzianisv/agents-supervisor**.
+Removed from fork source to reduce rebase conflicts.
+
+Session rename tool (Item 9) extracted to `packages/opencode-plugins/src/rename.ts`.
+Loaded via `file:///path/to/packages/opencode-plugins/src/rename.ts` in config.
+Fork source (`tool/session.ts`) deleted; `registry.ts` and `session/system.ts` reverted to upstream.
+
+## ✅ Rebased onto `upstream/production` (2026-06-16)
+
+Rebased 37 fork commits via `git rebase upstream/production` from backup branch `backup/dev-pre-rebase-production-20260616084026`. All features verified with auto-review regression recovered.
+
+Key learnings:
+- Rebase replays commits by author date, not topological order — `fix(app): recover when session URL points to missing session` was replayed AFTER `feat(app): restore auto-review flow integration`, reverting auto-review. Always verify after rebase.
+- `upstream/production` is 6 commits behind `upstream/dev`; `upstream/dev` ahead by commits: `chore: generate`, `chore: update nix node_modules hashes`, `fix(mcp): type tool error content`, `fix(stats): align homepage model ranks`, `fix(mcp): handle tool result errors`.
 
 ## ✅ Recovered after rebase regression (2026-05-11)
 
@@ -125,18 +142,18 @@ After rebasing on `upstream/dev`, verify each feature still works:
 2. Click any session in the recent sidebar → URL is `/<base64dir>/session/<sessionId>`, session content loads
 3. Hover a session → hover preview shows messages; clicking a message navigates to the correct session
 
-### 7. Session Auto-Title and Rename
+### 7. Session Auto-Title and Rename — UPSTREAM ABSORBED
 
-**Files:**
-- `packages/opencode/src/session/prompt.ts` — `ensureTitle()` at line ~170, called on step 1 (first assistant response)
-- `packages/opencode/src/agent/agent.ts` — built-in "title" agent definition (line ~261)
-- `packages/opencode/src/agent/prompt/title.txt` — title generation system prompt
-- `packages/app/src/pages/session/message-timeline.tsx` — `titleMutation`, `openTitleEditor()`, "Rename" dropdown item
+**Status:** Auto-title (`ensureTitle()` + title agent) is now in `upstream/production`. No fork source needed.
+
+**Files (upstream):**
+- `packages/opencode/src/session/prompt.ts` — `ensureTitle()` called on first assistant response
+- `packages/opencode/src/agent/agent.ts` — built-in "title" agent
+- `packages/app/src/pages/session/message-timeline.tsx` — "Rename" dropdown item
 
 **How to verify:**
-1. Send a message in a new session → after first assistant response, session title should auto-update from "New session - ..." to a generated title
-2. Open "More options" dropdown on a session → "Rename" item appears → clicking opens inline title editor
-3. If auto-title fails, check that the configured provider has a working "small" model available
+1. Send a message in a new session → title auto-updates after first response
+2. "More options" → "Rename" → inline editor opens
 
 ### 8. Voice Support (STT + TTS)
 
@@ -152,14 +169,14 @@ After rebasing on `upstream/dev`, verify each feature still works:
 2. Mic input inserts transcript text into prompt
 3. Assistant playback calls `/tts/edge` and falls back to browser speech synthesis if needed
 
-### 9. Session Rename Tool (Agent-Side)
+### 9. Session Rename Tool (Agent-Side) — MIGRATED TO PLUGIN
 
-**Files:**
-- `packages/opencode/src/tool/rename.ts` — `rename` tool implementation
-- `packages/opencode/src/tool/registry.ts` — `rename` tool registration
-- `packages/opencode/src/session/system.ts` — session naming guidance in system prompt
+**Migrated to `packages/opencode-plugins/src/rename.ts` plugin.**
+Loaded via `file:///path/to/packages/opencode-plugins/src/rename.ts` in config.
 
-**How to verify:** In an agent session, tool list includes `rename`, and session titles are updated early in task flow.
+No fork source needed. `tool/session.ts` deleted; `registry.ts` and `session/system.ts` are clean upstream.
+
+**How to verify:** In an agent session, tool list includes `session` (from plugin), and session titles are updated early in task flow.
 
 ### 10. Auto-Resume on Serve
 
@@ -201,19 +218,10 @@ After rebasing on `upstream/dev`, verify each feature still works:
 2. `codesign --verify --verbose=4 ~/.local/bin/opencode` (macOS)
 3. `~/.local/bin/opencode --version`
 
-### 14. Auto-Review (Supervisor + Cross-Review)
+### 14. Auto-Review (Supervisor + Cross-Review) — MIGRATED TO PLUGIN
 
-**Files:**
-- `packages/opencode/src/config/config.ts` — `auto_review` config field (optional `model` in `provider/model` format)
-- `packages/app/src/context/settings.tsx` — `models` section: `autoReview` toggle, `defaultModel`, `reviewModel`
-- `packages/app/src/pages/session.tsx` — orchestration loop: supervisor → summarize → cross-review with retry cap
-- `packages/app/src/pages/session/auto-review.ts` — prompt generation, model picking, done-token detection
-
-**How to verify:**
-1. Enable "Auto Review" in Settings → Models
-2. Send a coding task; after the assistant completes, a supervisor review followup auto-queues
-3. After supervisor review completes and summarization, a cross-review followup queues with a different model
-4. Review stops after "Task completed." token or after 3 retries per phase
+**Migrated to `packages/opencode-plugins/src/reflection.ts` plugin.**
+No longer maintained as fork code. Load via `file:///path/to/packages/opencode-plugins/src/reflection.ts` in config.
 
 ---
 
@@ -237,7 +245,7 @@ After every rebase + deploy, run through this checklist in the browser:
 | 12 | Verify back/forward navigation | Browser back/forward buttons work between sessions |
 | 13 | Toggle speaker control in prompt | Auto-speak setting toggles and current playback stops when disabled |
 | 14 | Trigger voice playback and STT | Mic capture inserts text; `/tts/edge` returns playable audio for assistant speech |
-| 15 | Enable auto-review in Settings → Models | Toggle persists; after assistant completes, supervisor review auto-queues |
+| 15 | Auto-review via reflection plugin | Plugin loads and auto-review triggers on assistant completion |
 
 ---
 
@@ -257,15 +265,13 @@ These files are frequently modified by both upstream and this fork. Pay extra at
 | `dialog-select-model.tsx` | LOW | Recently used models grouping logic |
 | `prompt-input.tsx` | **HIGH** | STT controls, mic permission flow, transcript insertion |
 | `message-timeline.tsx` | **HIGH** | TTS playback, stale-request cancellation, mute behavior |
-| `settings.tsx` | MEDIUM | `voice.autoSpeak` defaulting and persistence; `models` section for auto-review |
-| `session.tsx` | **HIGH** | Auto-review `createEffect`, `ReviewState`, followup store fields (`autoReview`, `review`, `pending`) |
+| `settings.tsx` | MEDIUM | `voice.autoSpeak` defaulting and persistence |
 | `package.json` | **HIGH** | root `install:local` script should delegate to `packages/opencode` |
 | `packages/opencode/package.json` | **HIGH** | keep `build:local` / `sign:local` / `copy:local` / `install:local` scripts |
 | `packages/opencode/script/install-local.ts` | **HIGH** | local binary copy target (`~/.local/bin/opencode`) + macOS codesign verification |
 | `packages/opencode/script/sign-local.ts` | MEDIUM | dist binary ad-hoc signing on macOS before copy |
-| `tool/registry.ts` | **HIGH** | `rename` tool registration in built-in list |
-| `tool/rename.ts` | **HIGH** | `rename` tool id/parameters/Session title update behavior |
-| `session/system.ts` | MEDIUM | session naming guidance so agent actually calls `rename` |
+| `tool/registry.ts` | LOW | `session` tool no longer registered (moved to plugin) |
+| `session/system.ts` | LOW | `# Session Naming` block removed (plugin injects it now) |
 
 ## Remaining Backup-Only Patches (not ported 1:1)
 
@@ -292,8 +298,8 @@ If this changes upstream, update `sidebar-recent.tsx`.
 # 1. Create a backup branch BEFORE rebasing
 git branch backup/dev-$(date +%Y%m%d%H%M%S)
 
-# 2. Rebase
-git rebase upstream/dev
+# 2. Rebase (on upstream/production or upstream/dev)
+git rebase upstream/production
 
 # 3. After resolving conflicts, diff against backup to check for lost features
 git diff HEAD..backup/dev-YYYYMMDDHHMMSS -- packages/app/src/pages/layout/

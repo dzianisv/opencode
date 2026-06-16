@@ -69,10 +69,6 @@ export const layer = Layer.effect(
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
-            ``,
-            `# Session Naming`,
-            `Once you understand the user's task, call the session tool early with a short descriptive title (3-7 words).`,
-            `If the task changes significantly, call session again to update the title.`,
           ].join("\n"),
           references.length === 0
             ? undefined
