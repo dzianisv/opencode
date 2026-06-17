@@ -1487,7 +1487,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
-            yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+            const subtasks = [task, ...tasks.filter((part): part is MessageV2.SubtaskPart => part.type === "subtask")]
+            yield* Effect.forEach(
+              subtasks,
+              (task) => handleSubtask({ task, model, lastUser, sessionID, session, msgs }),
+              { concurrency: 16, discard: true },
+            )
             continue
           }
 
