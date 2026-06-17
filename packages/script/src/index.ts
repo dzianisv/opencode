@@ -57,6 +57,13 @@ const team = [
   ...bot,
 ]
 
+const GIT_DESCRIBE = await $`git describe --tags --always --dirty`
+  .text()
+  .then((x) => x.trim())
+  .catch(() => "")
+
+const REPO = "dzianisv/opencode"
+
 export const Script = {
   get channel() {
     return CHANNEL
@@ -72,6 +79,12 @@ export const Script = {
   },
   get team() {
     return team
+  },
+  get gitDescribe() {
+    return GIT_DESCRIBE
+  },
+  get repo() {
+    return REPO
   },
 }
 console.log(`opencode script`, JSON.stringify(Script, null, 2))
