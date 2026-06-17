@@ -4,6 +4,7 @@ import * as EffectZod from "@/util/effect-zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import * as Log from "@opencode-ai/core/util/log"
+import { Interrupt } from "./interrupt"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
@@ -118,6 +119,7 @@ export const layer = Layer.effect(
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
     const llm = yield* LLM.Service
+    const interrupt = yield* Interrupt.Service
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
       return yield* EffectBridge.make()
     })
@@ -1423,6 +1425,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let structured: unknown
         let step = 0
         let reflection = 0
+        let cancelGrace = -1
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1502,6 +1505,53 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          if (session.parentID && Flag.OPENCODE_EXPERIMENTAL_SUBAGENT_INTERRUPT) {
+            const pending = yield* interrupt.consume(sessionID)
+            if (Option.isSome(pending)) {
+              const msg: MessageV2.User = {
+                id: MessageID.ascending(),
+                sessionID,
+                role: "user",
+                time: { created: Date.now() },
+                agent: lastUser.agent,
+                model: lastUser.model,
+              }
+              yield* sessions.updateMessage(msg)
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID,
+                type: "text",
+                text: Interrupt.renderMarker({
+                  intent: pending.value.intent,
+                  origin: pending.value.origin,
+                  reason: pending.value.reason,
+                }),
+                ignored: true,
+                metadata: { interrupt: { intent: pending.value.intent, origin: pending.value.origin } },
+              } satisfies MessageV2.TextPart)
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: msg.id,
+                sessionID,
+                type: "text",
+                text:
+                  pending.value.intent === "cancel"
+                    ? Interrupt.renderCancel(pending.value.reason)
+                    : Interrupt.renderSteer(pending.value.reason),
+                synthetic: true,
+                metadata: { interrupt: { intent: pending.value.intent, origin: pending.value.origin } },
+              } satisfies MessageV2.TextPart)
+              if (pending.value.intent === "cancel") {
+                cancelGrace = Interrupt.CANCEL_GRACE_TURNS
+                yield* interrupt.recordTerminal({
+                  sessionID,
+                  reason: pending.value.reason || `Cancelled by ${pending.value.origin}`,
+                })
+              }
+              continue
+            }
+          }
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1677,6 +1727,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return "continue" as const
           }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
           if (outcome === "break") break
+          if (cancelGrace >= 0) {
+            cancelGrace -= 1
+            if (cancelGrace === 0) break
+          }
           continue
         }
 
@@ -1864,6 +1918,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Session.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(SessionSummary.defaultLayer),
+    Layer.provide(Interrupt.defaultLayer),
     Layer.provide(
       Layer.mergeAll(
         Agent.defaultLayer,

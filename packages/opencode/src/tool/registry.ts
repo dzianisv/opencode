@@ -8,6 +8,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { TaskAbortTool, TaskCancelTool, TaskSteerTool } from "./task-interrupt"
 import { TodoWriteTool } from "./todo"
 import { SessionTool } from "./session"
 import { WebFetchTool } from "./webfetch"
@@ -44,6 +45,9 @@ import { Format } from "../format"
 import { InstanceState } from "@/effect/instance-state"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
+import { Interrupt } from "../session/interrupt"
+import { SessionRunState } from "../session/run-state"
+import { SessionStatus } from "../session/status"
 import { LSP } from "@/lsp/lsp"
 import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -88,9 +92,13 @@ export const layer: Layer.Layer<
   | Plugin.Service
   | Question.Service
   | Todo.Service
+  | Interrupt.Service
   | Agent.Service
   | Skill.Service
   | Session.Service
+  | SessionRunState.Service
+  | SessionStatus.Service
+  | Permission.Service
   | Provider.Service
   | Git.Service
   | LSP.Service
@@ -113,6 +121,9 @@ export const layer: Layer.Layer<
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
+    const taskAbort = yield* TaskAbortTool
+    const taskCancel = yield* TaskCancelTool
+    const taskSteer = yield* TaskSteerTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
@@ -222,6 +233,9 @@ export const layer: Layer.Layer<
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
+          task_abort: Tool.init(taskAbort),
+          task_cancel: Tool.init(taskCancel),
+          task_steer: Tool.init(taskSteer),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           session: Tool.init(session),
@@ -250,6 +264,9 @@ export const layer: Layer.Layer<
             tool.edit,
             tool.write,
             tool.task,
+            ...(Flag.OPENCODE_EXPERIMENTAL_SUBAGENT_INTERRUPT
+              ? [tool.task_steer, tool.task_cancel, tool.task_abort]
+              : []),
             tool.fetch,
             tool.todo,
             tool.session,
@@ -369,7 +386,11 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Todo.defaultLayer),
     Layer.provide(Skill.defaultLayer),
     Layer.provide(Agent.defaultLayer),
+    Layer.provide(Interrupt.defaultLayer),
     Layer.provide(Session.defaultLayer),
+    Layer.provide(SessionRunState.defaultLayer),
+    Layer.provide(SessionStatus.defaultLayer),
+    Layer.provide(Permission.defaultLayer),
     Layer.provide(Provider.defaultLayer),
     Layer.provide(Git.defaultLayer),
     Layer.provide(LSP.defaultLayer),
@@ -377,6 +398,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(FetchHttpClient.layer),
+  ).pipe(
     Layer.provide(Format.defaultLayer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
