@@ -34,7 +34,7 @@ export const Info = Schema.Struct({
   description: Schema.optional(Schema.String),
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
-  source: Schema.optional(Schema.Literals(["command", "mcp", "skill"])),
+  source: Schema.optional(Schema.Literals(["command", "mcp", "skill", "workflow"])),
   // Some command templates are lazy promises from MCP prompt resolution.
   template: Schema.Unknown.annotate({ [ZodOverride]: z.promise(z.string()).or(z.string()) }),
   subtask: Schema.optional(Schema.Boolean),
@@ -59,6 +59,7 @@ export function hints(template: string) {
 export const Default = {
   INIT: "init",
   REVIEW: "review",
+  WORKFLOW: "workflow",
 } as const
 
 export interface Interface {
@@ -98,6 +99,13 @@ export const layer = Layer.effect(
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
+      }
+      commands[Default.WORKFLOW] = {
+        name: Default.WORKFLOW,
+        description: "run JS workflows from .opencode/workflows",
+        source: "workflow",
+        template: "",
+        hints: ["$ARGUMENTS"],
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {

@@ -31,6 +31,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
+import * as Workflow from "@/workflow"
 import { pathToFileURL, fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
@@ -1726,7 +1727,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     )
 
-    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+    const command: Interface["command"] = (input) =>
+      Effect.gen(function* () {
       yield* elog.info("command", { sessionID: input.sessionID, command: input.command, agent: input.agent })
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
@@ -1735,6 +1737,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
         yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
+      }
+      if (cmd.source === "workflow") {
+        return yield* Workflow.executeCommand({
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          arguments: input.arguments,
+          agent: input.agent,
+          model: input.model,
+          variant: input.variant,
+        }).pipe(
+          Effect.provideService(Session.Service, sessions),
+          Effect.provideService(Agent.Service, agents),
+          Effect.provideService(Provider.Service, provider),
+          Effect.provideService(Config.Service, config),
+          Effect.provideService(Plugin.Service, plugin),
+          Effect.provideService(ToolRegistry.Service, registry),
+        )
       }
       const agentName = cmd.agent ?? input.agent ?? (yield* agents.defaultAgent())
 
