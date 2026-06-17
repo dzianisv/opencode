@@ -56,7 +56,7 @@ Source refs:
 Recovered fixes:
 - Restored `AsyncQueue` lifecycle hardening in `packages/opencode/src/util/queue.ts` (`close()`, `drain()`, `isClosed`, and closed-state consumer release).
 - Switched OAuth browser-open subprocess listeners to one-shot handlers in `packages/opencode/src/mcp/index.ts` (`once("error")`, `once("exit")`) to prevent listener accumulation.
-- Added explicit typed pubsub map cleanup in `packages/opencode/src/bus/index.ts` finalizer (`typed.clear()` after shutdown).
+- ~~Added explicit typed pubsub map cleanup in `packages/opencode/src/bus/index.ts` finalizer (`typed.clear()` after shutdown).~~ **⚠️ NOT PORTED** — `bus/index.ts` no longer exists; the bus is now `bus/global.ts` (a plain `EventEmitter` subclass with no finalizer or cleanup logic). `typed.clear()` does not appear anywhere in the codebase.
 
 ## ✅ Recovered local install flow regression (2026-05-11)
 
@@ -187,17 +187,23 @@ No fork source needed. `tool/session.ts` deleted; `registry.ts` and `session/sys
 
 ### 11. Multi-Instance Serve
 
-**Files:**
-- `packages/opencode/src/cli/cmd/serve.ts` — `OPENCODE_INSTANCE_MAX` env var support
+> **⚠️ NOT PORTED — `OPENCODE_INSTANCE_MAX` is not read by any code.**
+> `serve.ts` has no env var handling for instance limits. The systemd override
+> sets `OPENCODE_INSTANCE_MAX=16` but nothing in `packages/opencode/src/` or
+> `packages/core/src/` reads it. This feature was either never implemented or
+> lost in a rebase. The env var in the service config is a no-op.
 
-**How to verify:** Env var `OPENCODE_INSTANCE_MAX=16` is respected in systemd service config.
+**Files:**
+- `packages/opencode/src/cli/cmd/serve.ts` — ~~`OPENCODE_INSTANCE_MAX` env var support~~ no instance-max logic present
+
+**How to verify:** N/A — feature does not exist in code. Env var is inert.
 
 ### 12. Memory Leak Hardening (Queue + MCP + Bus)
 
 **Files:**
 - `packages/opencode/src/util/queue.ts` — `AsyncQueue.close()`, `drain()`, `isClosed`, and safe closed-state async iteration behavior
 - `packages/opencode/src/mcp/index.ts` — one-shot subprocess listeners for OAuth browser open flow
-- `packages/opencode/src/bus/index.ts` — finalizer clears typed pubsub map after shutdown
+- ~~`packages/opencode/src/bus/index.ts` — finalizer clears typed pubsub map after shutdown~~ **⚠️ NOT PORTED** — file is now `bus/global.ts`, no finalizer present
 
 **How to verify:**
 1. `cd packages/opencode && bun typecheck`

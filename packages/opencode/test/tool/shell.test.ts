@@ -1166,9 +1166,9 @@ describe("tool.shell abort", () => {
         expect(result.output).toContain("first")
         expect(result.output).toContain("second")
         expect(updates.length).toBeGreaterThan(1)
-      },
-    })
-  })
+      }),
+    ),
+  )
 
   test("emits metadata heartbeat while command is quiet", async () => {
     await WithInstance.provide({

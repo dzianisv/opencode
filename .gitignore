@@ -28,6 +28,10 @@ target
 
 # Local dev files
 opencode-dev
+sessions.txt
+status.md
+handoff.md
+.tasks/
 UPCOMING_CHANGELOG.md
 logs/
 *.bun-build

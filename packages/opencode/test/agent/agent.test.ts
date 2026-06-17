@@ -774,14 +774,6 @@ it.instance(
       },
     },
   })
-  await WithInstance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const agent = await load(tmp.path, (svc) => svc.defaultAgent())
-      expect(agent).toBe("plan")
-    },
-  })
-})
 
 it.instance(
   "defaultAgent throws when all primary agents are disabled",

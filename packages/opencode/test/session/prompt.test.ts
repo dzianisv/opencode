@@ -518,7 +518,6 @@ it.live("loop calls LLM and returns assistant message", () =>
     { git: true, config: providerCfg },
   ),
 )
-)
 
 it.instance("loop surfaces content-filter finishes as session errors", () =>
   Effect.gen(function* () {

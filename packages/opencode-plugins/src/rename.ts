@@ -35,14 +35,14 @@ export const server: Plugin = async ({ client }) => {
           ),
         },
         execute: async (args, ctx) => {
-          const { data: session } = await client.session.get({ sessionID: ctx.sessionID })
+          const { data: session } = await client.session.get({ path: { id: ctx.sessionID } })
           if (!args.title) return `Current session title: "${session?.title}"`
 
           // Skip if user already set a custom title (not a default generated one)
           const isDefault = !session?.title || /^New session/.test(session.title) || /^\d{4}-\d{2}-\d{2}/.test(session.title)
           if (!isDefault) return `Session already has a custom title: "${session?.title}". Rename skipped.`
 
-          await client.session.update({ sessionID: ctx.sessionID, title: args.title })
+          await client.session.update({ path: { id: ctx.sessionID }, body: { title: args.title } })
           return `Session renamed to: "${args.title}"`
         },
       }),
