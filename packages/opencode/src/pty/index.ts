@@ -194,6 +194,12 @@ export const layer = Layer.effect(
         TERM: "xterm-256color",
         OPENCODE_TERMINAL: "1",
       } as Record<string, string>
+      // Strip server credentials so embedded terminals don't inherit them.
+      // The desktop sidecar sets these in its own process.env; without stripping
+      // them, any `opencode serve` run from an embedded terminal silently
+      // requires the sidecar's auto-generated password.
+      delete env.OPENCODE_SERVER_PASSWORD
+      delete env.OPENCODE_SERVER_USERNAME
 
       if (process.platform === "win32") {
         env.LC_ALL = "C.UTF-8"
