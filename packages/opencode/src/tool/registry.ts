@@ -52,6 +52,7 @@ import { Agent } from "../agent/agent"
 import { Git } from "@/git"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { InstanceLayer } from "@/project/instance-layer"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -381,6 +382,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
     Layer.provide(Truncate.defaultLayer),
+    Layer.provide(InstanceLayer.layer),
   ),
 )
 
