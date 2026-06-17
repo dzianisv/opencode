@@ -1,0 +1,143 @@
+name: fork publish
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - packages/opencode/package.json
+  workflow_dispatch:
+
+concurrency:
+  group: fork-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'dzianisv/opencode'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read package version
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "name=@vibetechnologies/opencode" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p \"require('./packages/opencode/package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Check npm registry
+        id: registry
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} already published. Skip publish."
+            exit 0
+          fi
+          echo "published=false" >> "$GITHUB_OUTPUT"
+          echo "${PACKAGE_NAME}@${PACKAGE_VERSION} not on npm. Continue."
+
+      - name: Setup Bun
+        if: steps.registry.outputs.published != 'true'
+        uses: ./.github/actions/setup-bun
+
+      - name: Build Linux CLI binary
+        if: steps.registry.outputs.published != 'true'
+        working-directory: packages/opencode
+        env:
+          OPENCODE_CHANNEL: local
+        run: bun run build --single
+
+      - name: Prepare publish package
+        if: steps.registry.outputs.published != 'true'
+        working-directory: packages/opencode
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf .publish
+          mkdir -p .publish/bin
+          cp dist/opencode-linux-x64/bin/opencode .publish/bin/opencode
+          chmod 755 .publish/bin/opencode
+          cp README.md .publish/README.md
+          cp ../../LICENSE .publish/LICENSE
+          node <<'NODE'
+          const fs = require('fs')
+          const source = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+          const pkg = {
+            name: process.env.PACKAGE_NAME,
+            version: process.env.PACKAGE_VERSION,
+            description: source.description ?? 'AI-powered development tool',
+            license: source.license ?? 'MIT',
+            type: 'module',
+            bin: {
+              opencode: './bin/opencode',
+            },
+            os: ['linux'],
+            cpu: ['x64'],
+            files: ['bin', 'README.md', 'LICENSE'],
+            repository: {
+              type: 'git',
+              url: 'git+https://github.com/dzianisv/opencode.git',
+            },
+            homepage: 'https://github.com/dzianisv/opencode#readme',
+            bugs: {
+              url: 'https://github.com/dzianisv/opencode/issues',
+
+            },
+          }
+          fs.writeFileSync('.publish/package.json', JSON.stringify(pkg, null, 2) + '\n')
+          NODE
+
+      - name: Preview npm tarball
+        if: steps.registry.outputs.published != 'true'
+        working-directory: packages/opencode/.publish
+        run: npm pack --dry-run
+
+      - name: Publish package
+        if: steps.registry.outputs.published != 'true'
+        id: publish
+        working-directory: packages/opencode/.publish
+        run: npm publish --provenance --access public
+
+      - name: Create git tag
+        if: steps.registry.outputs.published == 'true' || steps.publish.outcome == 'success'
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${PACKAGE_VERSION}"
+          git fetch --tags origin
+          if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "${tag} already exists."
+            exit 0
+          fi
+          git tag "${tag}"
+          git push origin "${tag}"
