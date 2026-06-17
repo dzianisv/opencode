@@ -25,6 +25,7 @@ import { Format } from "@/format"
 import { Ripgrep } from "@/file/ripgrep"
 import * as Truncate from "@/tool/truncate"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceLayer } from "@/project/instance-layer"
 
 const node = CrossSpawnSpawner.defaultLayer
 const originalExperimentalScout = Flag.OPENCODE_EXPERIMENTAL_SCOUT
@@ -47,6 +48,7 @@ const registryLayer = ToolRegistry.layer.pipe(
   Layer.provide(AppFileSystem.defaultLayer),
   Layer.provide(Bus.layer),
   Layer.provide(FetchHttpClient.layer),
+  Layer.provide(InstanceLayer.layer),
   Layer.provide(Format.defaultLayer),
   Layer.provide(node),
   Layer.provide(Ripgrep.defaultLayer),

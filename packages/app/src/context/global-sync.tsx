@@ -66,6 +66,43 @@ export const loadLspQuery = (directory: string, sdk: OpencodeClient) =>
     queryFn: () => sdk.lsp.status().then((r) => r.data ?? []),
   })
 
+function eventRoutingIdentity(event: { type: string; properties?: unknown }): {
+  sessionID?: string
+  messageID?: string
+} {
+  const props = (event.properties ?? {}) as {
+    info?: { id?: string; sessionID?: string }
+    part?: { sessionID?: string; messageID?: string }
+    sessionID?: string
+    messageID?: string
+  }
+  switch (event.type) {
+    case "session.created":
+    case "session.updated":
+    case "session.deleted":
+      return { sessionID: props.sessionID ?? props.info?.id }
+    case "message.updated":
+      return { sessionID: props.sessionID ?? props.info?.sessionID, messageID: props.info?.id }
+    case "message.part.updated":
+      return { sessionID: props.sessionID ?? props.part?.sessionID, messageID: props.part?.messageID }
+    case "message.removed":
+      return { sessionID: props.sessionID, messageID: props.messageID }
+    case "message.part.removed":
+    case "message.part.delta":
+      return { messageID: props.messageID }
+    case "todo.updated":
+    case "session.status":
+    case "permission.asked":
+    case "permission.replied":
+    case "question.asked":
+    case "question.replied":
+    case "question.rejected":
+      return { sessionID: props.sessionID }
+    default:
+      return {}
+  }
+}
+
 function createGlobalSync() {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
@@ -356,21 +393,49 @@ function createGlobalSync() {
     }
 
     const existing = children.children[key]
-    if (!existing) return
-    children.mark(key)
-    const [store, setStore] = existing
-    applyDirectoryEvent({
-      event,
-      directory,
-      store,
-      setStore,
-      push: queue.push,
-      setSessionTodo,
-      vcsCache: children.vcsCache.get(key),
-      loadLsp: () => {
-        void queryClient.fetchQuery(loadLspQuery(key, sdkFor(directory)))
-      },
-    })
+    if (existing) {
+      children.mark(key)
+      const [store, setStore] = existing
+      applyDirectoryEvent({
+        event,
+        directory,
+        store,
+        setStore,
+        push: queue.push,
+        setSessionTodo,
+        vcsCache: children.vcsCache.get(key),
+        loadLsp: () => {
+          void queryClient.fetchQuery(loadLspQuery(key, sdkFor(directory)))
+        },
+      })
+      return
+    }
+
+    const identity = eventRoutingIdentity(event)
+    if (identity.sessionID === undefined && identity.messageID === undefined) return
+    for (const targetKey of Object.keys(children.children)) {
+      const target = children.children[targetKey]
+      if (!target) continue
+      const [store, setStore] = target
+      const hasSession =
+        identity.sessionID !== undefined &&
+        (store.message[identity.sessionID] !== undefined || store.session.some((item) => item.id === identity.sessionID))
+      const hasMessage = identity.messageID !== undefined && store.part[identity.messageID] !== undefined
+      if (!hasSession && !hasMessage) continue
+      children.mark(targetKey)
+      applyDirectoryEvent({
+        event,
+        directory: targetKey,
+        store,
+        setStore,
+        push: queue.push,
+        setSessionTodo,
+        vcsCache: children.vcsCache.get(targetKey),
+        loadLsp: () => {
+          void queryClient.fetchQuery(loadLspQuery(targetKey, sdkFor(targetKey)))
+        },
+      })
+    }
   })
 
   onCleanup(unsub)
