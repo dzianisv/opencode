@@ -98,7 +98,13 @@ const load = Effect.fn("Workflow.load")(function* () {
   const config = yield* Config.Service
   const plugin = yield* Plugin.Service
   const ctx = yield* InstanceState.context
-  const directories = [...new Set([path.join(ctx.worktree, ".opencode"), ...(yield* config.directories())])]
+  const configDirs = yield* config.directories()
+  // Always include ctx.directory/.opencode directly — config.directories() may be
+  // cached from before the project .opencode dir existed (e.g. in tests or when
+  // the dir is created after first config access).
+  const directories = [
+    ...new Set([path.join(ctx.directory, ".opencode"), path.join(ctx.worktree, ".opencode"), ...configDirs]),
+  ]
   const seen = new Set<string>()
   const result: LoadedWorkflow[] = []
 
