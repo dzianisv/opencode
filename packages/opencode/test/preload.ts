@@ -6,40 +6,12 @@ import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
-// Best-effort sweep of stale per-test tmpdirs (`opencode-test-*`) left behind by
-// PRIOR runs whose process was killed mid-test (timeout/crash/CI cancel) before
-// the scoped fixture finalizers could rm them. The in-run teardown
-// (tmpdirScoped's Effect.addFinalizer / tmpdir's Symbol.asyncDispose) fires
-// correctly on a normal scope close, but a SIGKILL skips every JS finalizer, so
-// orphans accumulate across runs. This is purely defensive: it is AGE-GATED
-// (older than 1h) so it can never race a live sibling test process's just-created
-// dir, and it swallows every error. Failure here must not affect tests.
-const STALE_MS = 60 * 60 * 1000
-try {
-  const root = os.tmpdir()
-  const now = Date.now()
-  const entries = await fs.readdir(root).catch(() => [] as string[])
-  await Promise.all(
-    entries
-      .filter((name) => name.startsWith("opencode-test-"))
-      .map(async (name) => {
-        const full = path.join(root, name)
-        const stat = await fs.stat(full).catch(() => undefined)
-        if (!stat || now - stat.mtimeMs < STALE_MS) return
-        await fs.rm(full, { recursive: true, force: true }).catch(() => undefined)
-      }),
-  )
-} catch {
-  // never fail preload on cleanup
-}
-
 // Set XDG env vars FIRST, before any src/ imports
 const dir = path.join(os.tmpdir(), "opencode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
 afterAll(async () => {
-  const { AppRuntime } = await import("../src/effect/app-runtime")
-  await AppRuntime.dispose()
-
+  const { Database } = await import("../src/storage/db")
+  Database.close()
   const busy = (error: unknown) =>
     typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY"
   const rm = async (left: number): Promise<void> => {
@@ -47,8 +19,7 @@ afterAll(async () => {
     await sleep(100)
     return fs.rm(dir, { recursive: true, force: true }).catch((error) => {
       if (!busy(error)) throw error
-      if (left <= 1 && process.platform !== "win32") throw error
-      if (left <= 1) return
+      if (left <= 1) throw error
       return rm(left - 1)
     })
   }
@@ -64,7 +35,6 @@ process.env["XDG_CONFIG_HOME"] = path.join(dir, "config")
 process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 process.env["OPENCODE_MODELS_PATH"] = path.join(import.meta.dir, "tool", "fixtures", "models-api.json")
 process.env["OPENCODE_EXPERIMENTAL_EVENT_SYSTEM"] = "true"
-process.env["OPENCODE_EXPERIMENTAL_WORKSPACES"] = "true"
 
 // Set test home directory to isolate tests from user's actual home directory
 // This prevents tests from picking up real user configs/skills from ~/.claude/skills
@@ -75,6 +45,7 @@ process.env["OPENCODE_TEST_HOME"] = testHome
 // Set test managed config directory to isolate tests from system managed settings
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["OPENCODE_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
+process.env["OPENCODE_DISABLE_DEFAULT_PLUGINS"] = "true"
 
 // Write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "opencode")
@@ -104,16 +75,18 @@ delete process.env["CEREBRAS_API_KEY"]
 delete process.env["SAMBANOVA_API_KEY"]
 delete process.env["OPENCODE_SERVER_PASSWORD"]
 delete process.env["OPENCODE_SERVER_USERNAME"]
-delete process.env["OPENCODE_EXPERIMENTAL"]
-delete process.env["OPENCODE_ENABLE_EXPERIMENTAL_MODELS"]
-delete process.env["OTEL_EXPORTER_OTLP_ENDPOINT"]
-delete process.env["OTEL_EXPORTER_OTLP_HEADERS"]
-delete process.env["OTEL_RESOURCE_ATTRIBUTES"]
 
 // Use in-memory sqlite
 process.env["OPENCODE_DB"] = ":memory:"
 
 // Now safe to import from src/
+const { Log } = await import("@opencode-ai/core/util/log")
 const { initProjectors } = await import("../src/server/projectors")
+
+void Log.init({
+  print: false,
+  dev: true,
+  level: "DEBUG",
+})
 
 initProjectors()

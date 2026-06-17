@@ -264,98 +264,6 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
-function makeScanner(spawner: ChildProcessSpawner["Service"], fs: typeof AppFileSystem) {
-  const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
-    const lines = yield* spawner
-      .lines(ChildProcess.make(shell, ["-lc", 'cygpath -w -- "$1"', "_", text]))
-      .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-    const file = lines[0]?.trim()
-    if (!file) return
-    return AppFileSystem.normalizePath(file)
-  })
-
-  const resolvePath = Effect.fn("ShellTool.resolvePath")(function* (text: string, root: string, shell: string) {
-    if (process.platform === "win32") {
-      if (Shell.posix(shell) && text.startsWith("/") && AppFileSystem.windowsPath(text) === text) {
-        const file = yield* cygpath(shell, text)
-        if (file) return file
-      }
-      return AppFileSystem.normalizePath(path.resolve(root, AppFileSystem.windowsPath(text)))
-    }
-    return path.resolve(root, text)
-  })
-
-  const argPath = Effect.fn("ShellTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
-    const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
-    const file = text && prefix(text)
-    if (!file || dynamic(file, ps)) return
-    const next = ps ? provider(file) : file
-    if (!next) return
-    return yield* resolvePath(next, cwd, shell)
-  })
-
-  const collect = Effect.fn("ShellTool.collect")(function* (
-    root: Node,
-    cwd: string,
-    ps: boolean,
-    shell: string,
-    instance: InstanceContext,
-  ) {
-    const scan: Scan = {
-      dirs: new Set<string>(),
-      patterns: new Set<string>(),
-      always: new Set<string>(),
-    }
-    const shellKind = ShellID.toKind(Shell.name(shell))
-
-    for (const node of commands(root)) {
-      const command = parts(node)
-      const tokens = command.map((item) => item.text)
-      const cmd = ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0]
-
-      if (cmd && (FILES.has(cmd) || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
-        for (const arg of pathArgs(command, ps, shellKind === "cmd")) {
-          const resolved = yield* argPath(arg, cwd, ps, shell)
-          log.info("resolved path", { arg, resolved })
-          if (!resolved || containsPath(resolved, instance)) continue
-          const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
-          scan.dirs.add(dir)
-        }
-      }
-
-      if (tokens.length && (!cmd || !CWD.has(cmd))) {
-        scan.patterns.add(source(node))
-        scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
-      }
-    }
-
-    return scan
-  })
-
-  return { resolvePath, collect }
-}
-
-export const scanCommand = Effect.fn("ShellTool.scanCommand")(function* (
-  command: string,
-  cwd: string,
-  instance: InstanceContext,
-  shellOverride?: string,
-) {
-  const spawner = yield* ChildProcessSpawner
-  const config = yield* Config.Service
-  const shell = shellOverride ?? Shell.acceptable((yield* config.get()).shell)
-  const scanner = makeScanner(spawner, AppFileSystem)
-  const ps = Shell.ps(shell)
-  return yield* Effect.scoped(
-    Effect.gen(function* () {
-      const tree = yield* Effect.acquireRelease(parse(command, ps), (tree) => Effect.sync(() => tree.delete()))
-      const scan = yield* scanner.collect(tree.rootNode, cwd, ps, shell, instance)
-      if (!containsPath(cwd, instance)) scan.dirs.add(cwd)
-      return scan
-    }),
-  )
-})
-
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan) {
   if (scan.dirs.size > 0) {
     const globs = Array.from(scan.dirs).map((dir) => {
@@ -433,7 +341,72 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
 
-    const { resolvePath, collect } = makeScanner(spawner, fs)
+    const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
+      const lines = yield* spawner
+        .lines(ChildProcess.make(shell, ["-lc", 'cygpath -w -- "$1"', "_", text]))
+        .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+      const file = lines[0]?.trim()
+      if (!file) return
+      return AppFileSystem.normalizePath(file)
+    })
+
+    const resolvePath = Effect.fn("ShellTool.resolvePath")(function* (text: string, root: string, shell: string) {
+      if (process.platform === "win32") {
+        if (Shell.posix(shell) && text.startsWith("/") && AppFileSystem.windowsPath(text) === text) {
+          const file = yield* cygpath(shell, text)
+          if (file) return file
+        }
+        return AppFileSystem.normalizePath(path.resolve(root, AppFileSystem.windowsPath(text)))
+      }
+      return path.resolve(root, text)
+    })
+
+    const argPath = Effect.fn("ShellTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
+      const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
+      const file = text && prefix(text)
+      if (!file || dynamic(file, ps)) return
+      const next = ps ? provider(file) : file
+      if (!next) return
+      return yield* resolvePath(next, cwd, shell)
+    })
+
+    const collect = Effect.fn("ShellTool.collect")(function* (
+      root: Node,
+      cwd: string,
+      ps: boolean,
+      shell: string,
+      instance: InstanceContext,
+    ) {
+      const scan: Scan = {
+        dirs: new Set<string>(),
+        patterns: new Set<string>(),
+        always: new Set<string>(),
+      }
+      const shellKind = ShellID.toKind(Shell.name(shell))
+
+      for (const node of commands(root)) {
+        const command = parts(node)
+        const tokens = command.map((item) => item.text)
+        const cmd = ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0]
+
+        if (cmd && (FILES.has(cmd) || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
+          for (const arg of pathArgs(command, ps, shellKind === "cmd")) {
+            const resolved = yield* argPath(arg, cwd, ps, shell)
+            log.info("resolved path", { arg, resolved })
+            if (!resolved || containsPath(resolved, instance)) continue
+            const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
+            scan.dirs.add(dir)
+          }
+        }
+
+        if (tokens.length && (!cmd || !CWD.has(cmd))) {
+          scan.patterns.add(source(node))
+          scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+        }
+      }
+
+      return scan
+    })
 
     const shellEnv = Effect.fn("ShellTool.shellEnv")(function* (ctx: Tool.Context, cwd: string) {
       const extra = yield* plugin.trigger(
