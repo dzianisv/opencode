@@ -5,6 +5,32 @@ Use this as a checklist after every rebase on `upstream/dev` to verify nothing w
 
 ---
 
+## ✅ Post-Rebase Stabilization Complete (2026-06-17)
+
+Branch `origin/dev` is stable after full rebase onto `upstream/production` (2026-06-16).
+
+**Verified green:**
+- `bun turbo typecheck` — 23/23 packages, 0 errors (note: run `bun install` after every branch switch or rebase)
+- Smoke test: `opencode run "create a simple helloworld.py app"` → `Hello, World!` ✅
+- Binary: `opencode 0.0.0-local-202606171546` built via `bun run install:local`
+
+**CI gate added:** `.github/workflows/smoke-test.yml` — runs on every PR to `dev`.
+Builds binary with `--skip-embed-web-ui`, runs smoke test, verifies `Hello` in output.
+
+**Branches cleaned up (deleted):**
+- `backup/dev-*` (3 pre-rebase backups — no longer needed)
+- `copilot/fix-http-copy-buttons-206`, `copilot/session-plugin-toggle-202`
+- `fix/recent-models-and-labels` (merged to dev)
+- `fix-post-rebase-build-errors` (PR #228 closed; `origin/dev` already passes clean)
+- `pr-29789`, `pr-32167`, `rebase/upstream-sync`
+
+**Remaining active branches (keep — unmerged work):**
+- `feat/autopilot-mode`, `feat/cron-heartbeat-scheduler`, `feat/workflows-consolidated`
+- `fix/computediff-and-serve-smoke`, `fix/issue-200-auto-review`, `fix/vcs-diff-sdk-missing`
+- `pty-strip-server-creds`
+
+---
+
 ## ✅ Recovered after rebase regression (2026-05-11)
 
 Source refs:
