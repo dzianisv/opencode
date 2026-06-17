@@ -231,6 +231,8 @@ import type {
   ToolIdsResponses,
   ToolListErrors,
   ToolListResponses,
+  TtsEdgeErrors,
+  TtsEdgeResponses,
   TuiAppendPromptErrors,
   TuiAppendPromptResponses,
   TuiClearPromptErrors,
@@ -1308,6 +1310,32 @@ export class Global extends HeyApiClient {
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+}
+
+export class Tts extends HeyApiClient {
+  /**
+   * Convert text to speech with Edge TTS
+   *
+   * Generate MP3 audio using the server-backed Edge TTS engine.
+   */
+  public edge<ThrowOnError extends boolean = false>(
+    parameters?: {
+      text?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "text" }] }])
+    return (options?.client ?? this.client).post<TtsEdgeResponses, TtsEdgeErrors, ThrowOnError>({
+      url: "/tts/edge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 
@@ -6674,6 +6702,11 @@ export class OpencodeClient extends HeyApiClient {
   private _global?: Global
   get global(): Global {
     return (this._global ??= new Global({ client: this.client }))
+  }
+
+  private _tts?: Tts
+  get tts(): Tts {
+    return (this._tts ??= new Tts({ client: this.client }))
   }
 
   private _event?: Event

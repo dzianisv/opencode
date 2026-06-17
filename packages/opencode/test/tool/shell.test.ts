@@ -1170,14 +1170,14 @@ describe("tool.shell abort", () => {
     ),
   )
 
-  test("emits metadata heartbeat while command is quiet", async () => {
-    await WithInstance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await initBash()
-        const ticks: number[] = []
-        await Effect.runPromise(
-          bash.execute(
+  it.live(
+    "emits metadata heartbeat while command is quiet",
+    () =>
+      runIn(
+        projectRoot,
+        Effect.gen(function* () {
+          const ticks: number[] = []
+          yield* run(
             {
               command: wait(11_500),
               description: "Heartbeat test",
@@ -1191,13 +1191,13 @@ describe("tool.shell abort", () => {
                   ticks.push(Date.now())
                 }),
             },
-          ),
-        )
-        expect(ticks.length).toBeGreaterThanOrEqual(2)
-        expect(ticks[ticks.length - 1]! - ticks[0]!).toBeGreaterThanOrEqual(9_000)
-      },
-    })
-  }, 30_000)
+          )
+          expect(ticks.length).toBeGreaterThanOrEqual(2)
+          expect(ticks[ticks.length - 1]! - ticks[0]!).toBeGreaterThanOrEqual(9_000)
+        }),
+      ),
+    30_000,
+  )
 })
 
 describe("tool.shell truncation", () => {

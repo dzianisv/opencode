@@ -742,7 +742,7 @@ export function fromError(
   }
 }
 
-export { AbortedError, Assistant, User, WithParts }
-export type { TextPart }
+export { AbortedError, Assistant, User, WithParts, Info }
+export type { TextPart, ToolPart, Part }
 
 export * as MessageV2 from "./message-v2"

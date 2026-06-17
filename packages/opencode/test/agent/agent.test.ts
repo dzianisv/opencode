@@ -49,60 +49,46 @@ afterEach(async () => {
   await disposeAllInstances()
 })
 
-test("returns default native agents when no config", async () => {
-  await withExperimentalScout(false, async () => {
-    await using tmp = await tmpdir()
-    await WithInstance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const agents = await load(tmp.path, (svc) => svc.list())
-        const names = agents.map((a) => a.name)
-        expect(names).toContain("build")
-        expect(names).toContain("autopilot")
-        expect(names).toContain("plan")
-        expect(names).toContain("general")
-        expect(names).toContain("explore")
-        expect(names).not.toContain("scout")
-        expect(names).toContain("compaction")
-        expect(names).toContain("title")
-        expect(names).toContain("summary")
-      },
-    })
-  })
-})
+it.instance("returns default native agents when no config", () =>
+  Effect.gen(function* () {
+    const agents = yield* load((svc) => svc.list())
+    const names = agents.map((a) => a.name)
+    expect(names).toContain("build")
+    expect(names).toContain("autopilot")
+    expect(names).toContain("plan")
+    expect(names).toContain("general")
+    expect(names).toContain("explore")
+    expect(names).not.toContain("scout")
+    expect(names).toContain("compaction")
+    expect(names).toContain("title")
+    expect(names).toContain("summary")
+  }),
+)
 
-test("build agent has correct default properties", async () => {
-  await using tmp = await tmpdir()
-  await WithInstance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const build = await load(tmp.path, (svc) => svc.get("build"))
-      expect(build).toBeDefined()
-      expect(build?.mode).toBe("primary")
-      expect(build?.native).toBe(true)
-      expect(evalPerm(build, "edit")).toBe("allow")
-      expect(evalPerm(build, "bash")).toBe("allow")
-      expect(evalPerm(build, "repo_clone")).toBe("deny")
-      expect(evalPerm(build, "repo_overview")).toBe("deny")
-      expect(evalPerm(build, "autopilot_exit")).toBe("deny")
-    },
-  })
-})
+it.instance("build agent has correct default properties", () =>
+  Effect.gen(function* () {
+    const build = yield* load((svc) => svc.get("build"))
+    expect(build).toBeDefined()
+    expect(build?.mode).toBe("primary")
+    expect(build?.native).toBe(true)
+    expect(evalPerm(build, "edit")).toBe("allow")
+    expect(evalPerm(build, "bash")).toBe("allow")
+    expect(evalPerm(build, "repo_clone")).toBe("deny")
+    expect(evalPerm(build, "repo_overview")).toBe("deny")
+    expect(evalPerm(build, "autopilot_exit")).toBe("deny")
+  }),
+)
 
-test("autopilot agent allows autopilot_exit", async () => {
-  await using tmp = await tmpdir()
-  await WithInstance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const autopilot = await load(tmp.path, (svc) => svc.get("autopilot"))
-      expect(autopilot).toBeDefined()
-      expect(autopilot?.mode).toBe("primary")
-      expect(autopilot?.native).toBe(true)
-      expect(evalPerm(autopilot, "edit")).toBe("allow")
-      expect(evalPerm(autopilot, "autopilot_exit")).toBe("allow")
-    },
-  })
-})
+it.instance("autopilot agent allows autopilot_exit", () =>
+  Effect.gen(function* () {
+    const autopilot = yield* load((svc) => svc.get("autopilot"))
+    expect(autopilot).toBeDefined()
+    expect(autopilot?.mode).toBe("primary")
+    expect(autopilot?.native).toBe(true)
+    expect(evalPerm(autopilot, "edit")).toBe("allow")
+    expect(evalPerm(autopilot, "autopilot_exit")).toBe("allow")
+  }),
+)
 
 it.instance("plan agent denies edits except .opencode/plans/*", () =>
   Effect.gen(function* () {
