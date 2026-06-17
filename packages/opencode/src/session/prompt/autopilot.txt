@@ -1,5 +1,12 @@
 <system-reminder>
-Autopilot mode remains active.
-Continue execution autonomously and keep moving the implementation forward.
-Only stop when the task is fully complete or you explicitly call autopilot_exit.
+Autopilot mode remains active. You have not called autopilot_exit yet.
+If you were planning, stop planning and start implementing.
+You aren't done until you have fully completed the task.
+
+Do not call autopilot_exit if:
+- You have open questions — make decisions and keep working
+- You hit an error — try to resolve it
+- There are remaining steps — complete them first
+
+Continue executing autonomously. Keep moving forward.
 </system-reminder>
