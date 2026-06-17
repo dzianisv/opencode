@@ -10,15 +10,13 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin/tool"
 
-export const id = "rename"
-
 const SESSION_NAMING_GUIDANCE = [
   "# Session Naming",
   "Once you understand the user's task, call the `session` tool early with a short descriptive title (3-7 words).",
   "If the task changes significantly, call `session` again to update the title.",
 ].join("\n")
 
-export const server: Plugin = async ({ client }) => {
+const server: Plugin = async ({ client }) => {
   return {
     tool: {
       session: tool({
@@ -53,3 +51,5 @@ export const server: Plugin = async ({ client }) => {
     },
   }
 }
+
+export default { id: "rename", server }

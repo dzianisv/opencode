@@ -32,9 +32,15 @@ import { ConfigManaged } from "./managed"
 import { ConfigParse } from "./parse"
 import { ConfigPaths } from "./paths"
 import { ConfigPlugin } from "./plugin"
+import { ConfigProxy } from "./proxy"
 import { ConfigVariable } from "./variable"
+import * as ConfigLayout from "@opencode-ai/core/v1/config/layout"
+import * as ConfigServer from "@opencode-ai/core/v1/config/server"
+import * as ConfigSkills from "@opencode-ai/core/v1/config/skills"
+import * as ConfigReference from "@opencode-ai/core/config/reference"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import type { DeepMutable } from "@opencode-ai/core/schema"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -126,8 +132,8 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }
   return config
 }
 
-export const Server = ConfigServer.Server.zod
-export const Layout = ConfigLayout.Layout.zod
+export const Server = ConfigServer.Server
+export const Layout = ConfigLayout.Layout
 export type Layout = ConfigLayout.Layout
 
 const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate({
@@ -135,14 +141,6 @@ const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate
   description: "Log level",
 })
 
-// The Effect Schema is the canonical source of truth. The `.zod` compatibility
-// surface is derived so existing Hono validators keep working without a parallel
-// Zod definition.
-//
-// The walker emits `z.object({...})` which is non-strict by default. Config
-// historically uses `.strict()` (additionalProperties: false in openapi.json),
-// so layer that on after derivation.  Re-apply the Config ref afterward
-// since `.strict()` strips the walker's meta annotation.
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String).annotate({
     description: "JSON schema reference for configuration validation",
@@ -219,13 +217,6 @@ export const Info = Schema.Struct({
   ),
 })
   .annotate({ identifier: "Config" })
-  .pipe(
-    withStatics((s) => ({
-      zod: (zod(s) as unknown as z.ZodObject<any>).strict().meta({ ref: "Config" }) as unknown as z.ZodType<
-        DeepMutable<Schema.Schema.Type<typeof s>>
-      >,
-    })),
-  )
 
 // Uses the shared `DeepMutable` from `@/util/schema`. See the definition
 // there for why the local variant is needed over `Types.DeepMutable` from

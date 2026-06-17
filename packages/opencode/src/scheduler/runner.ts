@@ -1,7 +1,6 @@
 import { Cron } from "croner"
-import * as Log from "@opencode-ai/core/util/log"
 import { AppRuntime } from "@/effect/app-runtime"
-import { Instance, type InstanceContext } from "@/project/instance"
+import { context, type InstanceContext } from "@/project/instance-context"
 import { InstanceRuntime } from "@/project/instance-runtime"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
@@ -10,7 +9,14 @@ import * as Session from "@/session/session"
 import type { SessionID } from "@/session/schema"
 import { SchedulerStore, type Job } from "./store"
 
-const log = Log.create({ service: "scheduler.runner" })
+const log = {
+  info(message: string, data?: unknown) {
+    console.log(`[scheduler.runner] ${message}`, data)
+  },
+  error(message: string, data?: unknown) {
+    console.error(`[scheduler.runner] ${message}`, data)
+  },
+}
 
 type State = {
   timer?: ReturnType<typeof setTimeout>
@@ -49,7 +55,7 @@ function nextRun(job: Job, from = Date.now()) {
 }
 
 async function inCtx<T>(ctx: InstanceContext, task: () => Promise<T>) {
-  return Instance.restore(ctx, task)
+  return context.provide(ctx, task)
 }
 
 async function fx<T>(task: () => Promise<T>) {

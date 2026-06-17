@@ -4,6 +4,9 @@ import { pathToFileURL } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import path from "path"
 
+export const Spec = ConfigPluginV1.Spec
+export type Spec = ConfigPluginV1.Spec
+
 export type Scope = "global" | "local"
 
 // Origin keeps the original config provenance attached to a spec.

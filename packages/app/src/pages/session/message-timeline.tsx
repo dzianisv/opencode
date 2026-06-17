@@ -98,7 +98,6 @@ type SpeechUtteranceLike = {
   lang: string
   rate: number
 }
-}
 
 const timelineCacheLimit = 16
 const timelineFallbackItemSize = 60

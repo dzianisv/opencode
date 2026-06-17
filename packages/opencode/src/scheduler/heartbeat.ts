@@ -1,16 +1,20 @@
 import path from "path"
-import { Effect } from "effect"
-import * as Log from "@opencode-ai/core/util/log"
 import { AppRuntime } from "@/effect/app-runtime"
-import { Instance, type InstanceContext } from "@/project/instance"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { context, type InstanceContext } from "@/project/instance-context"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import { SessionPrompt } from "@/session/prompt"
 import * as Session from "@/session/session"
 import type { SessionID } from "@/session/schema"
 
-const log = Log.create({ service: "scheduler.heartbeat" })
+const log = {
+  info(message: string, data?: unknown) {
+    console.log(`[scheduler.heartbeat] ${message}`, data)
+  },
+  error(message: string, data?: unknown) {
+    console.error(`[scheduler.heartbeat] ${message}`, data)
+  },
+}
 
 const state: {
   timer?: ReturnType<typeof setTimeout>
@@ -37,7 +41,7 @@ function parse(input: string) {
 
 async function fx<T>(task: () => Promise<T>) {
   if (!state.context) throw new Error("scheduler heartbeat is not initialized")
-  return Instance.restore(state.context, task)
+  return context.provide(state.context, task)
 }
 
 async function ensureSession() {
@@ -50,20 +54,14 @@ async function ensureSession() {
 }
 
 async function run() {
-  const text = await fx(() =>
-    AppRuntime.runPromise(
-      Effect.gen(function* () {
-        const fs = yield* AppFileSystem.Service
-        const file = path.join(Instance.worktree, "HEARTBEAT.md")
-        return yield* fs.readFileString(file).pipe(
-          Effect.catchIf(
-            (err) => err.reason._tag === "NotFound",
-            () => Effect.succeed(""),
-          ),
-        )
-      }),
-    ),
-  )
+  const worktree = state.context?.worktree
+  if (!worktree) throw new Error("scheduler heartbeat is not initialized")
+  const text = await Bun.file(path.join(worktree, "HEARTBEAT.md"))
+    .text()
+    .catch((err) => {
+      if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return ""
+      throw err
+    })
   const prompt = text.trim()
   if (!prompt) return
 

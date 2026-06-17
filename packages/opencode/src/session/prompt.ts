@@ -1173,7 +1173,7 @@ export const layer = Layer.effect(
           ) {
             if (lastUser.agent === "autopilot") {
               if (reflection >= 50) {
-                yield* slog.info("autopilot reflection cap reached", { reflection })
+                yield* Effect.logInfo("autopilot reflection cap reached", { reflection })
                 break
               }
               reflection++
@@ -1196,7 +1196,7 @@ export const layer = Layer.effect(
               } satisfies MessageV2.TextPart)
               continue
             }
-            yield* slog.info("exiting loop")
+            yield* Effect.logInfo("exiting loop")
             break
           }
 

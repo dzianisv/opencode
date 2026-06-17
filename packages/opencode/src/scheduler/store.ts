@@ -3,13 +3,14 @@ import fs from "fs/promises"
 import { Cron } from "croner"
 import { Schema } from "effect"
 import { Global } from "@opencode-ai/core/global"
-import { Lock } from "@/util/lock"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Flock } from "@opencode-ai/core/util/flock"
 import { ToolID } from "@/tool/schema"
-import { ProviderID, ModelID } from "@/provider/schema"
 
 const model = Schema.Struct({
-  providerID: ProviderID,
-  modelID: ModelID,
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
 })
 
 export const Job = Schema.Struct({
@@ -44,6 +45,10 @@ export function file() {
   return path.join(Global.Path.data, "scheduler", "jobs.json")
 }
 
+function lock() {
+  return `scheduler:${file()}`
+}
+
 async function readRaw() {
   const text = await Bun.file(file())
     .text()
@@ -63,8 +68,7 @@ async function writeRaw(list: ReadonlyArray<Job>) {
 }
 
 export async function list() {
-  using _ = await Lock.read(`scheduler:${file()}`)
-  return readRaw()
+  return Flock.withLock(lock(), () => readRaw())
 }
 
 export async function get(id: string) {
@@ -74,56 +78,60 @@ export async function get(id: string) {
 export async function add(input: Input) {
   const parsed = Schema.decodeUnknownSync(Input)(input)
   new Cron(parsed.schedule, { paused: true })
-  using _ = await Lock.write(`scheduler:${file()}`)
-  const now = Date.now()
-  const job = Schema.decodeUnknownSync(Job)({
-    id: ToolID.ascending(),
-    schedule: parsed.schedule,
-    prompt: parsed.prompt,
-    enabled: parsed.enabled ?? true,
-    agent: parsed.agent,
-    model: parsed.model,
-    variant: parsed.variant,
-    created_at: now,
-    updated_at: now,
+  return Flock.withLock(lock(), async () => {
+    const now = Date.now()
+    const job = Schema.decodeUnknownSync(Job)({
+      id: ToolID.ascending(),
+      schedule: parsed.schedule,
+      prompt: parsed.prompt,
+      enabled: parsed.enabled ?? true,
+      agent: parsed.agent,
+      model: parsed.model,
+      variant: parsed.variant,
+      created_at: now,
+      updated_at: now,
+    })
+    const jobs = await readRaw()
+    await writeRaw([...jobs, job])
+    return job
   })
-  const jobs = await readRaw()
-  await writeRaw([...jobs, job])
-  return job
 }
 
 export async function remove(id: string) {
-  using _ = await Lock.write(`scheduler:${file()}`)
-  const jobs = await readRaw()
-  const next = jobs.filter((item) => item.id !== id)
-  if (next.length === jobs.length) return false
-  await writeRaw(next)
-  return true
+  return Flock.withLock(lock(), async () => {
+    const jobs = await readRaw()
+    const next = jobs.filter((item) => item.id !== id)
+    if (next.length === jobs.length) return false
+    await writeRaw(next)
+    return true
+  })
 }
 
 export async function setEnabled(id: string, enabled: boolean) {
-  using _ = await Lock.write(`scheduler:${file()}`)
-  const now = Date.now()
-  const jobs = await readRaw()
-  let found = false
-  const next = jobs.map((item) => {
-    if (item.id !== id) return item
-    found = true
-    return { ...item, enabled, updated_at: now }
+  return Flock.withLock(lock(), async () => {
+    const now = Date.now()
+    const jobs = await readRaw()
+    let found = false
+    const next = jobs.map((item) => {
+      if (item.id !== id) return item
+      found = true
+      return { ...item, enabled, updated_at: now }
+    })
+    if (!found) return
+    await writeRaw(next)
+    return next.find((item) => item.id === id)
   })
-  if (!found) return
-  await writeRaw(next)
-  return next.find((item) => item.id === id)
 }
 
 export async function touch(id: string, at: number) {
-  using _ = await Lock.write(`scheduler:${file()}`)
-  const jobs = await readRaw()
-  const next = jobs.map((item) => {
-    if (item.id !== id) return item
-    return { ...item, last_run_at: at, updated_at: at }
+  return Flock.withLock(lock(), async () => {
+    const jobs = await readRaw()
+    const next = jobs.map((item) => {
+      if (item.id !== id) return item
+      return { ...item, last_run_at: at, updated_at: at }
+    })
+    await writeRaw(next)
   })
-  await writeRaw(next)
 }
 
 export const SchedulerStore = { file, list, get, add, remove, setEnabled, touch, Job, Input }

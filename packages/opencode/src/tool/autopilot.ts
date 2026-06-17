@@ -7,10 +7,13 @@ import * as Tool from "./tool"
 import DESCRIPTION from "./autopilot-exit.txt"
 
 function getLastModel(sessionID: SessionID) {
-  for (const item of MessageV2.stream(sessionID)) {
-    if (item.info.role === "user" && item.info.model) return item.info.model
-  }
-  return undefined
+  return Effect.gen(function* () {
+    const messages = yield* MessageV2.stream(sessionID)
+    for (const item of messages) {
+      if (item.info.role === "user" && item.info.model) return item.info.model
+    }
+    return undefined
+  })
 }
 
 export const Parameters = Schema.Struct({})
@@ -33,7 +36,7 @@ export const AutopilotExitTool = Tool.define(
             metadata: {},
           })
 
-          const model = getLastModel(ctx.sessionID) ?? (yield* provider.defaultModel())
+          const model = (yield* getLastModel(ctx.sessionID)) ?? (yield* provider.defaultModel())
           const msg: MessageV2.User = {
             id: MessageID.ascending(),
             sessionID: ctx.sessionID,

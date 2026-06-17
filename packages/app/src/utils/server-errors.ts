@@ -53,7 +53,6 @@ export function isSessionNotFoundError(error: unknown) {
         : ""
   return /^session not found(?::|\b)/i.test(message.trim())
 }
-}
 
 function isConfigInvalidErrorLike(error: unknown): error is ConfigInvalidError {
   if (typeof error !== "object" || error === null) return false

@@ -353,12 +353,16 @@ export const layer = Layer.effect(
           }
           const visible = Object.values(agents).filter((a) => a.mode !== "subagent" && a.hidden !== true)
           const build = visible.find((a) => a.name === "build")
-          if (build) return build.name
+          if (build) return build
           const plan = visible.find((a) => a.name === "plan")
-          if (plan) return plan.name
+          if (plan) return plan
           const fallback = visible[0]
-          if (fallback) return fallback.name
+          if (fallback) return fallback
           throw new Error("no primary visible agent found")
+        })
+
+        const defaultAgent = Effect.fnUntraced(function* () {
+          return (yield* defaultInfo()).name
         })
 
         return {

@@ -3,7 +3,6 @@ import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { synth } from "@/tts/edge"
 import * as Observability from "@opencode-ai/core/observability"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
@@ -194,17 +193,6 @@ const uiRoute = HttpRouter.use((router) =>
   }),
 ).pipe(Layer.provide(authOnlyRouterLayer))
 
-const ttsRoute = HttpRouter.use((router) =>
-  router.add("POST", "/tts/edge", (request) =>
-    Effect.gen(function* () {
-      const body: { text: string } = yield* Effect.tryPromise(() => request.json() as Promise<{ text: string }>)
-      if (!body.text?.trim()) return yield* HttpServerResponse.json({ error: "Empty text" }, { status: 400 })
-      const audio = yield* Effect.tryPromise(() => synth(body.text))
-      return HttpServerResponse.bytes(audio, { contentType: "audio/mpeg" })
-    }),
-  ),
-)
-
 type RouteRequirements =
   | HttpRouter.HttpRouter
   | HttpRouter.Request<"Error", unknown>
@@ -281,7 +269,6 @@ export function createRoutes(
     serverRoutes,
     docRoute,
     uiRoute,
-    ttsRoute,
   ).pipe(
     Layer.provide([
       errorLayer,
