@@ -1,0 +1,1 @@
+Hard-stop running subagent immediately.
