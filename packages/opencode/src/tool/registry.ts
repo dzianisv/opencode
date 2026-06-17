@@ -56,6 +56,8 @@ import { Agent } from "../agent/agent"
 import { Git } from "@/git"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { InstanceLayer } from "@/project/instance-layer"
+import { InstanceStore } from "@/project/instance-store"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -105,6 +107,7 @@ export const layer: Layer.Layer<
   | Instruction.Service
   | AppFileSystem.Service
   | Bus.Service
+  | InstanceStore.Service
   | HttpClient.HttpClient
   | ChildProcessSpawner
   | Ripgrep.Service
@@ -398,6 +401,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(InstanceLayer.layer),
   ).pipe(
     Layer.provide(Format.defaultLayer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),

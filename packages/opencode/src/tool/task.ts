@@ -6,6 +6,7 @@ import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
+import { InstanceStore } from "@/project/instance-store"
 import { Effect, Exit, Schema } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 
@@ -21,6 +22,10 @@ export const Parameters = Schema.Struct({
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
   subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
+  directory: Schema.optional(Schema.String).annotate({
+    description:
+      "Optional absolute path to the working directory for the subagent. When set, the subagent runs rooted at this path instead of inheriting the parent session's directory.",
+  }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
@@ -34,6 +39,7 @@ export const TaskTool = Tool.define(
     const agent = yield* Agent.Service
     const config = yield* Config.Service
     const sessions = yield* Session.Service
+    const instanceStore = yield* InstanceStore.Service
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -53,7 +59,15 @@ export const TaskTool = Tool.define(
         })
       }
 
-      const next = yield* agent.get(params.subagent_type)
+      const taskID = params.task_id
+      const session = taskID
+        ? yield* sessions.get(SessionID.make(taskID)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        : undefined
+      const directory = params.directory ?? session?.directory
+      const provideInstance = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        directory ? instanceStore.provide({ directory }, effect) : effect
+
+      const next = yield* provideInstance(agent.get(params.subagent_type))
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
@@ -61,45 +75,43 @@ export const TaskTool = Tool.define(
       const canTask = next.permission.some((rule) => rule.permission === id)
       const canTodo = next.permission.some((rule) => rule.permission === "todowrite")
 
-      const taskID = params.task_id
-      const session = taskID
-        ? yield* sessions.get(SessionID.make(taskID)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        : undefined
       const parent = yield* sessions.get(ctx.sessionID)
       const nextSession =
         session ??
-        (yield* sessions.create({
-          parentID: ctx.sessionID,
-          title: params.description + ` (@${next.name} subagent)`,
-          permission: [
-            ...(parent.permission ?? []).filter(
-              (rule) => rule.permission === "external_directory" || rule.action === "deny",
-            ),
-            ...(canTodo
-              ? []
-              : [
-                  {
-                    permission: "todowrite" as const,
-                    pattern: "*" as const,
-                    action: "deny" as const,
-                  },
-                ]),
-            ...(canTask
-              ? []
-              : [
-                  {
-                    permission: id,
-                    pattern: "*" as const,
-                    action: "deny" as const,
-                  },
-                ]),
-            ...(cfg.experimental?.primary_tools?.map((item) => ({
-              pattern: "*",
-              action: "allow" as const,
-              permission: item,
-            })) ?? []),
-          ],
-        }))
+        (yield* provideInstance(
+          sessions.create({
+            parentID: ctx.sessionID,
+            title: params.description + ` (@${next.name} subagent)`,
+            permission: [
+              ...(parent.permission ?? []).filter(
+                (rule) => rule.permission === "external_directory" || rule.action === "deny",
+              ),
+              ...(canTodo
+                ? []
+                : [
+                    {
+                      permission: "todowrite" as const,
+                      pattern: "*" as const,
+                      action: "deny" as const,
+                    },
+                  ]),
+              ...(canTask
+                ? []
+                : [
+                    {
+                      permission: id,
+                      pattern: "*" as const,
+                      action: "deny" as const,
+                    },
+                  ]),
+              ...(cfg.experimental?.primary_tools?.map((item) => ({
+                pattern: "*",
+                action: "allow" as const,
+                permission: item,
+              })) ?? []),
+            ],
+          }),
+        ))
 
       const msg = yield* Effect.sync(() => MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }))
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
@@ -133,39 +145,41 @@ export const TaskTool = Tool.define(
           ctx.abort.addEventListener("abort", onAbort)
         }),
         () =>
-          Effect.gen(function* () {
-            const parts = yield* ops.resolvePromptParts(params.prompt)
-            const result = yield* ops.prompt({
-              messageID,
-              sessionID: nextSession.id,
-              model: {
-                modelID: model.modelID,
-                providerID: model.providerID,
-              },
-              agent: next.name,
-              tools: {
-                ...(canTodo ? {} : { todowrite: false }),
-                ...(canTask ? {} : { task: false }),
-                ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-              },
-              parts,
-            })
+          provideInstance(
+            Effect.gen(function* () {
+              const parts = yield* ops.resolvePromptParts(params.prompt)
+              const result = yield* ops.prompt({
+                messageID,
+                sessionID: nextSession.id,
+                model: {
+                  modelID: model.modelID,
+                  providerID: model.providerID,
+                },
+                agent: next.name,
+                tools: {
+                  ...(canTodo ? {} : { todowrite: false }),
+                  ...(canTask ? {} : { task: false }),
+                  ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+                },
+                parts,
+              })
 
-            return {
-              title: params.description,
-              metadata: {
-                sessionId: nextSession.id,
-                model,
-              },
-              output: [
-                `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
-                "",
-                "<task_result>",
-                result.parts.findLast((item) => item.type === "text")?.text ?? "",
-                "</task_result>",
-              ].join("\n"),
-            }
-          }),
+              return {
+                title: params.description,
+                metadata: {
+                  sessionId: nextSession.id,
+                  model,
+                },
+                output: [
+                  `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,
+                  "",
+                  "<task_result>",
+                  result.parts.findLast((item) => item.type === "text")?.text ?? "",
+                  "</task_result>",
+                ].join("\n"),
+              }
+            }),
+          ),
         (_, exit) =>
           Effect.gen(function* () {
             if (Exit.hasInterrupts(exit)) yield* cancel
