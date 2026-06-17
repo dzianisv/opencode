@@ -14,6 +14,7 @@ import {
   Part,
   StructuredOutputError,
   SubtaskPart,
+  TextPart,
   User,
   WithParts,
   type ToolPart,
@@ -740,5 +741,8 @@ export function fromError(
       return new NamedError.Unknown({ message: JSON.stringify(e) }, { cause: e }).toObject()
   }
 }
+
+export { AbortedError, Assistant, User, WithParts }
+export type { TextPart }
 
 export * as MessageV2 from "./message-v2"

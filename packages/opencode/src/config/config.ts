@@ -24,8 +24,17 @@ import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
+import { ConfigAgentV1 } from "@opencode-ai/core/v1/config/agent"
+import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
+import { ConfigProviderV1 } from "@opencode-ai/core/v1/config/provider"
+import { ConfigAttachments } from "@opencode-ai/core/config/attachments"
+import { ConfigCompaction } from "@opencode-ai/core/config/compaction"
+import { ConfigExperimental } from "@opencode-ai/core/config/experimental"
+import { ConfigFormatter } from "@opencode-ai/core/config/formatter"
+import { ConfigLSP } from "@opencode-ai/core/config/lsp"
+import { ConfigToolOutput } from "@opencode-ai/core/config/tool-output"
 import { ConfigAgent } from "./agent"
 import { ConfigCommand } from "./command"
 import { ConfigManaged } from "./managed"
@@ -156,6 +165,9 @@ export const Info = Schema.Struct({
     description: "Command configuration, see https://opencode.ai/docs/commands",
   }),
   skills: Schema.optional(ConfigSkills.Info).annotate({ description: "Additional skill folder paths" }),
+  references: Schema.optional(ConfigReference.Info).annotate({
+    description: "Named git or local directory references",
+  }),
   reference: Schema.optional(ConfigReference.Info).annotate({
     description: "Named git or local directory references that can be @ mentioned as Scout-backed subagents",
   }),
@@ -215,13 +227,98 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  model: Schema.optional(Schema.String).annotate({ description: "Default model to use" }),
+  small_model: Schema.optional(Schema.String).annotate({
+    description: "Small model to use for lightweight tasks",
+  }),
+  default_agent: Schema.optional(Schema.String).annotate({ description: "Default agent to use" }),
+  username: Schema.optional(Schema.String).annotate({ description: "Username for telemetry" }),
+  instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description: "Additional instruction files or text to include in system prompt",
+  }),
+  formatter: Schema.optional(ConfigFormatter.Info).annotate({ description: "Formatter configuration" }),
+  lsp: Schema.optional(ConfigLSP.Info).annotate({ description: "LSP server configuration" }),
+  attachment: Schema.optional(ConfigAttachments.Info).annotate({ description: "File attachment configuration" }),
+  tool_output: Schema.optional(ConfigToolOutput.Info).annotate({
+    description: "Tool output truncation configuration",
+  }),
+  compaction: Schema.optional(
+    Schema.Union([
+      ConfigCompaction.Info,
+      Schema.Struct({
+        auto: Schema.optional(Schema.Boolean),
+        prune: Schema.optional(Schema.Boolean),
+        tail_turns: Schema.optional(Schema.Int),
+        preserve_recent_tokens: Schema.optional(Schema.Int),
+        reserved: Schema.optional(Schema.Int),
+      }),
+    ]),
+  ).annotate({ description: "Context compaction configuration" }),
+  experimental: Schema.optional(
+    Schema.Struct({
+      disable_paste_summary: Schema.optional(Schema.Boolean),
+      batch_tool: Schema.optional(Schema.Boolean),
+      openTelemetry: Schema.optional(Schema.Boolean),
+      primary_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+      continue_loop_on_deny: Schema.optional(Schema.Boolean),
+      mcp_timeout: Schema.optional(Schema.Int),
+      policies: Schema.optional(Schema.mutable(Schema.Array(ConfigExperimental.Policy))),
+    }),
+  ).annotate({
+    description: "Experimental features configuration",
+  }),
+  mcp: Schema.optional(
+    Schema.Record(
+      Schema.String,
+      Schema.Union([ConfigMCPV1.Info, Schema.Struct({ enabled: Schema.Boolean })]),
+    ),
+  ).annotate({ description: "MCP server configuration" }),
+  permission: Schema.optional(ConfigPermissionV1.Info).annotate({
+    description: "Default permission rules",
+  }),
+  agent: Schema.optional(Schema.Record(Schema.String, ConfigAgentV1.Info)).annotate({
+    description: "Agent configurations",
+  }),
+  mode: Schema.optional(Schema.Record(Schema.String, ConfigAgentV1.Info)).annotate({
+    description: "Mode configurations (deprecated, use agent)",
+  }),
+  tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
+    description: "@deprecated Use 'permission' field instead",
+  }),
+  disabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description: "List of provider IDs to disable",
+  }),
+  enabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description: "List of provider IDs to enable (all others disabled)",
+  }),
+  provider: Schema.optional(Schema.Record(Schema.String, ConfigProviderV1.Info)).annotate({
+    description: "Provider configuration",
+  }),
+  scheduler: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      maxConcurrent: Schema.optional(Schema.Int),
+      heartbeat: Schema.optional(
+        Schema.Struct({
+          enabled: Schema.optional(Schema.Boolean),
+          interval: Schema.optional(Schema.String),
+        }),
+      ),
+    }),
+  ).annotate({ description: "Scheduler configuration" }),
+  enterprise: Schema.optional(
+    Schema.Struct({
+      url: Schema.optional(Schema.String),
+    }),
+  ).annotate({ description: "Enterprise configuration" }),
 })
   .annotate({ identifier: "Config" })
 
 // Uses the shared `DeepMutable` from `@/util/schema`. See the definition
 // there for why the local variant is needed over `Types.DeepMutable` from
 // effect-smol (the upstream version collapses `unknown` to `{}`).
-export type Info = DeepMutable<Schema.Schema.Type<typeof Info>> & {
+export type Info = ConfigV1.Info &
+  DeepMutable<Schema.Schema.Type<typeof Info>> & {
   // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
   plugin_origins?: ConfigPlugin.Origin[]

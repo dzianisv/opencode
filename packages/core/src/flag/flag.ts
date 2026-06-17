@@ -75,4 +75,13 @@ export const Flag = {
   get OPENCODE_CLIENT() {
     return process.env["OPENCODE_CLIENT"] ?? "cli"
   },
+  get OPENCODE_DISABLE_CLAUDE_CODE_PROMPT() {
+    return truthy("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT") || truthy("OPENCODE_DISABLE_CLAUDE_CODE")
+  },
+  get OPENCODE_EXPERIMENTAL_LSP_TOOL() {
+    return enabledByExperimental("OPENCODE_EXPERIMENTAL_LSP_TOOL")
+  },
+  get OPENCODE_EXPERIMENTAL_PLAN_MODE() {
+    return enabledByExperimental("OPENCODE_EXPERIMENTAL_PLAN_MODE")
+  },
 }

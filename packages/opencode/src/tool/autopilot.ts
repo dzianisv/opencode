@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import { Session } from "@/session/session"
 import { MessageV2 } from "../session/message-v2"
 import { Provider } from "@/provider/provider"
+import { Database } from "@opencode-ai/core/database/database"
 import { type SessionID, MessageID, PartID } from "../session/schema"
 import * as Tool from "./tool"
 import DESCRIPTION from "./autopilot-exit.txt"
@@ -23,6 +24,7 @@ export const AutopilotExitTool = Tool.define(
   Effect.gen(function* () {
     const session = yield* Session.Service
     const provider = yield* Provider.Service
+    const database = yield* Database.Service
 
     return {
       description: DESCRIPTION,
@@ -36,7 +38,9 @@ export const AutopilotExitTool = Tool.define(
             metadata: {},
           })
 
-          const model = (yield* getLastModel(ctx.sessionID)) ?? (yield* provider.defaultModel())
+          const model =
+            (yield* getLastModel(ctx.sessionID).pipe(Effect.provideService(Database.Service, database))) ??
+            (yield* provider.defaultModel())
           const msg: MessageV2.User = {
             id: MessageID.ascending(),
             sessionID: ctx.sessionID,
