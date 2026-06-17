@@ -340,7 +340,7 @@ export function MessageTimeline(props: {
       const message = list[i]
       if (message.role !== "assistant") continue
       if (typeof message.time.completed !== "number") continue
-      const text = (sync.data.part[message.id] ?? [])
+      const text = (sync().data.part[message.id] ?? [])
         .flatMap((part) => {
           if (part.type !== "text") return []
           if (part.synthetic || part.ignored) return []
@@ -647,7 +647,7 @@ export function MessageTimeline(props: {
       if (conn?.password) {
         headers.Authorization = `Basic ${btoa(`${conn.username ?? "opencode"}:${conn.password}`)}`
       }
-      const res = await (platform.fetch ?? fetch)(new URL("/tts/edge", conn?.url ?? globalSDK.url).toString(), {
+      const res = await (platform.fetch ?? fetch)(new URL("/tts/edge", conn?.url ?? serverSDK().url).toString(), {
         method: "POST",
         headers,
         body: JSON.stringify({ text: input.text }),

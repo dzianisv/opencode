@@ -367,7 +367,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const plugin = {
-      list: createMemo(() => (sync.data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0]))),
+      list: createMemo(() => (sync().data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0]))),
       disabled() {
         const installed = new Set(plugin.list())
         return (scope()?.plugin_disabled ?? []).filter((item) => installed.has(item))

@@ -16,7 +16,7 @@ import {
 } from "solid-js"
 import { Popover as KobaltePopover } from "@kobalte/core/popover"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
-import type { useLocal } from "@/context/local"
+import { useLocal } from "@/context/local"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
 import {
   ContentPart,
@@ -280,6 +280,11 @@ const transcriptInsert = (input: { transcript: string; before: string; after: st
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const local = useLocal()
+  const [picker, setPicker] = createStore<{ projectOpen: boolean; projectSearch: string }>({
+    projectOpen: false,
+    projectSearch: "",
+  })
 
   const sync = useSync()
   const files = useFile()
@@ -430,6 +435,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     mode: "normal" | "shell"
     applyingHistory: boolean
     voice: "idle" | "starting" | "listening"
+    variantOpen: boolean
   }>({
     popover: null,
     historyIndex: -1,
@@ -439,6 +445,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     mode: "normal",
     applyingHistory: false,
     voice: "idle",
+    variantOpen: false,
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })

@@ -52,7 +52,6 @@ export interface Settings {
   }
   models: {
     defaultModel?: { providerID: string; modelID: string }
-    reviewModel?: { providerID: string; modelID: string }
   }
 }
 
@@ -154,7 +153,6 @@ const defaultSettings: Settings = {
   },
   models: {
     defaultModel: undefined,
-    reviewModel: undefined,
   },
 }
 
@@ -367,10 +365,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         defaultModel: createMemo(() => store.models?.defaultModel),
         setDefaultModel(value: { providerID: string; modelID: string } | undefined) {
           setStore("models", "defaultModel", value as any)
-        },
-        reviewModel: createMemo(() => store.models?.reviewModel),
-        setReviewModel(value: { providerID: string; modelID: string } | undefined) {
-          setStore("models", "reviewModel", value as any)
         },
       },
     }

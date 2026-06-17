@@ -18,6 +18,14 @@ export type ProviderModelNotFoundError = {
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string
 
+function unwrapNamedError(error: unknown): unknown {
+  if (typeof error !== "object" || error === null) return error
+  const o = error as Record<string, unknown>
+  if (typeof o.name === "string" && "data" in o) return error
+  if (typeof o.error === "object") return unwrapNamedError(o.error)
+  return error
+}
+
 function tr(translator: Translator | undefined, key: string, text: string, vars?: Record<string, string | number>) {
   if (!translator) return text
   const out = translator(key, vars)

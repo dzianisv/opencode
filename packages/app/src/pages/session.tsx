@@ -403,11 +403,13 @@ export default function Page() {
       failed: Record<string, string | undefined>
       paused: Record<string, boolean | undefined>
       edit: Record<string, FollowupEdit | undefined>
+      pending: Record<string, string | undefined>
     }>({
       items: {},
       failed: {},
       paused: {},
       edit: {},
+      pending: {},
     }),
   )
 
