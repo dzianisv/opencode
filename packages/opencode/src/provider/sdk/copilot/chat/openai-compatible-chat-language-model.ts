@@ -467,13 +467,8 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
             // Capture reasoning_opaque for Copilot multi-turn reasoning
             if (delta.reasoning_opaque) {
-              if (reasoningOpaque != null) {
-                throw new InvalidResponseDataError({
-                  data: delta,
-                  message:
-                    "Multiple reasoning_opaque values received in a single response. Only one thinking part per response is supported.",
-                })
-              }
+              // Accept the latest reasoning_opaque value — Claude models may
+              // produce multiple thinking blocks on complex prompts.
               reasoningOpaque = delta.reasoning_opaque
             }
 

@@ -414,6 +414,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .pipe(Effect.orDie),
       })
 
+      // When tools has wildcard disable ("*": false), skip all tool registration.
+      // This is used by workflow agent calls to get clean text completions.
+      if (input.tools?.["*"] === false) return tools
+
       for (const item of yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
@@ -1605,7 +1609,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            // When a system override is set (e.g., workflow agent calls),
+            // use only that — skip AGENTS.md, skills, and full env prompt.
+            // Check the first user message (not lastUser) because subsequent
+            // loop iterations create new user messages for tool results that
+            // lack the system field.
+            const firstUserSystem = (msgs.find(m => m.info.role === "user") as { info: MessageV2.User } | undefined)?.info.system
+            const system = firstUserSystem
+              ? [firstUserSystem]
+              : [...env, ...instructions, ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({

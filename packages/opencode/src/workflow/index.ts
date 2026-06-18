@@ -424,6 +424,8 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
       variant?: string
       files?: string[]
       schema?: Record<string, unknown>
+      system?: string
+      tools?: boolean
       onError?: "fail" | "null"
     }) => {
       try {
@@ -437,7 +439,8 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
         const result = await run(
           Effect.gen(function* () {
             const promptSvc = yield* SessionPrompt.Service
-            const parts = yield* promptSvc.resolvePromptParts(options.prompt)
+            const resolvedParts = yield* promptSvc.resolvePromptParts(options.prompt)
+            const parts: Array<{ type: string; text?: string; url?: string; filename?: string; mime?: string; id?: string }> = [...resolvedParts]
             const attachments =
               options.files?.map((file) => ({
                 type: "file" as const,
@@ -447,6 +450,9 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
               })) ?? []
             // Resolve model: "provider/model" uses parseModel directly;
             // bare "model-name" searches all configured providers.
+            // Prefers the highest-versioned match (e.g., "claude-sonnet-4" →
+            // "claude-sonnet-4.6" over exact "claude-sonnet-4" which may be
+            // deprecated or unsupported by the API).
             let resolvedModel: ReturnType<typeof Provider.parseModel> | undefined
             if (options.model) {
               if (options.model.includes("/")) {
@@ -454,8 +460,18 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
               } else {
                 const providers = yield* provider.list()
                 for (const [pid, info] of Object.entries(providers)) {
-                  if (options.model in info.models) {
-                    resolvedModel = Provider.parseModel(`${pid}/${options.model}`)
+                  const modelKeys = Object.keys(info.models)
+                  // Find all models that start with the requested name
+                  const matches = modelKeys.filter(k =>
+                    k === options.model || k.startsWith(options.model + ".") || k.startsWith(options.model + "-")
+                  )
+                  if (matches.length > 0) {
+                    // Prefer versioned variants (e.g., claude-sonnet-4.6) over
+                    // the bare name (claude-sonnet-4) — bare names are often
+                    // aliases that rotate and may be temporarily unsupported.
+                    const versioned = matches.filter(k => k !== options.model)
+                    const best = versioned.length > 0 ? versioned.sort().pop()! : matches[0]
+                    resolvedModel = Provider.parseModel(`${pid}/${best}`)
                     break
                   }
                 }
@@ -464,20 +480,88 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
                 }
               }
             }
-            return yield* promptSvc.prompt({
+            // When schema is specified, embed the schema in the prompt and parse
+            // JSON from the text response. This avoids the StructuredOutput tool
+            // which conflicts with extended-thinking models (toolChoice: required
+            // is incompatible with thinking/reasoning).
+            if (options.schema) {
+              const schemaInstruction = [
+                "\n\nYou MUST respond with ONLY a valid JSON object matching this schema:",
+                "```json",
+                JSON.stringify(options.schema, null, 2),
+                "```",
+                "Do not include any other text, explanation, or markdown. Output ONLY the JSON object.",
+              ].join("\n")
+              const lastTextPart = [...parts].reverse().find(p => p.type === "text")
+              if (lastTextPart && "text" in lastTextPart && lastTextPart.text) {
+                (lastTextPart as { text: string }).text += schemaInstruction
+              } else {
+                parts.push({ type: "text", text: schemaInstruction })
+              }
+            }
+            // Override system prompt to a minimal instruction — the default
+            // agent's full system prompt (with tool docs, persona, etc.)
+            // confuses the model on workflow-specific prompts.
+            // Tools disabled by default for clean text completions. Workflows
+            // needing file access can pass { tools: true } in agent options.
+            const agentName = options.agent ?? (yield* agents.defaultAgent())
+            const enableTools = options.tools === true
+            const systemPrompt = options.system ?? "You are a helpful assistant. Follow the user's instructions precisely. If asked to output JSON, output ONLY valid JSON with no other text."
+            let promptResult = yield* promptSvc.prompt({
               sessionID: child.id,
-              agent: options.agent ?? (yield* agents.defaultAgent()),
-              model: resolvedModel,
-              variant: options.variant,
-              format: options.schema
-                ? new MessageV2.OutputFormatJsonSchema({ type: "json_schema", schema: options.schema })
-                : undefined,
-              parts: [...parts, ...attachments],
+              agent: agentName,
+              variant: options.variant ?? "low",
+              system: systemPrompt,
+              ...(!enableTools ? { tools: { "*": false } } : {}),
+              parts: [...parts, ...attachments] as any,
             })
+            // If schema was requested but model returned empty text (common when
+            // tools were used — model gathers info then stops without outputting),
+            // send a follow-up message asking for the JSON output.
+            const firstText = lastText(promptResult)
+            if (options.schema && !firstText.trim()) {
+              const followUp: MessageV2.TextPartInput = {
+                type: "text",
+                text: "Now produce your final answer as a JSON object matching the schema. Output ONLY the JSON, no other text.",
+              }
+              promptResult = yield* promptSvc.prompt({
+                sessionID: child.id,
+                agent: agentName,
+                variant: options.variant ?? "low",
+                system: systemPrompt,
+                tools: { "*": false },
+                parts: [followUp],
+              })
+            }
+            // Check for API/model errors on the assistant message
+            const info = promptResult.info
+            if (info.role === "assistant" && info.error) {
+              const errData = info.error as Record<string, unknown>
+              const errMsg = (errData.data as Record<string, unknown>)?.message ?? errData.message ?? "Unknown provider error"
+              throw new Error(`Agent call failed: ${errMsg}`)
+            }
+            return promptResult
           }),
         )
         const text = lastText(result)
-        return { text, data: result.info.role === "assistant" ? result.info.structured ?? text : text }
+        // For schema requests, parse JSON from the text response
+        let data: unknown = text
+        if (options.schema && text) {
+          try {
+            // Strip markdown code fences and surrounding whitespace
+            const cleaned = text.trim()
+              .replace(/^```(?:json)?\s*\n?/i, "")
+              .replace(/\n?```\s*$/i, "")
+              .trim()
+            data = JSON.parse(cleaned)
+          } catch {
+            data = text
+          }
+        } else if (result.info.role === "assistant") {
+          data = result.info.structured ?? text
+        }
+        logs.push(`[workflow:agent] text=${text.length}chars data=${typeof data} role=${result.info.role} parts=${result.parts.length}`)
+        return { text, data }
       } catch (error) {
         if (options.onError === "null") return null
         throw error
