@@ -369,6 +369,7 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
   const config = yield* Config.Service
   const registry = yield* ToolRegistry.Service
   const agents = yield* Agent.Service
+  const provider = yield* Provider.Service
   const ctx = yield* InstanceState.context
   const logs: string[] = []
   let phase: string | undefined
@@ -444,10 +445,29 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
                 filename: path.basename(file),
                 mime: "text/plain",
               })) ?? []
+            // Resolve model: "provider/model" uses parseModel directly;
+            // bare "model-name" searches all configured providers.
+            let resolvedModel: ReturnType<typeof Provider.parseModel> | undefined
+            if (options.model) {
+              if (options.model.includes("/")) {
+                resolvedModel = Provider.parseModel(options.model)
+              } else {
+                const providers = yield* provider.list()
+                for (const [pid, info] of Object.entries(providers)) {
+                  if (options.model in info.models) {
+                    resolvedModel = Provider.parseModel(`${pid}/${options.model}`)
+                    break
+                  }
+                }
+                if (!resolvedModel) {
+                  resolvedModel = Provider.parseModel(options.model)
+                }
+              }
+            }
             return yield* promptSvc.prompt({
               sessionID: child.id,
               agent: options.agent ?? (yield* agents.defaultAgent()),
-              model: options.model ? Provider.parseModel(options.model) : undefined,
+              model: resolvedModel,
               variant: options.variant,
               format: options.schema
                 ? new MessageV2.OutputFormatJsonSchema({ type: "json_schema", schema: options.schema })
