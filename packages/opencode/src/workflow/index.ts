@@ -75,7 +75,81 @@ function parseArgs(input: string, info?: Info) {
   )
 }
 
+// Claude Code "bare globals" format: file exports `meta` but no `run()`.
+// The file body uses top-level await with injected globals: agent(), parallel(),
+// phase(), log(), and args. We wrap it in an AsyncFunction and bridge the
+// globals to WorkflowContext methods.
+async function importBareGlobals(file: string): Promise<WorkflowDefinition | undefined> {
+  const source = await fs.readFile(file, "utf8")
+  if (!source.includes("export const meta")) return undefined
+
+  // Extract meta object using brace counting
+  const metaMatch = source.match(/export\s+const\s+meta\s*=\s*\{/)
+  if (!metaMatch || metaMatch.index === undefined) return undefined
+  const braceOpen = metaMatch.index + metaMatch[0].length - 1
+  let depth = 0
+  let metaEnd = -1
+  for (let i = braceOpen; i < source.length; i++) {
+    if (source[i] === "{") depth++
+    else if (source[i] === "}") {
+      depth--
+      if (depth === 0) {
+        metaEnd = i + 1
+        break
+      }
+    }
+  }
+  if (metaEnd === -1) return undefined
+
+  const metaSource = source.slice(braceOpen, metaEnd)
+  let meta: Meta
+  try {
+    meta = new Function("return " + metaSource)() as Meta
+  } catch {
+    return undefined
+  }
+  if (!meta?.name) return undefined
+
+  // Build body: strip meta declaration and export keywords
+  const body = (source.slice(0, metaMatch.index) + source.slice(metaEnd))
+    .replace(/^export\s+/gm, "")
+    .trim()
+
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (...args: string[]) => (...injected: unknown[]) => Promise<unknown>
+  let fn: (...injected: unknown[]) => Promise<unknown>
+  try {
+    fn = new AsyncFunction("args", "agent", "parallel", "phase", "log", body)
+  } catch (err) {
+    throw new Error(`Failed to compile bare-globals workflow ${file}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  return {
+    meta,
+    run: async (args: Record<string, unknown>, ctx: WorkflowContext) => {
+      const agentFn = async (prompt: string, options?: Record<string, unknown>) => {
+        const input: Parameters<WorkflowContext["agent"]>[0] = { prompt }
+        if (options?.model) input.model = options.model as string
+        if (options?.schema) input.schema = options.schema as Record<string, unknown>
+        if (options?.agent) input.agent = options.agent as string
+        if (options?.variant) input.variant = options.variant as string
+        if (options?.files) input.files = options.files as string[]
+        if (options?.onError) input.onError = options.onError as "fail" | "null"
+        const result = await ctx.agent(input)
+        // Claude Code agent() returns structured data directly, not {text, data}
+        if (!result) return null
+        if (result.data !== undefined && result.data !== null && result.data !== "") return result.data
+        return result.text
+      }
+      return fn(args, agentFn, ctx.parallel.bind(ctx), ctx.setPhase.bind(ctx), ctx.log.bind(ctx))
+    },
+  }
+}
+
 async function importWorkflow(file: string) {
+  // Try bare-globals format first (Claude Code dynamic workflows)
+  const bareGlobals = await importBareGlobals(file)
+  if (bareGlobals) return bareGlobals
+
   const url = pathToFileURL(file)
   url.searchParams.set("t", String(Date.now()))
   const mod = await import(url.href)
@@ -103,7 +177,13 @@ const load = Effect.fn("Workflow.load")(function* () {
   // cached from before the project .opencode dir existed (e.g. in tests or when
   // the dir is created after first config access).
   const directories = [
-    ...new Set([path.join(ctx.directory, ".opencode"), path.join(ctx.worktree, ".opencode"), ...configDirs]),
+    ...new Set([
+      path.join(ctx.directory, ".opencode"),
+      path.join(ctx.worktree, ".opencode"),
+      path.join(ctx.directory, ".agents"),
+      path.join(ctx.worktree, ".agents"),
+      ...configDirs,
+    ]),
   ]
   const seen = new Set<string>()
   const result: LoadedWorkflow[] = []
