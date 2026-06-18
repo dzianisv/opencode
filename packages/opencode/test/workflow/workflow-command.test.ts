@@ -1,11 +1,16 @@
 import { afterEach, describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
+import { fileURLToPath } from "url"
 import { Effect, Layer } from "effect"
 import { SessionPrompt } from "@/session/prompt"
 import { Session } from "@/session/session"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+
+// Resolve @opencode-ai/plugin from the workspace — uses the bun workspace symlink
+// so the path works on any machine without hardcoding.
+const PLUGIN_DIR = fileURLToPath(import.meta.resolve("@opencode-ai/plugin"))
 
 const it = testEffect(Layer.mergeAll(SessionPrompt.defaultLayer, Session.defaultLayer))
 
@@ -22,7 +27,7 @@ describe("workflow command", () => {
       const pluginLink = path.join(opencodeDir, "node_modules", "@opencode-ai", "plugin")
       yield* Effect.promise(() => fs.mkdir(workflowDir, { recursive: true }))
       yield* Effect.promise(() => fs.mkdir(path.dirname(pluginLink), { recursive: true }))
-      yield* Effect.promise(() => fs.symlink("/Users/engineer/workspace/opencode/packages/plugin", pluginLink, "dir"))
+      yield* Effect.promise(() => fs.symlink(PLUGIN_DIR, pluginLink, "dir"))
       yield* Effect.promise(() =>
         Bun.write(
           path.join(workflowDir, "hello.ts"),
