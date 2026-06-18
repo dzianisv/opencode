@@ -29,6 +29,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { Interrupt } from "../../src/session/interrupt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -170,9 +171,11 @@ function makeHttp() {
     Plugin.defaultLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
+    Interrupt.defaultLayer,
     lsp,
     mcp,
     AppFileSystem.defaultLayer,
+    run,
     status,
   ).pipe(Layer.provideMerge(infra))
   const question = Question.layer.pipe(Layer.provideMerge(deps))
@@ -372,8 +375,8 @@ it.live("loop injects synthetic autopilot prompt instead of exiting immediately"
         Effect.gen(function* () {
           const scope = yield* Scope.Scope
           const loop = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkIn(scope, { startImmediately: true }))
-          yield* Effect.sleep("1 second")
-          expect(yield* llm.calls).toBeGreaterThanOrEqual(1)
+          yield* llm.wait(2)
+          expect(yield* llm.calls).toBeGreaterThanOrEqual(2)
 
           const msgs = yield* MessageV2.filterCompactedEffect(chat.id)
           const injected = msgs
@@ -1547,7 +1550,7 @@ unix(
 
           yield* llm.tool("bash", {
             command:
-              'i=0; while [ "$i" -lt 4000 ]; do printf "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx %05d\\n" "$i"; i=$((i + 1)); done; sleep 30',
+              'i=0; while [ "$i" -lt 20000 ]; do printf "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx %05d\\n" "$i"; i=$((i + 1)); done; sleep 30',
             description: "Print many lines",
             timeout: 30_000,
             workdir: path.resolve(dir),
@@ -1555,7 +1558,7 @@ unix(
 
           const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
           yield* llm.wait(1)
-          yield* Effect.sleep(150)
+          yield* Effect.sleep(500)
           yield* prompt.cancel(chat.id)
 
           const exit = yield* Fiber.await(run)

@@ -2,16 +2,9 @@ import { Effect, Schema } from "effect"
 import { Session } from "@/session/session"
 import { MessageV2 } from "../session/message-v2"
 import { Provider } from "@/provider/provider"
-import { type SessionID, MessageID, PartID } from "../session/schema"
+import { MessageID, PartID } from "../session/schema"
 import * as Tool from "./tool"
 import DESCRIPTION from "./autopilot-exit.txt"
-
-function getLastModel(sessionID: SessionID) {
-  for (const item of MessageV2.stream(sessionID)) {
-    if (item.info.role === "user" && item.info.model) return item.info.model
-  }
-  return undefined
-}
 
 export const Parameters = Schema.Struct({})
 
@@ -33,13 +26,16 @@ export const AutopilotExitTool = Tool.define(
             metadata: {},
           })
 
-          const model = getLastModel(ctx.sessionID) ?? (yield* provider.defaultModel())
+          const current = (yield* session.get(ctx.sessionID)).model
+          const model = current
+            ? { modelID: current.id, providerID: current.providerID, variant: current.variant }
+            : yield* provider.defaultModel()
           const msg: MessageV2.User = {
             id: MessageID.ascending(),
             sessionID: ctx.sessionID,
             role: "user",
             time: { created: Date.now() },
-            agent: "build",
+            agent: ctx.agent,
             model,
           }
           yield* session.updateMessage(msg)
@@ -54,7 +50,7 @@ export const AutopilotExitTool = Tool.define(
 
           return {
             title: "Exited autopilot",
-            output: "Autopilot completed and switched to build for a summary.",
+            output: "Autopilot completed and queued summary in current session.",
             metadata: {},
           }
         }).pipe(Effect.orDie),
