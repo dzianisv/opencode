@@ -419,7 +419,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         providerID: input.model.providerID,
         agent: input.agent,
       })) {
-        const schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
+        let schema: ReturnType<typeof ProviderTransform.schema>
+        try {
+          schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
+        } catch (err) {
+          log.warn("skipping tool with invalid parameters", { tool: item.id, error: String(err) })
+          continue
+        }
         tools[item.id] = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
