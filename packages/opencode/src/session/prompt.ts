@@ -521,8 +521,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
               const metadata = {
                 ...result.metadata,
-                truncated: truncated.truncated,
-                ...(truncated.truncated && { outputPath: truncated.outputPath }),
+                truncated: result.metadata.truncated === true || truncated.truncated,
+                ...(truncated.truncated
+                  ? { outputPath: truncated.outputPath }
+                  : result.metadata.outputPath
+                    ? { outputPath: result.metadata.outputPath }
+                    : {}),
               }
 
               const output = {
