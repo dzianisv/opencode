@@ -1,0 +1,117 @@
+{
+  "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Bold-Latin1.woff2": {
+    "file": "_build/assets/IBMPlexMono-Bold-Latin1-K_Zucu9w.woff2",
+    "src": "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Bold-Latin1.woff2"
+  },
+  "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Medium-Latin1.woff2": {
+    "file": "_build/assets/IBMPlexMono-Medium-Latin1-DBHUbp12.woff2",
+    "src": "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Medium-Latin1.woff2"
+  },
+  "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Regular-Latin1.woff2": {
+    "file": "_build/assets/IBMPlexMono-Regular-Latin1-BsnL3gsb.woff2",
+    "src": "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Regular-Latin1.woff2"
+  },
+  "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-SemiBold-Latin1.woff2": {
+    "file": "_build/assets/IBMPlexMono-SemiBold-Latin1-iYs1QkgK.woff2",
+    "src": "../../../node_modules/.bun/@ibm+plex@6.4.1/node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-SemiBold-Latin1.woff2"
+  },
+  "../../ui/src/components/provider-icons/sprite.svg": {
+    "file": "_build/assets/sprite-Chb7ocDN.svg",
+    "src": "../../ui/src/components/provider-icons/sprite.svg"
+  },
+  "_countries-50m-AdHQYOKv.js": {
+    "file": "_build/assets/countries-50m-AdHQYOKv.js",
+    "name": "countries-50m",
+    "imports": [
+      "_routing--lmSOy1r.js"
+    ],
+    "assets": [
+      "_build/assets/sprite-Chb7ocDN.svg"
+    ]
+  },
+  "_routing--lmSOy1r.js": {
+    "file": "_build/assets/routing--lmSOy1r.js",
+    "name": "routing"
+  },
+  "_stats-shell-CsMXs3yn.js": {
+    "file": "_build/assets/stats-shell-CsMXs3yn.js",
+    "name": "stats-shell",
+    "imports": [
+      "_routing--lmSOy1r.js"
+    ],
+    "css": [
+      "_build/assets/stats-shell-t212VC-t.css"
+    ],
+    "assets": [
+      "_build/assets/IBMPlexMono-Regular-Latin1-BsnL3gsb.woff2",
+      "_build/assets/IBMPlexMono-Medium-Latin1-DBHUbp12.woff2",
+      "_build/assets/IBMPlexMono-SemiBold-Latin1-iYs1QkgK.woff2",
+      "_build/assets/IBMPlexMono-Bold-Latin1-K_Zucu9w.woff2"
+    ]
+  },
+  "_stats-shell-t212VC-t.css": {
+    "file": "_build/assets/stats-shell-t212VC-t.css",
+    "src": "_stats-shell-t212VC-t.css"
+  },
+  "src/entry-client.tsx": {
+    "file": "_build/assets/entry-client-De_mClA2.js",
+    "name": "entry-client",
+    "src": "src/entry-client.tsx",
+    "isEntry": true,
+    "imports": [
+      "_routing--lmSOy1r.js"
+    ],
+    "dynamicImports": [
+      "src/routes/index.tsx?pick=default&pick=$css",
+      "src/routes/index.tsx?pick=default&pick=$css",
+      "src/routes/[lab]/[model].tsx?pick=default&pick=$css",
+      "src/routes/[lab]/[model].tsx?pick=default&pick=$css",
+      "src/routes/[lab]/index.tsx?pick=default&pick=$css",
+      "src/routes/[lab]/index.tsx?pick=default&pick=$css"
+    ],
+    "css": [
+      "_build/assets/entry-client-CL9G5L8c.css"
+    ]
+  },
+  "src/routes/[lab]/[model].tsx?pick=default&pick=$css": {
+    "file": "_build/assets/_model_-8pJoZjdD.js",
+    "name": "_model_",
+    "src": "src/routes/[lab]/[model].tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_routing--lmSOy1r.js",
+      "_stats-shell-CsMXs3yn.js",
+      "_countries-50m-AdHQYOKv.js"
+    ]
+  },
+  "src/routes/[lab]/index.tsx?pick=default&pick=$css": {
+    "file": "_build/assets/index-CwtnrYHi.js",
+    "name": "index",
+    "src": "src/routes/[lab]/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_routing--lmSOy1r.js",
+      "_stats-shell-CsMXs3yn.js"
+    ]
+  },
+  "src/routes/index.tsx?pick=default&pick=$css": {
+    "file": "_build/assets/index-BhOHc5Wj.js",
+    "name": "index",
+    "src": "src/routes/index.tsx?pick=default&pick=$css",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_routing--lmSOy1r.js",
+      "_stats-shell-CsMXs3yn.js",
+      "_countries-50m-AdHQYOKv.js"
+    ],
+    "assets": [
+      "_build/assets/IBMPlexMono-Regular-Latin1-BsnL3gsb.woff2",
+      "_build/assets/IBMPlexMono-Medium-Latin1-DBHUbp12.woff2",
+      "_build/assets/IBMPlexMono-SemiBold-Latin1-iYs1QkgK.woff2",
+      "_build/assets/IBMPlexMono-Bold-Latin1-K_Zucu9w.woff2"
+    ]
+  }
+}

@@ -502,17 +502,28 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
             // Override system prompt to a minimal instruction — the default
             // agent's full system prompt (with tool docs, persona, etc.)
             // confuses the model on workflow-specific prompts.
-            // Tools disabled by default for clean text completions. Workflows
-            // needing file access can pass { tools: true } in agent options.
+            // Tools: whitelist only file-reading tools (read, glob, grep, shell)
+            // to keep prompt size small. The full 22+ builtin set includes
+            // massive descriptions (67-skill catalog, sub-agent list) that
+            // blow past API token limits causing "Bad Request".
             const agentName = options.agent ?? (yield* agents.defaultAgent())
-            const enableTools = options.tools === true
+            const disableTools = options.tools === false
+            const WORKFLOW_TOOLS: Record<string, boolean> = {
+              read: true,
+              glob: true,
+              grep: true,
+              shell: true,
+            }
+            const toolsConfig = disableTools
+              ? { "*": false }
+              : WORKFLOW_TOOLS
             const systemPrompt = options.system ?? "You are a helpful assistant. Follow the user's instructions precisely. If asked to output JSON, output ONLY valid JSON with no other text."
             let promptResult = yield* promptSvc.prompt({
               sessionID: child.id,
               agent: agentName,
               variant: options.variant ?? "low",
               system: systemPrompt,
-              ...(!enableTools ? { tools: { "*": false } } : {}),
+              tools: toolsConfig,
               parts: [...parts, ...attachments] as any,
             })
             // If schema was requested but model returned empty text (common when
@@ -520,9 +531,17 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
             // send a follow-up message asking for the JSON output.
             const firstText = lastText(promptResult)
             if (options.schema && !firstText.trim()) {
+              const schemaReminder = JSON.stringify(options.schema, null, 2)
               const followUp: MessageV2.TextPartInput = {
                 type: "text",
-                text: "Now produce your final answer as a JSON object matching the schema. Output ONLY the JSON, no other text.",
+                text: [
+                  "Based on everything you've gathered above, now produce your final answer.",
+                  "You MUST respond with ONLY a valid JSON object matching this schema:",
+                  "```json",
+                  schemaReminder,
+                  "```",
+                  "Output ONLY the JSON object. No other text, explanation, or markdown.",
+                ].join("\n"),
               }
               promptResult = yield* promptSvc.prompt({
                 sessionID: child.id,

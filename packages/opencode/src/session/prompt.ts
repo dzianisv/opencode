@@ -418,11 +418,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // This is used by workflow agent calls to get clean text completions.
       if (input.tools?.["*"] === false) return tools
 
+      // Determine if a whitelist is active: tools map has specific keys set to true
+      // (e.g., { read: true, glob: true }). Only include those tools.
+      const hasWhitelist = input.tools && !input.tools["*"] && Object.values(input.tools).some(v => v === true)
+      const whitelist = hasWhitelist ? new Set(Object.keys(input.tools!).filter(k => input.tools![k] === true)) : null
+
       for (const item of yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
         agent: input.agent,
       })) {
+        // Skip tools not in whitelist (when whitelist is active)
+        if (whitelist && !whitelist.has(item.id)) continue
         let schema: ReturnType<typeof ProviderTransform.schema>
         try {
           schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
