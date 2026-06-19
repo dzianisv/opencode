@@ -145,6 +145,69 @@ async function importBareGlobals(file: string): Promise<WorkflowDefinition | und
   }
 }
 
+// Extract a one-line description from a SKILL.md: prefer the frontmatter
+// `description:` field, else the first non-empty, non-heading line.
+function extractSkillDescription(content: string): string {
+  const fm = content.match(/^---\n([\s\S]*?)\n---/)
+  if (fm) {
+    const desc = fm[1].match(/^description:\s*(.+)$/m)
+    if (desc) return desc[1].trim().replace(/^["']|["']$/g, "")
+  }
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---")) continue
+    return trimmed
+  }
+  return ""
+}
+
+// Pre-resolve local files a workflow prompt references so the agent doesn't
+// need a slow tool loop to discover them — and so a large skill catalog never
+// bloats the request into an API "Bad Request". Two patterns are handled:
+//  - "<...>/SKILL.md" → inject that file's full content
+//  - a directory that contains "*/SKILL.md" children → inject a catalog of
+//    each child's name + description
+// Returns a `<workflow_context>` block (empty string when nothing matched).
+async function gatherPromptContext(prompt: string): Promise<string> {
+  const blocks: string[] = []
+  const seenFiles = new Set<string>()
+  const dirs = new Set<string>()
+  const tokens = prompt.match(/\/[^\s`'"()]+/g) ?? []
+  for (const raw of tokens) {
+    const token = raw.replace(/[.,;:]+$/, "")
+    if (token.endsWith("/SKILL.md")) {
+      if (seenFiles.has(token)) continue
+      seenFiles.add(token)
+      try {
+        const content = await fs.readFile(token, "utf8")
+        blocks.push(`<file path="${token}">\n${content}\n</file>`)
+      } catch {}
+    } else {
+      dirs.add(token.replace(/\/+$/, ""))
+    }
+  }
+  for (const dir of dirs) {
+    let isDir = false
+    try {
+      isDir = (await fs.stat(dir)).isDirectory()
+    } catch {}
+    if (!isDir) continue
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [] as Awaited<ReturnType<typeof fs.readdir>>)
+    const rows: string[] = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const skillPath = path.join(dir, entry.name, "SKILL.md")
+      try {
+        const content = await fs.readFile(skillPath, "utf8")
+        rows.push(`- ${entry.name}: ${extractSkillDescription(content)}`)
+      } catch {}
+    }
+    if (rows.length) blocks.push(`<skills_catalog dir="${dir}">\n${rows.join("\n")}\n</skills_catalog>`)
+  }
+  if (blocks.length === 0) return ""
+  return `<workflow_context>\nThe local files referenced below have already been read for you. Use this content directly — do NOT call tools to re-read them.\n\n${blocks.join("\n\n")}\n</workflow_context>\n\n`
+}
+
 async function importWorkflow(file: string) {
   // Try bare-globals format first (Claude Code dynamic workflows)
   const bareGlobals = await importBareGlobals(file)
@@ -439,7 +502,11 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
         const result = await run(
           Effect.gen(function* () {
             const promptSvc = yield* SessionPrompt.Service
-            const resolvedParts = yield* promptSvc.resolvePromptParts(options.prompt)
+            // Pre-inject referenced SKILL.md files + skill catalogs so the agent
+            // doesn't need a slow tool loop to discover them (and the catalog
+            // never inflates the request past the API token limit).
+            const injected = yield* Effect.promise(() => gatherPromptContext(options.prompt))
+            const resolvedParts = yield* promptSvc.resolvePromptParts(injected + options.prompt)
             const parts: Array<{ type: string; text?: string; url?: string; filename?: string; mime?: string; id?: string }> = [...resolvedParts]
             const attachments =
               options.files?.map((file) => ({
@@ -449,17 +516,28 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
                 mime: "text/plain",
               })) ?? []
             // Resolve model: "provider/model" uses parseModel directly;
-            // bare "model-name" searches all configured providers.
-            // Prefers the highest-versioned match (e.g., "claude-sonnet-4" →
-            // "claude-sonnet-4.6" over exact "claude-sonnet-4" which may be
-            // deprecated or unsupported by the API).
+            // bare "model-name" searches configured providers. The session's
+            // default provider is searched FIRST so a bare name like
+            // "claude-sonnet-4" resolves to the provider that actually has
+            // working credentials (e.g. github-copilot) rather than a provider
+            // that is merely listed (e.g. anthropic with no API key). Within a
+            // provider the highest-versioned match wins (claude-sonnet-4 →
+            // claude-sonnet-4.6) because bare aliases are often unsupported by
+            // the upstream API (Copilot rejects "claude-sonnet-4" with 400).
             let resolvedModel: ReturnType<typeof Provider.parseModel> | undefined
             if (options.model) {
               if (options.model.includes("/")) {
                 resolvedModel = Provider.parseModel(options.model)
               } else {
                 const providers = yield* provider.list()
-                for (const [pid, info] of Object.entries(providers)) {
+                const defaultPid = (yield* provider.defaultModel().pipe(Effect.catch(() => Effect.succeed(undefined))))?.providerID
+                const order = [
+                  ...(defaultPid && providers[defaultPid] ? [defaultPid] : []),
+                  ...(Object.keys(providers) as (keyof typeof providers)[]).filter((p) => p !== defaultPid),
+                ]
+                for (const pid of order) {
+                  const info = providers[pid]
+                  if (!info) continue
                   const modelKeys = Object.keys(info.models)
                   // Find all models that start with the requested name
                   const matches = modelKeys.filter(k =>
@@ -502,17 +580,20 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
             // Override system prompt to a minimal instruction — the default
             // agent's full system prompt (with tool docs, persona, etc.)
             // confuses the model on workflow-specific prompts.
-            // Tools: whitelist only file-reading tools (read, glob, grep, shell)
-            // to keep prompt size small. The full 22+ builtin set includes
-            // massive descriptions (67-skill catalog, sub-agent list) that
-            // blow past API token limits causing "Bad Request".
+            // Tools: whitelist a small set of file/exec tools to keep the request
+            // small. The full 22+ builtin set includes massive descriptions
+            // (67-skill catalog, sub-agent list) that blow past API token limits
+            // causing "Bad Request". Note the shell tool's id is "bash" (not
+            // "shell"); "write"/"edit" are required by report/ledger phases.
             const agentName = options.agent ?? (yield* agents.defaultAgent())
             const disableTools = options.tools === false
             const WORKFLOW_TOOLS: Record<string, boolean> = {
               read: true,
               glob: true,
               grep: true,
-              shell: true,
+              bash: true,
+              write: true,
+              edit: true,
             }
             const toolsConfig = disableTools
               ? { "*": false }
@@ -521,6 +602,7 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
             let promptResult = yield* promptSvc.prompt({
               sessionID: child.id,
               agent: agentName,
+              ...(resolvedModel ? { model: resolvedModel } : {}),
               variant: options.variant ?? "low",
               system: systemPrompt,
               tools: toolsConfig,
@@ -546,6 +628,7 @@ const executeLoaded = Effect.fn("Workflow.executeLoaded")(function* (input: {
               promptResult = yield* promptSvc.prompt({
                 sessionID: child.id,
                 agent: agentName,
+                ...(resolvedModel ? { model: resolvedModel } : {}),
                 variant: options.variant ?? "low",
                 system: systemPrompt,
                 tools: { "*": false },
