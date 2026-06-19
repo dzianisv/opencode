@@ -266,6 +266,9 @@ These files are frequently modified by both upstream and this fork. Pay extra at
 | `tool/registry.ts` | **HIGH** | `rename` tool registration in built-in list |
 | `tool/rename.ts` | **HIGH** | `rename` tool id/parameters/Session title update behavior |
 | `session/system.ts` | MEDIUM | session naming guidance so agent actually calls `rename` |
+| `workflow/index.ts` | **HIGH** | fork-only; entire bare-globals engine lives here |
+| `command/index.ts` | **HIGH** | `Default.WORKFLOW` + `source: "workflow"` registration |
+| `session/prompt.ts` | **HIGH** | `PromptInput.model` + tool-whitelist gate (`tools["*"] === false`) used by workflow `ctx.agent` |
 
 ## Remaining Backup-Only Patches (not ported 1:1)
 
@@ -390,6 +393,33 @@ Deep audit of every outbound HTTP call, the sharing pipeline, LLM request header
 2. Use your own provider API keys (Anthropic, OpenAI, etc.) — prompts go directly to the provider with no opencode.ai intermediary.
 3. Never set `share: "auto"` unless you want full prompt/response/diff history uploaded to opncd.ai.
 4. Enterprise users: keep `.well-known/opencode` and remote config on trusted infrastructure; same-origin and credentialed-URL guards are enforced in code.
+
+---
+
+## ✅ Dynamic Workflow Runner (Claude Code bare-globals) — 2026-06-19
+
+Commit `20734871477c19d11859f7c4f564e4553d8578fb` on `dev`. Adds a `/workflow <file.js>` slash command that runs project-local JS workflows, with full support for Claude Code's "bare-globals" workflow format (files written for Claude Code's hidden workflows feature run unmodified). Announced upstream on issues [#29059](https://github.com/anomalyco/opencode/issues/29059), [#30308](https://github.com/anomalyco/opencode/issues/30308), [#32166](https://github.com/anomalyco/opencode/issues/32166).
+
+**Files (13, ~1454 insertions):**
+- `packages/opencode/src/workflow/index.ts` — engine: bare-globals runtime (`agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, `args`) via AsyncFunction injection, native `workflow({...})` form, model resolution, skill-catalog pre-injection, tool whitelist.
+- `packages/opencode/src/command/index.ts` — registers `workflow` command source (`/workflow`, `source: "workflow"`).
+- `packages/opencode/src/session/prompt.ts` — `PromptInput.model` (`{providerID, modelID}`) + tool whitelist support (`tools["*"] === false` gate).
+- `packages/opencode/src/provider/.../openai-compatible-chat-language-model.ts` — tool-schema serialization guard.
+- `packages/plugin/src/workflow.ts`, `packages/plugin/src/index.ts`, `packages/plugin/package.json` — plugin wiring.
+- Tests: `test/workflow/bare-globals.test.ts`, `test/workflow/workflow-command.test.ts`, `test/server/httpapi-workflow.test.ts`, `test/tool/{interrupt-schema,plugin-schema,schema-all}.test.ts`.
+
+**Key behaviors:**
+- Sub-agents run in isolated sessions (clean main chat); structured output via JSON `schema` option (model forced to return validated JSON).
+- Bare model IDs resolve across providers, preferring the default provider (e.g. `claude-sonnet-4` → `claude-sonnet-4.6`); resolved model is threaded through to the sub-agent prompt call (was previously computed then discarded).
+- Skill-catalog pre-injection: prompt referencing a skills dir gets `SKILL.md` content + per-dir catalog injected as a `<workflow_context>` block.
+- Tool whitelist for agent calls: `{ read, glob, grep, bash, write, edit }` (note shell tool id is `bash`, not `shell`).
+
+**How to verify:**
+1. `bun run --cwd packages/opencode install:local`
+2. From a project dir: `~/.local/bin/opencode run "/workflow .agents/workflows/iso-test.workflow.js"` → returns `{ "mode": "plain", "r": "4" }`
+3. `cd packages/opencode && bun test test/workflow/` (bare-globals + command tests pass)
+
+**⚠️ REBASE NOTE:** This is a fork-only feature; upstream has no `workflow` command source. If upstream adds one, reconcile `command/index.ts` registration and `Default.WORKFLOW` carefully. The `prompt.ts` `model` + tool-whitelist hooks are also load-bearing for `ctx.agent` — verify they survive any `session/prompt.ts` conflict.
 
 ### Remediation update (2026-05-14)
 
