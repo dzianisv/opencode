@@ -15,6 +15,10 @@ import { Todo } from "@/session/todo"
 import { Skill } from "@/skill"
 import { Agent } from "@/agent/agent"
 import { Session } from "@/session/session"
+import { Interrupt } from "@/session/interrupt"
+import { SessionRunState } from "@/session/run-state"
+import { SessionStatus } from "@/session/status"
+import { Permission } from "@/permission"
 import { Provider } from "@/provider/provider"
 import { Git } from "@/git"
 import { LSP } from "@/lsp/lsp"
@@ -26,6 +30,8 @@ import { Ripgrep } from "@/file/ripgrep"
 import * as Truncate from "@/tool/truncate"
 import { InstanceState } from "@/effect/instance-state"
 import { InstanceLayer } from "@/project/instance-layer"
+import { InstanceStore } from "@/project/instance-store"
+import { InstanceBootstrap } from "@/project/bootstrap-service"
 
 const node = CrossSpawnSpawner.defaultLayer
 const originalExperimentalScout = Flag.OPENCODE_EXPERIMENTAL_SCOUT
@@ -33,25 +39,41 @@ const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
 })
 
+const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
+
+const registryDeps = Layer.mergeAll(
+  Layer.mergeAll(
+    configLayer,
+    InstanceStore.defaultLayer.pipe(Layer.provide(noopBootstrap)),
+    Interrupt.defaultLayer,
+    Permission.defaultLayer,
+    SessionStatus.defaultLayer,
+    SessionRunState.defaultLayer,
+    Plugin.defaultLayer,
+    Question.defaultLayer,
+    Todo.defaultLayer,
+    Skill.defaultLayer,
+    Agent.defaultLayer,
+    Session.defaultLayer,
+  ),
+  Layer.mergeAll(
+    Provider.defaultLayer,
+    Git.defaultLayer,
+    LSP.defaultLayer,
+    Instruction.defaultLayer,
+    AppFileSystem.defaultLayer,
+    Bus.layer,
+    FetchHttpClient.layer,
+    InstanceLayer.layer,
+    Format.defaultLayer,
+    node,
+    Ripgrep.defaultLayer,
+    Truncate.defaultLayer,
+  ),
+)
+
 const registryLayer = ToolRegistry.layer.pipe(
-  Layer.provide(configLayer),
-  Layer.provide(Plugin.defaultLayer),
-  Layer.provide(Question.defaultLayer),
-  Layer.provide(Todo.defaultLayer),
-  Layer.provide(Skill.defaultLayer),
-  Layer.provide(Agent.defaultLayer),
-  Layer.provide(Session.defaultLayer),
-  Layer.provide(Provider.defaultLayer),
-  Layer.provide(Git.defaultLayer),
-  Layer.provide(LSP.defaultLayer),
-  Layer.provide(Instruction.defaultLayer),
-  Layer.provide(AppFileSystem.defaultLayer),
-  Layer.provide(Bus.layer),
-  Layer.provide(FetchHttpClient.layer),
-  Layer.provide(InstanceLayer.layer),
-  Layer.provide(Format.defaultLayer),
-  Layer.provide(node),
-  Layer.provide(Ripgrep.defaultLayer),
+  Layer.provide(registryDeps),
   Layer.provide(Truncate.defaultLayer),
 )
 
