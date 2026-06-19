@@ -30,6 +30,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
+import * as Workflow from "@/workflow"
 import { pathToFileURL, fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
@@ -413,12 +414,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .pipe(Effect.orDie),
       })
 
+      // When tools has wildcard disable ("*": false), skip all tool registration.
+      // This is used by workflow agent calls to get clean text completions.
+      if (input.tools?.["*"] === false) return tools
+
+      // Determine if a whitelist is active: tools map has specific keys set to true
+      // (e.g., { read: true, glob: true }). Only include those tools.
+      const hasWhitelist = input.tools && !input.tools["*"] && Object.values(input.tools).some(v => v === true)
+      const whitelist = hasWhitelist ? new Set(Object.keys(input.tools!).filter(k => input.tools![k] === true)) : null
+
       for (const item of yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
         agent: input.agent,
       })) {
-        const schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
+        // Skip tools not in whitelist (when whitelist is active)
+        if (whitelist && !whitelist.has(item.id)) continue
+        let schema: ReturnType<typeof ProviderTransform.schema>
+        try {
+          schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
+        } catch (err) {
+          log.warn("skipping tool with invalid parameters", { tool: item.id, error: String(err) })
+          continue
+        }
         tools[item.id] = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
@@ -1598,7 +1616,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            // When a system override is set (e.g., workflow agent calls),
+            // use only that — skip AGENTS.md, skills, and full env prompt.
+            // Check the first user message (not lastUser) because subsequent
+            // loop iterations create new user messages for tool results that
+            // lack the system field.
+            const firstUserSystem = (msgs.find(m => m.info.role === "user") as { info: MessageV2.User } | undefined)?.info.system
+            const system = firstUserSystem
+              ? [firstUserSystem]
+              : [...env, ...instructions, ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
@@ -1667,7 +1693,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     )
 
-    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+    const command: Interface["command"] = (input) =>
+      Effect.gen(function* () {
       yield* elog.info("command", { sessionID: input.sessionID, command: input.command, agent: input.agent })
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
@@ -1676,6 +1703,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
         yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
+      }
+      if (cmd.source === "workflow") {
+        return yield* Workflow.executeCommand({
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          arguments: input.arguments,
+          agent: input.agent,
+          model: input.model,
+          variant: input.variant,
+        }).pipe(
+          Effect.provideService(Session.Service, sessions),
+          Effect.provideService(Agent.Service, agents),
+          Effect.provideService(Provider.Service, provider),
+          Effect.provideService(Config.Service, config),
+          Effect.provideService(Plugin.Service, plugin),
+          Effect.provideService(ToolRegistry.Service, registry),
+        )
       }
       const agentName = cmd.agent ?? input.agent ?? (yield* agents.defaultAgent())
 

@@ -15,8 +15,10 @@ import type { Provider as ProviderV2, Model as ModelV2 } from "@opencode-ai/sdk/
 
 import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
+import type { WorkflowDefinition } from "./workflow.js"
 
 export * from "./tool.js"
+export * from "./workflow.js"
 
 export type ProviderContext = {
   source: "env" | "config" | "custom" | "api"
@@ -225,6 +227,7 @@ export interface Hooks {
   tool?: {
     [key: string]: ToolDefinition
   }
+  workflow?: () => Promise<Record<string, WorkflowDefinition | string>>
   auth?: AuthHook
   provider?: ProviderHook
   /**
