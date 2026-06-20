@@ -34,7 +34,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "name=@vibetechnologies/opencode" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./packages/opencode/package.json').version\")" >> "$GITHUB_OUTPUT"
+          V=$(node -p "require('./packages/opencode/package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
