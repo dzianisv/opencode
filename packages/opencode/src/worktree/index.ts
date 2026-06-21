@@ -247,6 +247,26 @@ export const layer: Layer.Layer<
       yield* project.addSandbox(ctx.project.id, info.directory).pipe(Effect.catch(() => Effect.void))
     })
 
+    const SHARED_DIRS = ["node_modules", ".venv"] as const
+
+    const symlinkSharedDeps = Effect.fnUntraced(function* (primaryDir: string, worktreeDir: string) {
+      for (const dir of SHARED_DIRS) {
+        const source = pathSvc.join(primaryDir, dir)
+        const target = pathSvc.join(worktreeDir, dir)
+
+        const sourceExists = yield* fs.exists(source).pipe(Effect.orDie)
+        if (!sourceExists) continue
+
+        const targetExists = yield* fs.exists(target).pipe(Effect.orDie)
+        if (targetExists) continue
+
+        yield* Effect.promise(() =>
+          import("fs/promises").then((fsp) => fsp.symlink(source, target, "junction")),
+        )
+        log.info("symlinked shared dependency directory", { source, target })
+      }
+    })
+
     const boot = Effect.fnUntraced(function* (info: Info, startCommand?: string) {
       const ctx = yield* InstanceState.context
       const workspaceID = yield* InstanceState.workspaceID
@@ -265,6 +285,8 @@ export const layer: Layer.Layer<
         })
         return
       }
+
+      yield* symlinkSharedDeps(ctx.worktree, info.directory)
 
       const booted = yield* store.load({ directory: info.directory }).pipe(
         Effect.as(true),
