@@ -49,11 +49,14 @@ function detectPlatformAndArch() {
 
 function findBinary() {
   const { platform, arch } = detectPlatformAndArch()
-  const packageName = `opencode-${platform}-${arch}`
   const binaryName = platform === "windows" ? "opencode.exe" : "opencode"
+  let packageName
 
   try {
-    // Use require.resolve to find the package
+    const selfPkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"))
+    const scope = selfPkg.name.replace(/[^/]+$/, "")
+    packageName = `${scope}opencode-${platform}-${arch}`
+
     const packageJsonPath = require.resolve(`${packageName}/package.json`)
     const packageDir = path.dirname(packageJsonPath)
     const binaryPath = path.join(packageDir, "bin", binaryName)
@@ -64,7 +67,7 @@ function findBinary() {
 
     return { binaryPath, binaryName }
   } catch (error) {
-    throw new Error(`Could not find package ${packageName}: ${error.message}`, { cause: error })
+    throw new Error(`Could not find package ${packageName || "unknown"}: ${error.message}`, { cause: error })
   }
 }
 
