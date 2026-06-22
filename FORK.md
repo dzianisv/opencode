@@ -74,7 +74,24 @@ bun run script/install-local.ts
 git push origin dev --force-with-lease --no-verify
 # Wait for CI, then:
 npm view @vibetechnologies/opencode@<VERSION> version
+
+# 8. Feature smoke test — verifies recent sessions sidebar wasn't dropped
+bash packages/app/scripts/smoke-recent-sessions.sh
 ```
+
+## Invariants That Must Survive Every Rebase
+
+These features MUST be present after every rebase. If any are missing, the rebase is NOT done:
+
+| Feature | Check file/component | Why it breaks |
+|---------|---------------------|---------------|
+| Recent sessions sidebar | `packages/app/src/pages/layout/sidebar-recent.tsx` | Upstream rewrites app layout; our additions get dropped |
+| `/recent` route | `grep /recent packages/app/src/app.tsx` | Upstream router changes; our route registration gets dropped |
+| sidebarView state | `grep sidebarView packages/app/src/pages/layout/layout.tsx` | State dropped when layout.tsx conflicts are resolved against upstream |
+
+**Validation script**: `bash packages/app/scripts/smoke-recent-sessions.sh`
+
+**Never declare a rebase done without running this script.**
 
 ## Intentionally Dropped Patches
 
