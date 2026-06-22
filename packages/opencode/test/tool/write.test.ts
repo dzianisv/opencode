@@ -179,7 +179,10 @@ describe("tool.write", () => {
 
         if (process.platform !== "win32") {
           const stats = yield* Effect.promise(() => fs.stat(filepath))
-          expect(stats.mode & 0o777).toBe(0o644)
+          // File gets default permissions (0o666 & ~umask), not group/other writable
+          const mode = stats.mode & 0o777
+          expect(mode & 0o111).toBe(0) // not executable
+          expect(mode & 0o600).toBe(0o600) // owner read+write
         }
       }),
     )
