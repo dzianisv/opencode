@@ -10,4 +10,6 @@ export const InstallationChannel = typeof OPENCODE_CHANNEL === "string" ? OPENCO
 export const InstallationLocal = InstallationChannel === "local"
 const repo = typeof OPENCODE_REPO === "string" ? OPENCODE_REPO : ""
 const gitDescribe = typeof OPENCODE_GIT_DESCRIBE === "string" ? OPENCODE_GIT_DESCRIBE : ""
-export const InstallationVersionDisplay = [repo, gitDescribe || InstallationVersion].filter(Boolean).join(" ")
+const isDevBuild = !InstallationVersion || InstallationVersion === "local" || InstallationVersion.startsWith("0.0.0-")
+const versionPart = isDevBuild ? gitDescribe || InstallationVersion : InstallationVersion
+export const InstallationVersionDisplay = [repo, versionPart].filter(Boolean).join(" ")

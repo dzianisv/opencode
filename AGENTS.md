@@ -2,6 +2,30 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## Delivering to npm
+
+This repo is a fork (`dzianisv/opencode`) that publishes to `@vibetechnologies/opencode`.
+After committing a change, use the **`fork-deliver`** skill to ship it end-to-end:
+
+```
+load skill: fork-deliver
+```
+
+Summary of the delivery pipeline:
+
+1. **Typecheck** — `cd packages/opencode && bun typecheck` must be clean.
+2. **Version** — `packages/opencode/package.json` version must not already exist on npm.
+   Bump patch if needed (`chore(opencode): bump to X.Y.Z`).
+3. **Push** — `git push origin dev`. Pre-push hook runs typecheck automatically.
+4. **CI trigger** — `fork-publish` workflow fires only when `packages/opencode/package.json`
+   changes on `dev`. If your commit didn't touch that file, bump the version.
+5. **Monitor** — `gh run watch <run-id>` until all steps show ✓.
+6. **Verify** — install the published binary and confirm `opencode -v` shows
+   `dzianisv/opencode <VERSION>` (not `github-v*` or `0.0.0-*`).
+
+The `fork-deliver` skill contains the exact commands, failure table, and gotchas
+(including the `OPENCODE_CHANNEL` / version-display bug fixed in commits 8d74035d6 + 5a6007f6e).
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.
