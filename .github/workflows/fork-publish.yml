@@ -54,10 +54,10 @@ jobs:
           set -euo pipefail
           check() {
             if npm view "${1}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
-              echo "${1}@${PACKAGE_VERSION} already published."
+              echo "${1}@${PACKAGE_VERSION} already published." >&2
               echo "true"
             else
-              echo "${1}@${PACKAGE_VERSION} not on npm."
+              echo "${1}@${PACKAGE_VERSION} not on npm." >&2
               echo "false"
             fi
           }
