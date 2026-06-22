@@ -521,8 +521,25 @@ export const layer = Layer.effect(
           { concurrency: "unbounded" },
         )
 
+        // Synchronous exit handler: kill MCP child processes on crash, uncaught
+        // exception, or signal.  The "exit" event is sync-only so we skip the
+        // async `descendants()` walk and kill direct children — the OS will
+        // propagate SIGTERM to their subtrees.
+        const killMcpChildren = () => {
+          for (const client of Object.values(s.clients)) {
+            if (!(client.transport instanceof StdioClientTransport)) continue
+            const pid = client.transport.pid
+            if (typeof pid !== "number") continue
+            try {
+              process.kill(pid, "SIGTERM")
+            } catch {}
+          }
+        }
+        process.on("exit", killMcpChildren)
+
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
+            process.removeListener("exit", killMcpChildren)
             yield* Effect.forEach(
               Object.values(s.clients),
               (client) =>
