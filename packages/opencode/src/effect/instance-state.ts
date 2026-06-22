@@ -1,4 +1,4 @@
-import { Effect, ScopedCache, Scope } from "effect"
+import { Duration, Effect, ScopedCache, Scope } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
 import { InstanceRef, WorkspaceRef } from "./instance-ref"
 import { registerDisposer } from "./instance-registry"
@@ -28,7 +28,8 @@ export const make = <A, E = never, R = never>(
 ): Effect.Effect<InstanceState<A, E, Exclude<R, Scope.Scope>>, never, R | Scope.Scope> =>
   Effect.gen(function* () {
     const cache = yield* ScopedCache.make<string, A, E, R>({
-      capacity: Number.POSITIVE_INFINITY,
+      capacity: 5,
+      timeToLive: Duration.minutes(10),
       lookup: () =>
         Effect.gen(function* () {
           return yield* init(yield* context)
