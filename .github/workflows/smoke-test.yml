@@ -1,0 +1,56 @@
+name: smoke-test
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  smoke-test:
+    name: Smoke test — opencode run helloworld
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Build opencode (local)
+        run: |
+          cd packages/opencode
+          OPENCODE_CHANNEL=local bun run build --single --skip-embed-web-ui
+
+      - name: Install binary
+        run: |
+          cd packages/opencode
+          bun run copy:local
+
+      - name: Run smoke test
+        id: smoke
+        run: |
+          mkdir -p /tmp/smoke-test
+          cd /tmp/smoke-test
+          ~/.local/bin/opencode run "create a simple helloworld.py app"
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        timeout-minutes: 5
+
+      - name: Verify output
+        run: |
+          if [ ! -f /tmp/smoke-test/helloworld.py ]; then
+            echo "FAIL: helloworld.py not created"
+            exit 1
+          fi
+          OUTPUT=$(python3 /tmp/smoke-test/helloworld.py)
+          echo "Output: $OUTPUT"
+          if echo "$OUTPUT" | grep -qi "hello"; then
+            echo "PASS: smoke test passed — Hello, World! ✅"
+          else
+            echo "FAIL: expected 'Hello' in output, got: $OUTPUT"
+            exit 1
+          fi
