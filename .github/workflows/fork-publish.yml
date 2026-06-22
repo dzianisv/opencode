@@ -33,7 +33,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "name=@vibetechnologies/opencode" >> "$GITHUB_OUTPUT"
           V=$(node -p "require('./packages/opencode/package.json').version")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
@@ -50,86 +49,109 @@ jobs:
         id: registry
         shell: bash
         env:
-          PACKAGE_NAME: ${{ steps.package.outputs.name }}
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: |
           set -euo pipefail
-          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} already published. Skip publish."
-            exit 0
+          check() {
+            if npm view "${1}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+              echo "${1}@${PACKAGE_VERSION} already published."
+              echo "true"
+            else
+              echo "${1}@${PACKAGE_VERSION} not on npm."
+              echo "false"
+            fi
+          }
+          VT=$(check "@vibetechnologies/opencode")
+          DZ=$(check "@dzianisv/opencode")
+          echo "vt_published=${VT}" >> "$GITHUB_OUTPUT"
+          echo "dz_published=${DZ}" >> "$GITHUB_OUTPUT"
+          # build needed if either is unpublished
+          if [[ "$VT" == "true" && "$DZ" == "true" ]]; then
+            echo "build_needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_needed=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "published=false" >> "$GITHUB_OUTPUT"
-          echo "${PACKAGE_NAME}@${PACKAGE_VERSION} not on npm. Continue."
 
       - name: Setup Bun
-        if: steps.registry.outputs.published != 'true'
+        if: steps.registry.outputs.build_needed == 'true'
         uses: ./.github/actions/setup-bun
 
       - name: Build Linux CLI binary
-        if: steps.registry.outputs.published != 'true'
+        if: steps.registry.outputs.build_needed == 'true'
         working-directory: packages/opencode
         env:
           OPENCODE_CHANNEL: latest
           OPENCODE_VERSION: ${{ steps.package.outputs.version }}
         run: bun run build --single
 
-      - name: Prepare publish package
-        if: steps.registry.outputs.published != 'true'
+      - name: Publish @vibetechnologies/opencode
+        if: steps.registry.outputs.vt_published != 'true'
         working-directory: packages/opencode
         shell: bash
         env:
-          PACKAGE_NAME: ${{ steps.package.outputs.name }}
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: |
           set -euo pipefail
-          rm -rf .publish
-          mkdir -p .publish/bin
-          cp dist/opencode-linux-x64/bin/opencode .publish/bin/opencode
-          chmod 755 .publish/bin/opencode
-          cp README.md .publish/README.md
-          cp ../../LICENSE .publish/LICENSE
-          node <<'NODE'
-          const fs = require('fs')
-          const source = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-          const pkg = {
-            name: process.env.PACKAGE_NAME,
-            version: process.env.PACKAGE_VERSION,
-            description: source.description ?? 'AI-powered development tool',
-            license: source.license ?? 'MIT',
-            type: 'module',
-            bin: {
-              opencode: './bin/opencode',
-            },
-            os: ['linux'],
-            cpu: ['x64'],
-            files: ['bin', 'README.md', 'LICENSE'],
-            repository: {
-              type: 'git',
-              url: 'git+https://github.com/dzianisv/opencode.git',
-            },
-            homepage: 'https://github.com/dzianisv/opencode#readme',
-            bugs: {
-              url: 'https://github.com/dzianisv/opencode/issues',
+          rm -rf .publish-vt
+          mkdir -p .publish-vt/bin
+          cp dist/opencode-linux-x64/bin/opencode .publish-vt/bin/opencode
+          chmod 755 .publish-vt/bin/opencode
+          cp README.md .publish-vt/README.md
+          cp ../../LICENSE .publish-vt/LICENSE
+          node -e "
+            const fs = require('fs')
+            const src = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+            fs.writeFileSync('.publish-vt/package.json', JSON.stringify({
+              name: '@vibetechnologies/opencode',
+              version: process.env.PACKAGE_VERSION,
+              description: src.description ?? 'AI-powered development tool',
+              license: src.license ?? 'MIT',
+              type: 'module',
+              bin: { opencode: './bin/opencode' },
+              os: ['linux'], cpu: ['x64'],
+              files: ['bin', 'README.md', 'LICENSE'],
+              repository: { type: 'git', url: 'git+https://github.com/dzianisv/opencode.git' },
+              homepage: 'https://github.com/dzianisv/opencode#readme',
+              bugs: { url: 'https://github.com/dzianisv/opencode/issues' },
+            }, null, 2) + '\n')
+          "
+          npm publish .publish-vt --provenance --access public
 
-            },
-          }
-          fs.writeFileSync('.publish/package.json', JSON.stringify(pkg, null, 2) + '\n')
-          NODE
-
-      - name: Preview npm tarball
-        if: steps.registry.outputs.published != 'true'
-        working-directory: packages/opencode/.publish
-        run: npm pack --dry-run
-
-      - name: Publish package
-        if: steps.registry.outputs.published != 'true'
-        id: publish
-        working-directory: packages/opencode/.publish
-        run: npm publish --provenance --access public
+      - name: Publish @dzianisv/opencode
+        if: steps.registry.outputs.dz_published != 'true'
+        working-directory: packages/opencode
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf .publish-dz
+          mkdir -p .publish-dz/bin
+          cp dist/opencode-linux-x64/bin/opencode .publish-dz/bin/opencode
+          chmod 755 .publish-dz/bin/opencode
+          cp README.md .publish-dz/README.md
+          cp ../../LICENSE .publish-dz/LICENSE
+          node -e "
+            const fs = require('fs')
+            const src = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+            fs.writeFileSync('.publish-dz/package.json', JSON.stringify({
+              name: '@dzianisv/opencode',
+              version: process.env.PACKAGE_VERSION,
+              description: src.description ?? 'AI-powered development tool',
+              license: src.license ?? 'MIT',
+              type: 'module',
+              bin: { opencode: './bin/opencode' },
+              os: ['linux'], cpu: ['x64'],
+              files: ['bin', 'README.md', 'LICENSE'],
+              repository: { type: 'git', url: 'git+https://github.com/dzianisv/opencode.git' },
+              homepage: 'https://github.com/dzianisv/opencode#readme',
+              bugs: { url: 'https://github.com/dzianisv/opencode/issues' },
+            }, null, 2) + '\n')
+          "
+          npm publish .publish-dz --provenance --access public
 
       - name: Create git tag
-        if: steps.registry.outputs.published == 'true' || steps.publish.outcome == 'success'
+        if: always()
         shell: bash
         env:
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
