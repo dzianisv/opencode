@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.17.9",
+  "version": "1.17.10",
   "name": "opencode",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
     "build": "bun run script/build.ts",
+    "install:local": "bun run build && bun run script/install-local.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
     "dev:temporary": "bun run --conditions=browser ./src/temporary.ts"
   },
