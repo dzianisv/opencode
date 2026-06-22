@@ -1,0 +1,41 @@
+name: deprecate legacy platform packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deprecate:
+    if: github.repository == 'dzianisv/opencode'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Deprecate legacy platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          MSG="Unused stub — superseded by @vibetechnologies/opencode (single-binary package)"
+          packages=(
+            "@vibetechnologies/opencode-linux-x64"
+            "@vibetechnologies/opencode-linux-x64-musl"
+            "@vibetechnologies/opencode-linux-x64-baseline-musl"
+            "@vibetechnologies/opencode-linux-arm64"
+            "@vibetechnologies/opencode-linux-arm64-musl"
+            "@vibetechnologies/opencode-darwin-x64-baseline"
+            "@vibetechnologies/opencode-darwin-arm64"
+            "@vibetechnologies/opencode-windows-x64"
+            "@vibetechnologies/opencode-windows-x64-baseline"
+            "@vibetechnologies/opencode-windows-arm64"
+          )
+          for pkg in "${packages[@]}"; do
+            echo "Deprecating $pkg ..."
+            npm deprecate "$pkg" "$MSG" || echo "WARN: failed to deprecate $pkg (may not exist or no permission)"
+          done
+          echo "Done."
