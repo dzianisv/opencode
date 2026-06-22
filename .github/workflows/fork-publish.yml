@@ -70,7 +70,8 @@ jobs:
         if: steps.registry.outputs.published != 'true'
         working-directory: packages/opencode
         env:
-          OPENCODE_CHANNEL: local
+          OPENCODE_CHANNEL: latest
+          OPENCODE_VERSION: ${{ steps.package.outputs.version }}
         run: bun run build --single
 
       - name: Prepare publish package
