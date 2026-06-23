@@ -53,7 +53,7 @@ const INVARIANTS: Array<{ desc: string; check: () => boolean; fatal: boolean }> 
   {
     desc: "layout.tsx imports RecentTile",
     check: () => {
-      const f = "packages/app/src/pages/layout/layout.tsx"
+      const f = "packages/app/src/pages/layout.tsx"
       return existsSync(f) && readFileSync(f, "utf8").includes("RecentTile")
     },
     fatal: true,
@@ -61,7 +61,7 @@ const INVARIANTS: Array<{ desc: string; check: () => boolean; fatal: boolean }> 
   {
     desc: "layout.tsx imports RecentSidebarPanel",
     check: () => {
-      const f = "packages/app/src/pages/layout/layout.tsx"
+      const f = "packages/app/src/pages/layout.tsx"
       return existsSync(f) && readFileSync(f, "utf8").includes("RecentSidebarPanel")
     },
     fatal: true,
@@ -69,7 +69,7 @@ const INVARIANTS: Array<{ desc: string; check: () => boolean; fatal: boolean }> 
   {
     desc: "layout.tsx has sidebarView state",
     check: () => {
-      const f = "packages/app/src/pages/layout/layout.tsx"
+      const f = "packages/app/src/pages/layout.tsx"
       return existsSync(f) && readFileSync(f, "utf8").includes("sidebarView")
     },
     fatal: true,
@@ -149,9 +149,9 @@ Run ALL of the following checks using bash. Do not skip any.
 ## 1. Feature invariants
 \`\`\`bash
 test -f packages/app/src/pages/layout/sidebar-recent.tsx && echo "OK sidebar-recent.tsx" || echo "FAIL sidebar-recent.tsx"
-grep -q "RecentTile" packages/app/src/pages/layout/layout.tsx && echo "OK RecentTile" || echo "FAIL RecentTile"
-grep -q "RecentSidebarPanel" packages/app/src/pages/layout/layout.tsx && echo "OK RecentSidebarPanel" || echo "FAIL RecentSidebarPanel"
-grep -q 'sidebarView' packages/app/src/pages/layout/layout.tsx && echo "OK sidebarView" || echo "FAIL sidebarView"
+grep -q "RecentTile" packages/app/src/pages/layout.tsx && echo "OK RecentTile" || echo "FAIL RecentTile"
+grep -q "RecentSidebarPanel" packages/app/src/pages/layout.tsx && echo "OK RecentSidebarPanel" || echo "FAIL RecentSidebarPanel"
+grep -q 'sidebarView' packages/app/src/pages/layout.tsx && echo "OK sidebarView" || echo "FAIL sidebarView"
 grep -q '"/recent"' packages/app/src/app.tsx && echo "OK /recent route" || echo "FAIL /recent route"
 \`\`\`
 

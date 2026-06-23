@@ -37,13 +37,13 @@ jobs:
             test -f packages/app/src/pages/layout/sidebar-recent.tsx
 
           check "layout.tsx imports RecentTile" \
-            grep -q "RecentTile" packages/app/src/pages/layout/layout.tsx
+            grep -q "RecentTile" packages/app/src/pages/layout.tsx
 
           check "layout.tsx imports RecentSidebarPanel" \
-            grep -q "RecentSidebarPanel" packages/app/src/pages/layout/layout.tsx
+            grep -q "RecentSidebarPanel" packages/app/src/pages/layout.tsx
 
           check "layout.tsx has sidebarView state" \
-            grep -q "sidebarView" packages/app/src/pages/layout/layout.tsx
+            grep -q "sidebarView" packages/app/src/pages/layout.tsx
 
           check "/recent route registered in app.tsx" \
             grep -q '"/recent"' packages/app/src/app.tsx
