@@ -20,7 +20,7 @@ jobs:
       - name: Run typecheck
         run: bun typecheck
 
-      - name: Feature invariants — recent sessions sidebar must survive every rebase
+      - name: Feature invariants — v2 layout must survive every rebase
         run: |
           ERRORS=0
           check() {
@@ -33,26 +33,21 @@ jobs:
             fi
           }
 
-          check "sidebar-recent.tsx exists" \
-            test -f packages/app/src/pages/layout/sidebar-recent.tsx
+          # v2 design: recent sessions are built into sidebar-project.tsx natively
+          # sidebar-recent.tsx was a v1 artifact — it no longer exists
+          check "sidebar-project.tsx has recentSessions (v2 recent sessions)" \
+            grep -q "recentSessions" packages/app/src/pages/layout/sidebar-project.tsx
 
-          check "layout.tsx imports RecentTile" \
-            grep -q "RecentTile" packages/app/src/pages/layout.tsx
+          check "layout.tsx imports SortableProject (v2 layout intact)" \
+            grep -q "SortableProject" packages/app/src/pages/layout.tsx
 
-          check "layout.tsx imports RecentSidebarPanel" \
-            grep -q "RecentSidebarPanel" packages/app/src/pages/layout.tsx
-
-          check "layout.tsx has sidebarView state" \
-            grep -q "sidebarView" packages/app/src/pages/layout.tsx
-
-          check "/recent route registered in app.tsx" \
-            grep -q '"/recent"' packages/app/src/app.tsx
+          check "sidebar-shell.tsx has SidebarContent (nav rail intact)" \
+            grep -q "SidebarContent" packages/app/src/pages/layout/sidebar-shell.tsx
 
           if [ "$ERRORS" -gt 0 ]; then
             echo ""
-            echo "FAIL: $ERRORS feature invariant(s) missing."
-            echo "Recent sessions sidebar was likely dropped during an upstream rebase."
-            echo "See FORK.md 'Invariants That Must Survive Every Rebase' + packages/app/scripts/smoke-recent-sessions.sh"
+            echo "FAIL: $ERRORS v2 layout invariant(s) missing."
+            echo "The v2 layout was likely broken during a rebase."
             exit 1
           fi
-          echo "All recent-sessions invariants present."
+          echo "All v2 layout invariants present."

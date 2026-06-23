@@ -17,11 +17,6 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
-type ModelItem = NonNullable<ReturnType<ModelState["current"]>>
-
-function itemKey(item: ModelItem) {
-  return `${item.provider.id}:${item.id}`
-}
 
 const ModelList: Component<{
   provider?: string
@@ -33,22 +28,11 @@ const ModelList: Component<{
   const model = props.model ?? useLocal().model
   const language = useLanguage()
 
-  const recent = () => "Recently Used"
   const models = createMemo(() =>
     model
       .list()
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true))
-      .map((m) => m as ModelItem),
-  )
-  const recents = createMemo(
-    () =>
-      new Map(
-        (model.recent?.() ?? []).flatMap((item, index) => {
-          if (!item) return []
-          return [[itemKey(item as ModelItem), index] as const]
-        }),
-      ),
+      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
 
   return (
@@ -56,20 +40,13 @@ const ModelList: Component<{
       class={`flex-1 px-3 min-h-0 [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:min-h-0 ${props.class ?? ""}`}
       search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true, action: props.action }}
       emptyMessage={language.t("dialog.model.empty")}
-      key={itemKey}
+      key={(x) => `${x.provider.id}:${x.id}`}
       items={models}
-      current={model.current() as ModelItem | undefined}
+      current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
-      sortBy={(a, b) => {
-        const ai = recents().get(itemKey(a))
-        const bi = recents().get(itemKey(b))
-        if (ai !== undefined && bi !== undefined) return ai - bi
-        return a.name.localeCompare(b.name)
-      }}
-      groupBy={(item) => (recents().has(itemKey(item)) ? recent() : item.provider.name)}
+      sortBy={(a, b) => a.name.localeCompare(b.name)}
+      groupBy={(x) => x.provider.name}
       sortGroupsBy={(a, b) => {
-        if (a.category === recent()) return -1
-        if (b.category === recent()) return 1
         const aProvider = a.items[0].provider.id
         const bProvider = b.items[0].provider.id
         if (popularProviders.includes(aProvider) && !popularProviders.includes(bProvider)) return -1

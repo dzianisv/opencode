@@ -90,7 +90,6 @@ import {
   type WorkspaceSidebarContext,
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
-import { RecentSidebarPanel, RecentTile } from "./layout/sidebar-recent"
 import { SidebarContent } from "./layout/sidebar-shell"
 
 export default function Layout(props: ParentProps) {
@@ -105,7 +104,6 @@ export default function Layout(props: ParentProps) {
       workspaceName: {} as Record<string, string>,
       workspaceBranchName: {} as Record<string, Record<string, string>>,
       workspaceExpanded: {} as Record<string, boolean>,
-      sidebarView: "recent" as "recent" | "project",
       gettingStartedDismissed: false,
     }),
   )
@@ -163,7 +161,6 @@ export default function Layout(props: ParentProps) {
     autoselect: !initialDirectory && !newDesign(),
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
-    hoverSession: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
     nav: undefined as HTMLElement | undefined,
     sortNow: Date.now(),
@@ -967,7 +964,7 @@ export default function Layout(props: ParentProps) {
     }
   }
 
-  async function archiveSession(session: Session): Promise<boolean> {
+  async function archiveSession(session: Session) {
     const [store, setStore] = serverSync().child(session.directory)
     const sessions = store.session ?? []
     const index = sessions.findIndex((s) => s.id === session.id)
@@ -991,7 +988,6 @@ export default function Layout(props: ParentProps) {
         navigate(`/${params.dir}/session`)
       }
     }
-    return true
   }
 
   command.register("layout", () => {
@@ -1285,7 +1281,6 @@ export default function Layout(props: ParentProps) {
 
   async function navigateToProject(directory: string | undefined) {
     if (!directory) return
-    setStore("sidebarView", "project")
     const root = projectRoot(directory)
     server.projects.touch(root)
     const project = layout.projects.list().find((item) => item.worktree === root)
@@ -1366,7 +1361,6 @@ export default function Layout(props: ParentProps) {
 
   function openProject(directory: string, navigate = true) {
     layout.projects.open(directory)
-    setStore("sidebarView", "project")
     if (navigate) return navigateToProject(directory)
   }
 
@@ -1979,9 +1973,6 @@ export default function Layout(props: ParentProps) {
     navList: currentSessions,
     sidebarExpanded,
     sidebarHovering,
-    nav: () => state.nav,
-    hoverSession: () => state.hoverSession,
-    setHoverSession: (id) => setState("hoverSession", id),
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
@@ -2007,11 +1998,9 @@ export default function Layout(props: ParentProps) {
   const projectSidebarCtx: ProjectSidebarContext = {
     currentDir,
     currentProject,
-    recentMode: () => store.sidebarView === "recent",
     sidebarOpened: () => layout.sidebar.opened(),
     sidebarHovering,
     hoverProject: () => state.hoverProject,
-    nav: () => state.nav,
     onProjectMouseEnter: (worktree, event) => aim.enter(worktree, event),
     onProjectMouseLeave: (worktree) => aim.leave(worktree),
     onProjectFocus: (worktree) => aim.activate(worktree),
@@ -2027,22 +2016,13 @@ export default function Layout(props: ParentProps) {
     workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
     workspaceIds,
     workspaceLabel,
-    setHoverSession: (id) => setState("hoverSession", id),
     sessionProps: {
       navList: currentSessions,
       sidebarExpanded,
-      sidebarHovering,
-      nav: () => state.nav,
-      hoverSession: () => state.hoverSession,
-      setHoverSession: (id) => setState("hoverSession", id),
       clearHoverProjectSoon,
       prefetchSession,
       archiveSession,
     },
-  }
-  const recentSessionProps = {
-    ...projectSidebarCtx.sessionProps,
-    collapsible: true,
   }
 
   const SidebarPanel = (panelProps: {
@@ -2353,16 +2333,6 @@ export default function Layout(props: ParentProps) {
       opened={() => layout.sidebar.opened()}
       aimMove={aim.move}
       projects={projects}
-      renderRecentTile={() => (
-        <RecentTile
-          selected={() => store.sidebarView === "recent"}
-          onClick={() => {
-            setStore("sidebarView", "recent")
-            if (!layout.sidebar.opened()) layout.sidebar.open()
-            navigate("/recent")
-          }}
-        />
-      )}
       renderProject={(project) => (
         <SortableProject ctx={projectSidebarCtx} project={project} sortNow={sortNow} mobile={mobile} />
       )}
@@ -2379,29 +2349,7 @@ export default function Layout(props: ParentProps) {
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
       renderPanel={() =>
-        store.sidebarView === "recent" ? (
-          mobile ? (
-            <RecentSidebarPanel
-              mobile
-              sessionProps={recentSessionProps}
-              sidebarWidth={() => layout.sidebar.width()}
-              sidebarOpened={() => layout.sidebar.opened()}
-              sidebarHovering={sidebarHovering}
-            />
-          ) : (
-            <RecentSidebarPanel
-              merged
-              sessionProps={recentSessionProps}
-              sidebarWidth={() => layout.sidebar.width()}
-              sidebarOpened={() => layout.sidebar.opened()}
-              sidebarHovering={sidebarHovering}
-            />
-          )
-        ) : mobile ? (
-          <SidebarPanel project={currentProject} mobile />
-        ) : (
-          <SidebarPanel project={currentProject} merged />
-        )
+        mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }
     />
   )

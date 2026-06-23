@@ -151,11 +151,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   })
 
   const setProjects = (next: Project[] | ((draft: Project[]) => Project[])) => {
-    if (typeof next === "function") {
-      setGlobalStore("project", next)
-      return
-    }
-    setGlobalStore("project", reconcile(next))
+    setGlobalStore("project", next)
   }
 
   const setBootStore = ((...input: unknown[]) => {

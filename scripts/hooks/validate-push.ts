@@ -46,39 +46,27 @@ out(`\n${BOLD}[pre-push] Feature invariants${RESET}`)
 
 const INVARIANTS: Array<{ desc: string; check: () => boolean; fatal: boolean }> = [
   {
-    desc: "sidebar-recent.tsx exists (recent sessions sidebar component)",
-    check: () => existsSync("packages/app/src/pages/layout/sidebar-recent.tsx"),
-    fatal: true,
-  },
-  {
-    desc: "layout.tsx imports RecentTile",
+    // v2 design: recent sessions are native to sidebar-project.tsx (no sidebar-recent.tsx)
+    desc: "sidebar-project.tsx has recentSessions (v2 recent sessions)",
     check: () => {
-      const f = "packages/app/src/pages/layout.tsx"
-      return existsSync(f) && readFileSync(f, "utf8").includes("RecentTile")
+      const f = "packages/app/src/pages/layout/sidebar-project.tsx"
+      return existsSync(f) && readFileSync(f, "utf8").includes("recentSessions")
     },
     fatal: true,
   },
   {
-    desc: "layout.tsx imports RecentSidebarPanel",
+    desc: "layout.tsx imports SortableProject (v2 layout intact)",
     check: () => {
       const f = "packages/app/src/pages/layout.tsx"
-      return existsSync(f) && readFileSync(f, "utf8").includes("RecentSidebarPanel")
+      return existsSync(f) && readFileSync(f, "utf8").includes("SortableProject")
     },
     fatal: true,
   },
   {
-    desc: "layout.tsx has sidebarView state",
+    desc: "sidebar-shell.tsx has SidebarContent (nav rail intact)",
     check: () => {
-      const f = "packages/app/src/pages/layout.tsx"
-      return existsSync(f) && readFileSync(f, "utf8").includes("sidebarView")
-    },
-    fatal: true,
-  },
-  {
-    desc: '/recent route registered in app.tsx',
-    check: () => {
-      const f = "packages/app/src/app.tsx"
-      return existsSync(f) && readFileSync(f, "utf8").includes('"/recent"')
+      const f = "packages/app/src/pages/layout/sidebar-shell.tsx"
+      return existsSync(f) && readFileSync(f, "utf8").includes("SidebarContent")
     },
     fatal: true,
   },
@@ -94,8 +82,8 @@ for (const { desc, check } of INVARIANTS) {
 }
 
 if (invariantErrors > 0) {
-  out(`\n${RED}${BOLD}PUSH BLOCKED: ${invariantErrors} feature invariant(s) missing.${RESET}`)
-  out(`The recent-sessions sidebar was likely dropped during a rebase.`)
+  out(`\n${RED}${BOLD}PUSH BLOCKED: ${invariantErrors} v2 layout invariant(s) missing.${RESET}`)
+  out(`The v2 layout was likely broken during a rebase.`)
   out(`See FORK.md "Invariants That Must Survive Every Rebase".`)
   out(`${DIM}To bypass: git push --no-verify${RESET}\n`)
   process.exit(1)

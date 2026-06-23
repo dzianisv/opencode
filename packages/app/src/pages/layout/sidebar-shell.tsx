@@ -17,7 +17,6 @@ export const SidebarContent = (props: {
   opened: Accessor<boolean>
   aimMove: (event: MouseEvent) => void
   projects: Accessor<LocalProject[]>
-  renderRecentTile: () => JSX.Element
   renderProject: (project: LocalProject) => JSX.Element
   handleDragStart: (event: unknown) => void
   handleDragEnd: () => void
@@ -64,7 +63,6 @@ export const SidebarContent = (props: {
             <DragDropSensors />
             <ConstrainDragXAxis />
             <div class="h-full w-full flex flex-col items-center gap-3 px-3 py-3 overflow-y-auto no-scrollbar">
-              {props.renderRecentTile()}
               <SortableProvider ids={props.projects().map((p) => p.worktree)}>
                 <For each={props.projects()}>{(project) => props.renderProject(project)}</For>
               </SortableProvider>
