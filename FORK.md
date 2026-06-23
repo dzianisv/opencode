@@ -31,6 +31,8 @@ upstream/dev @ `cd292a4ec` (v1.17.9) — 2026-06-22
 | `packages/opencode/script/build.ts` | MEDIUM | Added 2 extra `define` entries |
 | `packages/opencode/src/effect/instance-state.ts` | LOW | Changed `capacity`/`timeToLive` |
 | `packages/opencode/src/worktree/index.ts` | MEDIUM | Added symlink block in `boot()` |
+| `packages/opencode/package.json` | HIGH | `install:local` script must survive — upstream rewrites `scripts` block |
+| `packages/opencode/script/install-local.ts` | HIGH | Fork-only script — upstream will never add this; re-add if missing after rebase |
 
 ## Rebase Checklist
 
@@ -38,6 +40,8 @@ upstream/dev @ `cd292a4ec` (v1.17.9) — 2026-06-22
 2. `git branch backup/pre-rebase-$(date +%Y%m%d)`
 3. `git rebase upstream/dev`
 4. Resolve conflicts (check conflict zones above)
+4a. **Verify fork scripts survived**: `grep -q '"install:local"' packages/opencode/package.json || echo "MISSING install:local script — re-add it"` — if missing, add `"install:local": "bun run build && bun run script/install-local.ts"` back to `scripts` in `packages/opencode/package.json`
+4b. **Verify install-local.ts exists**: `ls packages/opencode/script/install-local.ts || echo "MISSING — restore from backup branch"`
 5. `cd packages/opencode && bun typecheck` (our changes shouldn't add new errors)
 6. Verify `git describe --tags --always` runs without error
 7. Update this file with new upstream commit hash
@@ -88,6 +92,8 @@ These features MUST be present after every rebase. If any are missing, the rebas
 | Recent sessions sidebar | `packages/app/src/pages/layout/sidebar-recent.tsx` | Upstream rewrites app layout; our additions get dropped |
 | `/recent` route | `grep /recent packages/app/src/app.tsx` | Upstream router changes; our route registration gets dropped |
 | sidebarView state | `grep sidebarView packages/app/src/pages/layout/layout.tsx` | State dropped when layout.tsx conflicts are resolved against upstream |
+| `install:local` script | `grep '"install:local"' packages/opencode/package.json` | Upstream rewrites `scripts` block; this fork-only script gets silently dropped |
+| `install-local.ts` build script | `ls packages/opencode/script/install-local.ts` | Fork-only file — upstream has no reason to add it; check it's present after every rebase |
 
 **Validation script**: `bash packages/app/scripts/smoke-recent-sessions.sh`
 
