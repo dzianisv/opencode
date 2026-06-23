@@ -119,6 +119,7 @@ jobs:
 
       - name: Publish @dzianisv/opencode
         if: steps.registry.outputs.dz_published != 'true'
+        continue-on-error: true
         working-directory: packages/opencode
         shell: bash
         env:
