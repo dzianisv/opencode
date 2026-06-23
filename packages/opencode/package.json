@@ -149,7 +149,9 @@
     "ws": "8.21.0",
     "xdg-basedir": "5.1.0",
     "yargs": "18.0.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "hono": "catalog:",
+    "hono-openapi": "catalog:"
   },
   "overrides": {
     "drizzle-orm": "catalog:"
