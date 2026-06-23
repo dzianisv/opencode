@@ -18,3 +18,9 @@ if (process.versions.bun !== expectedBunVersion) {
 }
 '
 bun typecheck
+
+# AI-powered validation: feature invariants + smoke tests + live server check.
+# Spawns Claude to verify nothing was silently dropped (e.g. during a rebase).
+# Skip AI only: SKIP_AI_VALIDATION=1 git push
+# Skip entirely: git push --no-verify
+bun scripts/hooks/validate-push.ts
