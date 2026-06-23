@@ -12,6 +12,7 @@ import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { Database } from "@opencode-ai/core/database/database"
 import { TodoWriteTool } from "./todo"
+import { RenameTool } from "./rename"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
@@ -94,6 +95,8 @@ export const layer = Layer.effect(
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
+    const rename = yield* RenameTool
+    const cron = yield* Effect.promise(() => import("./cron")).pipe(Effect.map((mod) => mod.CronTool), Effect.flatten)
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
@@ -206,6 +209,8 @@ export const layer = Layer.effect(
           task: Tool.init(task),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
+          rename: Tool.init(rename),
+          cron: Tool.init(cron),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
@@ -228,6 +233,8 @@ export const layer = Layer.effect(
             tool.task,
             tool.fetch,
             tool.todo,
+            tool.rename,
+            tool.cron,
             tool.search,
             tool.skill,
             tool.patch,

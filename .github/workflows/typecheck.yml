@@ -19,3 +19,40 @@ jobs:
 
       - name: Run typecheck
         run: bun typecheck
+
+      - name: Feature invariants — recent sessions sidebar must survive every rebase
+        run: |
+          ERRORS=0
+          check() {
+            local desc="$1"; shift
+            if "$@" &>/dev/null; then
+              echo "  [OK] $desc"
+            else
+              echo "  [FAIL] $desc"
+              ERRORS=$((ERRORS + 1))
+            fi
+          }
+
+          check "sidebar-recent.tsx exists" \
+            test -f packages/app/src/pages/layout/sidebar-recent.tsx
+
+          check "layout.tsx imports RecentTile" \
+            grep -q "RecentTile" packages/app/src/pages/layout/layout.tsx
+
+          check "layout.tsx imports RecentSidebarPanel" \
+            grep -q "RecentSidebarPanel" packages/app/src/pages/layout/layout.tsx
+
+          check "layout.tsx has sidebarView state" \
+            grep -q "sidebarView" packages/app/src/pages/layout/layout.tsx
+
+          check "/recent route registered in app.tsx" \
+            grep -q '"/recent"' packages/app/src/app.tsx
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo ""
+            echo "FAIL: $ERRORS feature invariant(s) missing."
+            echo "Recent sessions sidebar was likely dropped during an upstream rebase."
+            echo "See FORK.md 'Invariants That Must Survive Every Rebase' + packages/app/scripts/smoke-recent-sessions.sh"
+            exit 1
+          fi
+          echo "All recent-sessions invariants present."
