@@ -3,7 +3,6 @@ import { describeRoute, validator } from "hono-openapi"
 import z from "zod"
 import { lazy } from "@/util/lazy"
 import { synth } from "@/tts/edge"
-import { errors } from "../error"
 
 export const TtsRoutes = lazy(() =>
   new Hono().post(
@@ -21,7 +20,6 @@ export const TtsRoutes = lazy(() =>
             },
           },
         },
-        ...errors(400),
       },
     }),
     validator(

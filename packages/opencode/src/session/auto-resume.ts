@@ -1,4 +1,5 @@
-import { MessageV2 } from "./message-v2"
+import type { Assistant, User, WithParts } from "@opencode-ai/core/v1/session"
+import { AbortedError } from "@opencode-ai/core/v1/session"
 
 export const ResumeError = "Tool execution was interrupted by server restart"
 export const ResumeAbortError = "Tool execution aborted"
@@ -6,17 +7,17 @@ export const ResumePrompt =
   "Your last response was interrupted by an OpenCode server restart. Continue from the latest context without repeating completed work."
 
 export type ResumeMatch = {
-  assistant: MessageV2.Assistant
-  user: MessageV2.User
+  assistant: Assistant
+  user: User
 }
 
 export type ResumeAction =
-  | { type: "interrupted"; assistant: MessageV2.Assistant; user: MessageV2.User }
-  | { type: "unanswered"; user: MessageV2.User }
+  | { type: "interrupted"; assistant: Assistant; user: User }
+  | { type: "unanswered"; user: User }
 
-function interrupted(item: MessageV2.WithParts) {
+function interrupted(item: WithParts) {
   if (item.info.role !== "assistant") return false
-  if (MessageV2.AbortedError.isInstance(item.info.error)) return true
+  if (AbortedError.isInstance(item.info.error)) return true
   return item.parts.some(
     (part) =>
       part.type === "tool" &&
@@ -32,14 +33,14 @@ function interrupted(item: MessageV2.WithParts) {
  *   1. **unanswered** – last message is a user message with no assistant reply
  *   2. **interrupted** – last assistant was interrupted with no subsequent user message
  */
-export function pickAction(input: MessageV2.WithParts[]): ResumeAction | undefined {
+export function pickAction(input: WithParts[]): ResumeAction | undefined {
   if (input.length === 0) return
 
   const last = input[input.length - 1]
 
   // Priority 1: trailing user message with no assistant reply
   if (last.info.role === "user") {
-    return { type: "unanswered", user: last.info as MessageV2.User }
+    return { type: "unanswered", user: last.info as User }
   }
 
   // Priority 2: interrupted assistant (existing pickResume logic)
@@ -47,7 +48,7 @@ export function pickAction(input: MessageV2.WithParts[]): ResumeAction | undefin
   if (match) return { type: "interrupted", ...match }
 }
 
-export function pickResume(input: MessageV2.WithParts[]) {
+export function pickResume(input: WithParts[]) {
   for (let i = input.length - 1; i >= 0; i--) {
     const item = input[i]
     if (item.info.role !== "assistant") continue

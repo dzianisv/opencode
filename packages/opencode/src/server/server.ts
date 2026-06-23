@@ -1,5 +1,6 @@
 import "./init-projectors"
 
+import { Hono } from "hono"
 import { NodeHttpServer } from "@effect/platform-node"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
@@ -10,6 +11,7 @@ import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
 import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
 import { PublicApi } from "./routes/instance/httpapi/public"
+import { TtsRoutes } from "./routes/tts"
 import type { CorsOptions } from "@opencode-ai/server/cors"
 import { lazy } from "@/util/lazy"
 
@@ -62,6 +64,17 @@ export const Default = lazy(() => {
   }
   return { app }
 })
+
+export function Legacy(): { app: ServerApp } {
+  const honoApp = new Hono().route("/tts", TtsRoutes())
+  const app: ServerApp = {
+    fetch: (request: Request) => honoApp.fetch(request),
+    request(input, init) {
+      return honoApp.request(input, init)
+    },
+  }
+  return { app }
+}
 
 export async function openapi() {
   return OpenApi.fromApi(PublicApi)

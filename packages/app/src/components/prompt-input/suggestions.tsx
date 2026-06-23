@@ -7,7 +7,7 @@ export function PromptSuggestions(props: {
 }) {
   const sync = useSync()
   const prompts = createMemo(() => {
-    const cfg = sync.data.config as { prompts?: { label: string; text: string }[] }
+    const cfg = sync().data.config as { prompts?: { label: string; text: string }[] }
     return cfg.prompts ?? []
   })
 

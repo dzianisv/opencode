@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { ModelID, ProviderID } from "../../src/provider/schema"
-import { MessageV2 } from "../../src/session/message-v2"
+import { ModelID, ProviderID } from "@opencode-ai/llm"
+import type { Assistant, User, WithParts, Info, Part, ToolPart } from "@opencode-ai/core/v1/session"
+import { AbortedError } from "@opencode-ai/core/v1/session"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { pickAction, pickResume, ResumeAbortError, ResumeError } from "../../src/session/auto-resume"
 
@@ -13,14 +14,14 @@ const user = (input: { id: string; sessionID: string; at: number }) =>
     agent: "default",
     model: { providerID: ProviderID.make("opencode"), modelID: ModelID.make("gpt-5-mini") },
     mode: "build",
-  }) as unknown as MessageV2.User
+  }) as unknown as User
 
 const assistant = (input: {
   id: string
   sessionID: string
   parentID: string
   at: number
-  error?: MessageV2.Assistant["error"]
+  error?: Assistant["error"]
 }) =>
   ({
     id: MessageID.make(input.id),
@@ -41,7 +42,7 @@ const assistant = (input: {
       cache: { read: 0, write: 0 },
     },
     ...(input.error ? { error: input.error } : {}),
-  }) as unknown as MessageV2.Assistant
+  }) as unknown as Assistant
 
 const tool = (input: { sessionID: string; messageID: string; err?: string }) =>
   ({
@@ -57,10 +58,10 @@ const tool = (input: { sessionID: string; messageID: string; err?: string }) =>
       error: input.err ?? ResumeError,
       time: { start: 1, end: 2 },
     },
-  }) as unknown as MessageV2.ToolPart
+  }) as unknown as ToolPart
 
-const row = (info: MessageV2.Info, parts: MessageV2.Part[] = []) => ({ info, parts }) as MessageV2.WithParts
-const aborted = () => new MessageV2.AbortedError({ message: "The operation was aborted." }).toObject()
+const row = (info: Info, parts: Part[] = []) => ({ info, parts }) as WithParts
+const aborted = () => new AbortedError({ message: "The operation was aborted." }).toObject()
 
 describe("session auto resume", () => {
   test("picks interrupted assistant and previous user", () => {
