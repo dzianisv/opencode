@@ -51,7 +51,6 @@ import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { showToast } from "@opencode-ai/ui/toast"
 import {
   getMediaDevices,
   getPermissions,
@@ -446,6 +445,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [picker, setPicker] = createStore({
     projectOpen: false,
     projectSearch: "",
+  })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
   const motion = (value: number) => ({

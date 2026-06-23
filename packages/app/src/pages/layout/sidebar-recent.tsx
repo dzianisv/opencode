@@ -5,7 +5,8 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { type GlobalSession, type Session } from "@opencode-ai/sdk/v2/client"
-import { useGlobalSDK } from "@/context/global-sdk"
+import { useServerSDK } from "@/context/server-sdk"
+import type { ServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
 import { organizeRecentSessions } from "@/utils/recent-session"
 import { SessionItem, SessionSkeleton, type SessionItemProps } from "./sidebar-items"
@@ -13,7 +14,7 @@ import { SessionItem, SessionSkeleton, type SessionItemProps } from "./sidebar-i
 const LIMIT = 20
 
 async function query(
-  client: ReturnType<typeof useGlobalSDK>["client"],
+  client: ServerSDK["client"],
   opts: { search?: string; cursor?: number; limit?: number },
 ) {
   const result = await client.experimental.session
@@ -62,7 +63,7 @@ export const RecentSidebarPanel = (props: {
   sidebarOpened: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
 }): JSX.Element => {
-  const globalSDK = useGlobalSDK()
+  const serverSDK = useServerSDK()
   const language = useLanguage()
   const merged = createMemo(() => props.mobile || (props.merged ?? props.sidebarOpened()))
   const hover = createMemo(() => !props.mobile && props.merged === false && !props.sidebarOpened())
@@ -80,7 +81,7 @@ export const RecentSidebarPanel = (props: {
 
   const load = async (reset?: boolean) => {
     setStore("loading", true)
-    const result = await query(globalSDK.client, {
+    const result = await query(serverSDK().client, {
       search: store.search || undefined,
       cursor: reset ? undefined : store.cursor,
       limit: LIMIT,

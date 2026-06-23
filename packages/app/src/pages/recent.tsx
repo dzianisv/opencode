@@ -3,19 +3,19 @@ import { useNavigate } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { type GlobalSession } from "@opencode-ai/sdk/v2/client"
-import { useGlobalSDK } from "@/context/global-sdk"
+import { useServerSDK } from "@/context/server-sdk"
 import { DateTime } from "luxon"
 import { flattenRecentRoots, organizeRecentSessions, recentPrefix, recentTime } from "@/utils/recent-session"
 
 export default function Recent() {
   const navigate = useNavigate()
-  const globalSDK = useGlobalSDK()
+  const serverSDK = useServerSDK()
   const [search, setSearch] = createSignal("")
 
   const [sessions] = createResource(
     () => search(),
     async (query) => {
-      const result = await globalSDK.client.experimental.session
+      const result = await serverSDK().client.experimental.session
         .list({
           limit: 100,
           search: query || undefined,
