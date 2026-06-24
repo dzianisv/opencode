@@ -4502,3 +4502,57 @@ describe("ProviderTransform.providerOptions - ai-gateway-provider", () => {
     expect(result).toEqual({ openaiCompatible: { reasoningEffort: "high" } })
   })
 })
+
+describe("ProviderTransform.variants - github-copilot claude reasoning", () => {
+  const createCopilotClaudeModel = (id = "github-copilot/claude-sonnet-4.6") => ({
+    id,
+    providerID: "github-copilot",
+    api: {
+      id: "claude-sonnet-4.6",
+      url: "https://api.githubcopilot.com",
+      npm: "@ai-sdk/github-copilot",
+    },
+    name: "Claude Sonnet 4.6",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200_000, output: 64_000 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2025-07-01",
+  })
+
+  test("includes max effort for copilot claude via @ai-sdk/github-copilot", () => {
+    const result = ProviderTransform.variants(createCopilotClaudeModel() as any)
+    expect(Object.keys(result)).toContain("max")
+    expect(Object.keys(result)).toEqual(["low", "medium", "high", "max"])
+  })
+
+  test("copilot claude variants include reasoningSummary and include fields", () => {
+    const result = ProviderTransform.variants(createCopilotClaudeModel() as any)
+    expect(result["max"]).toMatchObject({
+      reasoningEffort: "max",
+      reasoningSummary: "auto",
+    })
+    expect(result["high"]).toMatchObject({
+      reasoningEffort: "high",
+      reasoningSummary: "auto",
+    })
+    // include should be set (encrypted reasoning token streaming)
+    expect(Array.isArray(result["max"].include)).toBe(true)
+  })
+
+  test("copilot claude with no reasoning capability returns empty", () => {
+    const model = createCopilotClaudeModel()
+    ;(model.capabilities as any).reasoning = false
+    expect(ProviderTransform.variants(model as any)).toEqual({})
+  })
+})

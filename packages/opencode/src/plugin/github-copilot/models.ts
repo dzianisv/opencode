@@ -220,10 +220,14 @@ export async function get(
       return item && usable(item) ? ([[item.id, item]] as const) : []
     }),
   )
-  // Secondary lookup index: normalize version separators so catalog keys like
-  // "claude-sonnet-4-6" (hyphen) match API IDs like "claude-sonnet-4.6" (dot).
+  // Secondary lookup index: only for API IDs that contain dots (version separator
+  // mismatch: catalog uses "claude-sonnet-4-6", API returns "claude-sonnet-4.6").
+  // Filtering to dot-containing IDs prevents collision between two entries that
+  // already use hyphens and would otherwise normalize to the same key.
   const remoteByNormalized = new Map(
-    [...remote].map(([id, item]) => [id.replace(/\./g, "-"), item] as const),
+    [...remote]
+      .filter(([id]) => id.includes("."))
+      .map(([id, item]) => [id.replace(/\./g, "-"), item] as const),
   )
 
   // prune existing models whose api.id isn't in the endpoint response
