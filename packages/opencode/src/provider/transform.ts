@@ -523,6 +523,9 @@ const OPENAI_GPT5_PRO_2_PLUS_EFFORTS = ["medium", "high", "xhigh"]
 const OPENAI_GPT5_CHAT_EFFORTS = ["medium"]
 const OPENAI_GPT5_CODEX_XHIGH_EFFORTS = [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
 const OPENAI_GPT5_CODEX_3_PLUS_EFFORTS = ["none", ...OPENAI_GPT5_CODEX_XHIGH_EFFORTS]
+// Copilot API for claude-sonnet-4.6 explicitly lists "max" in reasoning_effort.
+// reasoning_summary=auto and include are confirmed accepted by /chat/completions.
+const COPILOT_CLAUDE_EFFORTS = [...WIDELY_SUPPORTED_EFFORTS, "max"]
 
 // OpenAI rolled out the `none` reasoning_effort tier on this date (Responses API).
 // Models released before it 400 on `reasoning_effort: "none"`, so we only expose
@@ -823,7 +826,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
       }
       if (model.id.includes("claude")) {
         return Object.fromEntries(
-          [...WIDELY_SUPPORTED_EFFORTS, "max"].map((effort) => [
+          COPILOT_CLAUDE_EFFORTS.map((effort) => [
             effort,
             {
               reasoningEffort: effort,

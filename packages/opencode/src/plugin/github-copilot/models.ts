@@ -222,10 +222,9 @@ export async function get(
   )
   // Secondary lookup index: normalize version separators so catalog keys like
   // "claude-sonnet-4-6" (hyphen) match API IDs like "claude-sonnet-4.6" (dot).
-  const remoteByNormalized = new Map<string, SelectableItem>()
-  for (const [id, item] of remote) {
-    remoteByNormalized.set(id.replace(/\./g, "-"), item)
-  }
+  const remoteByNormalized = new Map(
+    [...remote].map(([id, item]) => [id.replace(/\./g, "-"), item] as const),
+  )
 
   // prune existing models whose api.id isn't in the endpoint response
   const matched = new Set<string>()
