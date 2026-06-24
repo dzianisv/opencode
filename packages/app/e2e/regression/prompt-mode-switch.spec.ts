@@ -110,7 +110,6 @@ test.describe("regression: build/plan mode toggle in v2 composer", () => {
   test("toggle sits before the model selector in DOM order", async ({ page }) => {
     const composer = await setupV2Session(page)
     const toggle = composer.locator('[data-component="prompt-mode-toggle"]')
-    const modelControl = composer.locator('[data-component="prompt-input"] ~ * [data-action="prompt-model"]').first()
 
     // Use JS to check DOM order: toggle must precede the model control
     const toggleBefore = await page.evaluate(() => {
@@ -144,7 +143,8 @@ test.describe("regression: build/plan toggle absent in v1 (legacy) layout", () =
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: false } }))
     })
     await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
-    await expectAppVisible(page.locator('[data-component="session-composer"]'))
+    // In v1 layout DockShellForm has no data-component; use outer dock container
+    await expectAppVisible(page.locator('[data-component="session-prompt-dock"]'))
     await expect(page.locator('[data-component="prompt-mode-toggle"]')).toHaveCount(0)
   })
 })
