@@ -822,7 +822,16 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
         return {}
       }
       if (model.id.includes("claude")) {
-        return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+        return Object.fromEntries(
+          [...WIDELY_SUPPORTED_EFFORTS, "max"].map((effort) => [
+            effort,
+            {
+              reasoningEffort: effort,
+              reasoningSummary: "auto",
+              include: INCLUDE_ENCRYPTED_REASONING,
+            },
+          ]),
+        )
       }
       const copilotEfforts = iife(() => {
         if (id.includes("5.1-codex-max") || id.includes("5.2") || id.includes("5.3"))
@@ -901,8 +910,8 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
           if (model.api.id.includes("opus-4.7")) {
             efforts = ["medium"]
           }
-          // Efforts currently supported are: low, medium, high
-          efforts = efforts.filter((v) => v !== "max" && v !== "xhigh")
+          // xhigh is not surfaced by the Copilot API; max is explicitly supported
+          efforts = efforts.filter((v) => v !== "xhigh")
         }
         return Object.fromEntries(
           efforts.map((effort) => [
