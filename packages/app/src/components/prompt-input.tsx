@@ -1421,10 +1421,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return projects().filter((project) => displayName(project).toLowerCase().includes(search))
   })
   const showAgentControl = createMemo(() => props.controls.agents.visible && props.controls.agents.options.length > 0)
-  const showBuildPlanToggle = createMemo(() => {
-    const available = props.controls.agents.available
-    return available.some((a) => a.name === "build") && available.some((a) => a.name === "plan")
-  })
   const selectProject = (worktree: string) => {
     setPicker({
       projectOpen: false,
@@ -1628,46 +1624,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </Show>
                   <Show when={newSession() && !selectedProject()}>
                     <ComposerPickerTrigger state={newProjectTriggerState()} />
-                  </Show>
-                  <Show when={store.mode !== "shell" && showBuildPlanToggle()}>
-                    <div data-component="prompt-mode-toggle" class="flex items-center">
-                      <button
-                        data-action="prompt-mode-build"
-                        type="button"
-                        aria-pressed={props.controls.agents.current === "build"}
-                        classList={{
-                          "h-7 px-2 rounded text-[13px] font-[440] leading-5 tracking-[-0.04px] transition-colors focus-visible:outline-none capitalize": true,
-                          "text-v2-text-text-base bg-v2-overlay-simple-overlay-hover":
-                            props.controls.agents.current === "build",
-                          "text-v2-text-text-faint hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base":
-                            props.controls.agents.current !== "build",
-                        }}
-                        onClick={() => {
-                          props.controls.agents.select("build")
-                          restoreFocus()
-                        }}
-                      >
-                        Build
-                      </button>
-                      <button
-                        data-action="prompt-mode-plan"
-                        type="button"
-                        aria-pressed={props.controls.agents.current === "plan"}
-                        classList={{
-                          "h-7 px-2 rounded text-[13px] font-[440] leading-5 tracking-[-0.04px] transition-colors focus-visible:outline-none capitalize": true,
-                          "text-v2-text-text-base bg-v2-overlay-simple-overlay-hover":
-                            props.controls.agents.current === "plan",
-                          "text-v2-text-text-faint hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base":
-                            props.controls.agents.current !== "plan",
-                        }}
-                        onClick={() => {
-                          props.controls.agents.select("plan")
-                          restoreFocus()
-                        }}
-                      >
-                        Plan
-                      </button>
-                    </div>
                   </Show>
                   <ComposerModelControl state={modelControlState()} />
                   <Show when={store.mode !== "shell" && showVariantControl()}>
