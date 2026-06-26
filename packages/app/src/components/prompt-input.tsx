@@ -1421,11 +1421,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return projects().filter((project) => displayName(project).toLowerCase().includes(search))
   })
   const showAgentControl = createMemo(() => props.controls.agents.visible && props.controls.agents.options.length > 0)
-  // Use options (filtered: non-hidden, non-subagent) not available (raw) so a
-  // hidden "plan" agent doesn't show a toggle that silently mis-selects.
   const showBuildPlanToggle = createMemo(() => {
-    const opts = props.controls.agents.options
-    return opts.includes("build") && opts.includes("plan")
+    const available = props.controls.agents.available
+    return available.some((a) => a.name === "build") && available.some((a) => a.name === "plan")
   })
   const selectProject = (worktree: string) => {
     setPicker({
