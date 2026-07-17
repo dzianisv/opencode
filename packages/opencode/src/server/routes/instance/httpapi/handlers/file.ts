@@ -7,6 +7,7 @@ import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Effect, Layer, Option } from "effect"
 import ignore from "ignore"
+import os from "os"
 import path from "path"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -128,6 +129,45 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return []
     })
 
+    const roots = Effect.fn("FileHttpApi.roots")(function* () {
+      const raw = yield* FSUtil.Service
+      const home = os.homedir()
+      if (process.platform === "win32") {
+        const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+        const drives = yield* Effect.all(
+          letters.map((letter) =>
+            raw
+              .existsSafe(`${letter}:\\`)
+              .pipe(Effect.map((exists) => (exists ? { path: `${letter}:\\`, label: `${letter}:` } : undefined))),
+          ),
+        )
+        return [
+          ...drives.filter((drive): drive is { path: string; label: string } => drive !== undefined),
+          { path: home, label: "Home" },
+        ]
+      }
+      const mountBases = ["/mnt", "/media", "/Volumes"]
+      const mounts = yield* Effect.all(
+        mountBases.map((base) =>
+          raw.existsSafe(base).pipe(
+            Effect.flatMap((exists) =>
+              exists
+                ? raw.readDirectoryEntries(base).pipe(
+                    Effect.map((entries) =>
+                      entries
+                        .filter((entry) => entry.type === "directory")
+                        .map((entry) => ({ path: path.join(base, entry.name), label: entry.name })),
+                    ),
+                    Effect.catch(() => Effect.succeed([] as { path: string; label: string }[])),
+                  )
+                : Effect.succeed([] as { path: string; label: string }[]),
+            ),
+          ),
+        ),
+      )
+      return [{ path: "/", label: "/" }, { path: home, label: "Home" }, ...mounts.flat()]
+    })
+
     return handlers
       .handle("findText", findText)
       .handle("findFile", findFile)
@@ -135,5 +175,6 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("list", list)
       .handle("content", content)
       .handle("status", status)
+      .handle("roots", roots)
   }),
 ).pipe(Layer.provide(LocationServiceMap.layer))

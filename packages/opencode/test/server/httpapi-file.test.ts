@@ -70,4 +70,21 @@ describe("file HttpApi", () => {
     expect(symbols.status).toBe(200)
     expect(await symbols.json()).toEqual([])
   })
+
+  test("serves roots endpoint", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    const roots = await request(FilePaths.roots, tmp.path)
+
+    expect(roots.status).toBe(200)
+    const body = await roots.json()
+    expect(Array.isArray(body)).toBe(true)
+    for (const root of body) {
+      expect(typeof root.path).toBe("string")
+      expect(typeof root.label).toBe("string")
+    }
+    if (process.platform !== "win32") {
+      expect(body).toContainEqual(expect.objectContaining({ path: "/" }))
+    }
+  })
 })
