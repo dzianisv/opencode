@@ -7,6 +7,10 @@ import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { eq, inArray } from "drizzle-orm"
 
 export const Event = {
   Asked: EventV2.define({ type: "permission.asked", schema: PermissionV1.Request.fields }),
@@ -29,12 +33,35 @@ export interface Interface {
 interface PendingEntry {
   info: PermissionV1.Request
   deferred: Deferred.Deferred<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>
+  // Whether the session row existed when the request was made. Only these are
+  // eligible for the orphan sweep — requests for sessions that never had a row
+  // (synthetic IDs) must survive it.
+  persisted: boolean
 }
 
 interface State {
   pending: Map<PermissionV1.ID, PendingEntry>
   approved: PermissionV1.Rule[]
 }
+
+// Drops every pending request matching `predicate`, rejecting its waiter so the
+// caller's fiber cannot hang, and telling clients to dismiss the prompt.
+const purge = Effect.fnUntraced(function* (
+  state: State,
+  events: EventV2.Interface,
+  predicate: (entry: PendingEntry) => boolean,
+) {
+  for (const [id, entry] of state.pending.entries()) {
+    if (!predicate(entry)) continue
+    state.pending.delete(id)
+    yield* events.publish(Event.Replied, {
+      sessionID: entry.info.sessionID,
+      requestID: entry.info.id,
+      reply: "reject",
+    })
+    yield* Deferred.fail(entry.deferred, new PermissionV1.RejectedError())
+  }
+})
 
 export function evaluate(permission: string, pattern: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
   return (
@@ -54,13 +81,25 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    const { db } = yield* Database.Service
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
-        void ctx
-        const state = {
+        const state: State = {
           pending: new Map<PermissionV1.ID, PendingEntry>(),
           approved: [],
         }
+
+        // Session deletion must cascade to its pending permissions, otherwise
+        // they are listed forever and their waiters never resolve — which
+        // freezes the caller (a deleted subagent hangs its parent session).
+        // Child sessions publish their own event, so no recursion is needed.
+        const unsubscribe = yield* events.listen((event) => {
+          if (event.type !== SessionV1.Event.Deleted.type || event.location?.directory !== ctx.directory)
+            return Effect.void
+          const data = event.data as EventV2.Data<typeof SessionV1.Event.Deleted>
+          return purge(state, events, (entry) => entry.info.sessionID === data.sessionID)
+        })
+        yield* Effect.addFinalizer(() => unsubscribe)
 
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
@@ -107,7 +146,16 @@ export const layer = Layer.effect(
       yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
-      pending.set(id, { info, deferred })
+      pending.set(id, {
+        info,
+        deferred,
+        persisted: !!(yield* db
+          .select({ id: SessionTable.id })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, request.sessionID))
+          .get()
+          .pipe(Effect.orDie)),
+      })
       yield* events.publish(Event.Asked, info)
       return yield* Effect.ensuring(
         Deferred.await(deferred),
@@ -118,7 +166,9 @@ export const layer = Layer.effect(
     })
 
     const reply = Effect.fn("Permission.reply")(function* (input: PermissionV1.ReplyInput) {
-      const { approved, pending } = yield* InstanceState.get(state)
+      const current = yield* InstanceState.get(state)
+      const approved = current.approved
+      const pending = current.pending
       const existing = pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
 
@@ -137,16 +187,7 @@ export const layer = Layer.effect(
             : new PermissionV1.RejectedError(),
         )
 
-        for (const [id, item] of pending.entries()) {
-          if (item.info.sessionID !== existing.info.sessionID) continue
-          pending.delete(id)
-          yield* events.publish(Event.Replied, {
-            sessionID: item.info.sessionID,
-            requestID: item.info.id,
-            reply: "reject",
-          })
-          yield* Deferred.fail(item.deferred, new PermissionV1.RejectedError())
-        }
+        yield* purge(current, events, (item) => item.info.sessionID === existing.info.sessionID)
         return
       }
 
@@ -177,9 +218,32 @@ export const layer = Layer.effect(
       }
     })
 
+    // Sweeps orphans whose session vanished without an observable delete event
+    // (missed event, out-of-band row removal), so a zombie can never outlive
+    // its session in the listing.
     const list = Effect.fn("Permission.list")(function* () {
-      const pending = (yield* InstanceState.get(state)).pending
-      return Array.from(pending.values(), (item) => item.info)
+      const current = yield* InstanceState.get(state)
+      const sessions = [
+        ...new Set(
+          Array.from(current.pending.values())
+            .filter((item) => item.persisted)
+            .map((item) => item.info.sessionID),
+        ),
+      ]
+      if (sessions.length > 0) {
+        const alive = new Set(
+          (
+            yield* db
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(inArray(SessionTable.id, sessions))
+              .all()
+              .pipe(Effect.orDie)
+          ).map((row) => row.id),
+        )
+        yield* purge(current, events, (item) => item.persisted && !alive.has(item.info.sessionID))
+      }
+      return Array.from(current.pending.values(), (item) => item.info)
     })
 
     return Service.of({ ask, reply, list })
@@ -223,8 +287,8 @@ export function disabled(tools: string[], ruleset: PermissionV1.Ruleset): Set<st
   )
 }
 
-export const defaultLayer = layer.pipe(Layer.provide(EventV2Bridge.defaultLayer))
+export const defaultLayer = layer.pipe(Layer.provide(EventV2Bridge.defaultLayer), Layer.provide(Database.defaultLayer))
 
-export const node = LayerNode.make(layer, [EventV2Bridge.node])
+export const node = LayerNode.make(layer, [EventV2Bridge.node, Database.node])
 
 export * as Permission from "."
