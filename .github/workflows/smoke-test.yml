@@ -28,7 +28,7 @@ jobs:
       - name: Install binary
         run: |
           cd packages/opencode
-          bun run copy:local
+          bun run script/install-local.ts
 
       - name: Run smoke test
         id: smoke
