@@ -92,6 +92,11 @@ export const LegacyStatus = Schema.Struct({
   status: Schema.Literals(["added", "deleted", "modified"]),
 }).annotate({ identifier: "File" })
 
+export const Root = Schema.Struct({
+  path: Schema.String,
+  label: Schema.String,
+}).annotate({ identifier: "FileRoot" })
+
 export const FilePaths = {
   findText: "/find",
   findFile: "/find/file",
@@ -99,6 +104,7 @@ export const FilePaths = {
   list: "/file",
   content: "/file/content",
   status: "/file/status",
+  roots: "/file/roots",
 } as const
 
 export const FileApi = HttpApi.make("file")
@@ -163,6 +169,16 @@ export const FileApi = HttpApi.make("file")
             identifier: "file.status",
             summary: "Get file status",
             description: "Get the git status of all files in the project.",
+          }),
+        ),
+        HttpApiEndpoint.get("roots", FilePaths.roots, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(Root), "Filesystem roots"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.roots",
+            summary: "List filesystem roots",
+            description: "List the machine's mounted drives, filesystem roots, and home directory for browsing.",
           }),
         ),
       )
