@@ -10,7 +10,6 @@ import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Durable } from "@opencode-ai/schema/durable-event-manifest"
 import { and, asc, desc, eq, inArray, lt, notInArray, sql } from "drizzle-orm"
 import { Effect, Schema } from "effect"
 import { EOL } from "os"
@@ -190,9 +189,6 @@ export function parseArchiveJsonl(text: string): Archive {
     }
     if (type === "event") {
       const event = decodeEventRecord(record)
-      const definition = Durable.get(event.eventType)
-      if (!definition?.durable) throw new Error(`Unknown durable event type on line ${line}: ${event.eventType}`)
-      Schema.decodeUnknownSync(definition.data)(event.data)
       events.push(event)
       continue
     }
@@ -493,8 +489,6 @@ const importArchive = Effect.fn("Cli.sessionOffload.import")(function* (file: st
             .run()
             .pipe(Effect.orDie)
           for (const event of archive.events) {
-            const definition = Durable.get(event.eventType)
-            if (!definition?.durable) return yield* Effect.die(`Unknown durable event type: ${event.eventType}`)
             yield* tx
               .insert(EventTable)
               .values({
@@ -502,7 +496,7 @@ const importArchive = Effect.fn("Cli.sessionOffload.import")(function* (file: st
                 aggregate_id: info.id,
                 seq: event.seq,
                 type: event.eventType,
-                data: Schema.encodeUnknownSync(definition.data)(Schema.decodeUnknownSync(definition.data)(event.data)) as never,
+                data: event.data,
               })
               .run()
               .pipe(Effect.orDie)
