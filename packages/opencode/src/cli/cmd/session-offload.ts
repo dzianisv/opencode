@@ -102,7 +102,7 @@ export type Archive = {
   }>
   sessionInputs: Array<{
     id: SessionMessage.ID
-    prompt: Record<string, unknown>
+    prompt: Prompt
     delivery: string
     admittedSeq: number
     promotedSeq?: number
@@ -177,9 +177,9 @@ export function parseArchiveJsonl(text: string): Archive {
     }
     if (type === "session-input") {
       const input = decodeSessionInputRecord(record)
-      decodePrompt(input.prompt)
+      const prompt = decodePrompt(input.prompt)
       decodeDelivery(input.delivery)
-      sessionInputs.push(input)
+      sessionInputs.push({ ...input, prompt })
       continue
     }
     if (type === "event-sequence") {
@@ -458,7 +458,7 @@ const importArchive = Effect.fn("Cli.sessionOffload.import")(function* (file: st
               .values({
                 id: input.id,
                 session_id: info.id,
-                prompt: Schema.encodeUnknownSync(Prompt)(decodePrompt(input.prompt)),
+                prompt: Schema.encodeUnknownSync(Prompt)(input.prompt),
                 delivery: decodeDelivery(input.delivery),
                 admitted_seq: input.admittedSeq,
                 promoted_seq: input.promotedSeq ?? null,
